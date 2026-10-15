@@ -1,0 +1,34 @@
+# scenes on the Arrange page: a second scene cloned, a mute, a cue while playing, the song
+wait 200
+tap HOME
+expect page Arrange
+expect scene 1
+tapkey w1
+expect scene 2
+wait 40
+shot scene2.png
+tapkey b0
+wait 40
+shot scene2_mute.png
+tap PLAY
+wait 300
+tapkey w0
+wait 40
+shot scene_cue.png
+wait 2500
+tap PLAY
+turn SELECT 1
+expect page Song
+tapkey w0
+tapkey w1
+tapkey w1
+wait 40
+shot song_slots.png
+tap SEL
+wait 40
+shot song_list.png
+tap HOME
+tap PLAY
+wait 1500
+shot song_playing.png
+tap PLAY

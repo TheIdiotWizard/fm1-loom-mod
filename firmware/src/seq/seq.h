@@ -63,15 +63,19 @@ typedef struct {
     void (*midi)(void *ctx, uint8_t status, uint8_t d1, uint8_t d2);
     void (*step)(void *ctx, int trk, int step);                    /* UI playheads */
     void (*scene)(void *ctx, int scene);                           /* a scene started */
+    void (*metro)(void *ctx, int accent);                          /* a metronome click (accent: the bar) */
     void *ctx;
 } seq_sink_t;
 
 #define SEQ_PENDING 16                /* note-offs a track may have waiting */
 typedef struct {
-    uint32_t off_at;                  /* samples, Q8 */
+    uint32_t off_at;                  /* samples left, Q8 (counted down; due under 256) */
     uint32_t tag;
     uint8_t used;
+    uint8_t kind;                     /* OFF_NOTE: sink note_off; OFF_PUNCH: clear a punch_seq bit; OFF_TAPE: a segment off */
+    uint8_t note;                     /* the MIDI note echoed, 0 none */
 } seq_off_t;
+enum { OFF_NOTE, OFF_PUNCH, OFF_TAPE };
 
 typedef struct {                      /* one track's runtime (interrupt only) */
     uint8_t pos;                      /* the step playing */
@@ -87,13 +91,34 @@ typedef struct {                      /* one track's runtime (interrupt only) */
     uint32_t bend_t, bend_len;        /* samples into the bend, its length */
     seq_off_t off[SEQ_PENDING];
     uint8_t last_note[SN];            /* the notes sounding (step mode: one step at a time) */
-    uint8_t held_drum;                /* fill FX: the last sound hit */
+    uint8_t held_drum;                /* fill FX: the last sound hit (1..11, 0 none) */
     uint8_t loop4_from;               /* PM_LOOP4: the step it loops from */
+    uint8_t loop4_on;
+    uint8_t stall_kind;               /* SC_PULSE or SC_HOLD while stall > 0 */
+    uint8_t jump_to;                  /* the jump component's next step, 0xFF none */
+    uint8_t nlast;                    /* notes in last_note[] */
+    uint8_t last_step;                /* the step last_note[] came from */
+    uint8_t last_vel, last_glide;     /* for retriggers (ratchets, stutter) */
+    uint8_t ramp_semi;                /* PM_RAMP: semitones added, one more each sixteenth */
+    uint8_t ext_ticks;                /* external clock: ticks into this step */
+    uint8_t stut_on;                  /* a stutter is running */
+    uint8_t echo_n, echo_vel;         /* PD_ECHO: the hit to repeat */
+    uint8_t echo_sound[SN];
+    uint8_t bend_last_set;
+    int16_t bend_last;                /* cents last sent */
+    int16_t bend_amp;                 /* random 2: the amplitude rolled */
+    uint32_t sub_to_next;             /* ratchets: samples to the next hit, Q8 (NEVER none) */
+    uint32_t stut_to_next;            /* stutter: the next retrigger, Q8 */
+    uint32_t echo_to_next;            /* echo: the repeat, Q8 */
+    uint32_t age;                     /* samples since the step fired, Q8 (live record quantise) */
+    int32_t off_q8;                   /* the current step's timing offset (swing, groove, nudge), Q8 */
 } seq_trk_t;
 
 typedef struct {
     uint8_t gen, applied;             /* lane runtime: the value last applied (LOCK_NONE = none) */
     uint8_t from, to;                 /* the ramp across this step (shape) */
+    uint8_t ramp;                     /* ramping toward `to` */
+    uint32_t age, len, hold;          /* samples into the gap, its length, the part held flat before the ramp */
 } lane_rt_t;
 
 typedef struct {                      /* a player (per track; the arp's clock runs here) */
@@ -106,6 +131,11 @@ typedef struct {                      /* a player (per track; the arp's clock ru
     uint8_t maestro_root;             /* the key playing it, 0 none */
     uint8_t roll_i; uint32_t roll_to_next;
     uint8_t sounding[16], nsounding;  /* notes the player holds on the engine (for their offs) */
+    uint32_t phys[4];                 /* the keys physically down (bit note) */
+    uint8_t nphys;
+    uint8_t roll[SN * 2], nroll;      /* maestro: the strum in its order */
+    uint8_t roll_vel;
+    uint8_t arp_wait;                 /* the first arp note waits for the grid */
 } player_t;
 
 typedef struct {
@@ -143,8 +173,27 @@ typedef struct {
     volatile uint32_t ext_pending;
     volatile uint8_t req_start, req_stop, req_cont, req_from_start;
     uint32_t rng;
-    uint32_t step_tick;               /* ticks since start (the metronome, the tape) */
+    uint32_t step_tick;               /* sixteenths since start (the metronome, the tape, the arp grid) */
     uint8_t metro_beat;
+    /* added runtime */
+    volatile uint8_t pcue[NSEQT];     /* a pattern cued per track, 0xFF none */
+    volatile uint8_t req_scene;       /* seq_set_scene: apply now, 0xFF none */
+    volatile uint32_t kq[32];         /* the keys from the main loop, played in the interrupt */
+    volatile uint8_t kq_w, kq_r;
+    uint32_t six_to_next;             /* samples to the next sixteenth, Q8 */
+    uint32_t bar_six;                 /* sixteenths since the bar count started */
+    uint32_t bar_len;                 /* the bar in sixteenths (track 1's span, at least 16) */
+    uint8_t bar16;                    /* the sixteenth of the bar, 0..15 */
+    uint8_t countin_six;
+    uint8_t bar_fresh;                /* the bar count just restarted: the next sixteenth is not a bar's end */
+    uint8_t ext_six;                  /* external clock: ticks into the sixteenth */
+    uint8_t chunk_cap;                /* a bend or a lock ramp runs: advance in chunks */
+    uint8_t brain_seen[4];            /* the BRAIN track's E1..E4 last read */
+    uint8_t ramp_ticks;               /* sixteenths passed this block: the ramp FX rises after the steps */
+    uint32_t tape_last;               /* samples per sixteenth last sent to the tape */
+    uint32_t punch_sent_d, punch_sent_m;
+    uint8_t rec_note[8], rec_trk[8], rec_step[8];   /* live record: keys down and the steps they took */
+    uint32_t rec_age[8];
 } seq_t;
 
 void seq_init(seq_t *s, patterns_t *P, uint8_t (*par)[NTP_ALL]);
@@ -175,6 +224,8 @@ void seq_tape_key(seq_t *s, int seg, int on);
 void seq_rec(seq_t *s, int on);                     /* live: keys write steps (quantised) while playing */
 void seq_rec_knob(seq_t *s, int trk, int param, int val);   /* REC held + a knob: a lock on the step playing */
 int seq_rec_pos(const seq_t *s, int trk);           /* the step live keys land on now */
+int seq_step_rec(seq_t *s, int trk, int step, int note, int vel);   /* step record: the note into the step of the
+                                                     * track's pattern (overdubs; the UI moves its cursor); 1 = written */
 /* step helpers (main loop) */
 void step_set_notes(step_t *st, const uint8_t *notes, int n, int vel);
 void step_toggle_note(step_t *st, int note);

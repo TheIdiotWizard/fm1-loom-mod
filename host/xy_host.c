@@ -1,33 +1,44 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* OMNI on the host: the whole app (UI, project, engine) against a simulated FM-1 driven by a script.
- * Audio goes to a WAV, the screen to PNGs, the lights to text, MIDI out to a log. The device-only
- * parts (HAL, USB, OTA, flash driver) are replaced by plat.h implemented here. (From X0X's x0x_host.)
+/* XY-1 on the host: the whole app (UI, project, sequencer, engine) against a simulated FM-1 driven
+ * by a script. Audio goes to a WAV (never played), the screen to PNGs, the lights to text, MIDI out
+ * to a log. The device-only parts (HAL, USB, OTA, flash driver) are replaced by plat.h implemented
+ * here. (From FoMni's omni_host, with X0X / SPH-16's engine commands.)
  *
- *   omni_host SCRIPT [OUTDIR]
+ *   xy_host SCRIPT [OUTDIR]
  *
- * Script, one command per line (# comments):
+ * Script, one command per line (# comments). Tracks, patterns, steps and scenes count from 1 in a
+ * script, as the screen shows them; "expect step" reports the playhead 0-based (eng_step).
  *   wait MS                      run the device for MS milliseconds
  *   press BTN | release BTN | tap BTN     (BTN: FX SEL ENV LFO EDIT GLO HOME SAVE ARP SEQ PLAY REC OCT- OCT+)
  *   key K down|up | tapkey K     (K: 0..26 = F3..G5, or w0..w15 white keys, b0..b10 black keys)
  *   strum A B [MS]               white keys A..B pressed in turn (down then up), MS apart (default 25)
  *   turn ENC N [MS]              (ENC: SELECT ALGO PRESET K1 K2 K3 K4; N detents, MS apart, default 80)
- *   spin ENC N                   N detents at once, exactly N (no acceleration)
+ *   spin ENC N                   N detents at once
  *   master N                     MASTER pot 0..4096
  *   midi B0 B1 B2                incoming USB MIDI message (hex bytes)
+ *   param T P V                  parameter P (synth.h TP_*) of track T set to V, as a knob would
+ *   load N                       every block costs N % (the overload guard's input); -1 = measured
+ *   steps T PAT                  print track T's pattern PAT: each step's notes, component, condition
+ *   step T PAT S NOTE VEL        write one note on step S (NOTE 0 clears the step)
+ *   scene N                      switch to scene N now
+ *   bpm N                        the tempo
+ *   cores N                      the second core on (1) or off (0): its job then runs in place
  *   wav FILE | wavstop           start / stop recording the output
  *   peakreset                    restart the output peak (expect peak_db_min / peak_db_max)
  *   shot FILE.png                save the screen
  *   leds                         print the lit buttons and keys
- *   expect WHAT VALUE            check state: exit 1 on mismatch; VALUE "<N" / ">N" is a bound
+ *   expect WHAT VALUE            check state: exit 1 on mismatch; VALUE "<N" / ">N" is a bound. WHAT:
+ *                                playing, step T, scene, voices, dirty, store_writes, midi_out, clocks_out,
+ *                                tempo, trk, page NAME, comp T S, note T PAT S, cores, guard, parT.P,
+ *                                peak_db_max / peak_db_min
  *   reboot                       re-run boot from the simulated flash (persistence test)
  *   listen                       a screen reader starts listening (HELLO, again every 2 s): each SAY is printed
- *                                ("said: ..."; "said!:" cuts off what was being said)
  *   where                        the reader asks for everything on the screen
  *   said TEXT                    some SAY since the last "said" (or "listen") has TEXT in it: else a failure
- *   speakdump                    every page, knob value, chord and message as the reader gets them (the audit)
- * OMNI_SAID_LOG=FILE: a reader listens from boot, quietly, and every SAY is appended to FILE (the audit).
+ *   speakdump                    every page, knob value and message as the reader gets them (the audit)
+ * XY_SAID_LOG=FILE: a reader listens from boot, quietly, and every SAY is appended to FILE (the audit).
  */
-#define OM_HOST 1
+#define XY_HOST 1
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,7 +70,6 @@ static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint1
 }
 #include "../firmware/src/gfx.c"
 
-
 /* ---------------------------------------------------------- platform --- */
 #include "../firmware/src/app/plat.h"
 
@@ -85,6 +95,7 @@ void plat_leds(uint32_t b, uint32_t k)
 static int glow_on = 1;                 /* the device's button glow (plat_glow); the lights printed are the bright ones */
 void plat_glow(int on) { glow_on = on; }
 void plat_play_red(int red) { (void)red; }      /* the device's PLAY colour: green, red while recording */
+void plat_keys_dim(uint32_t keys) { (void)keys; }
 
 #define MQ 256
 static uint32_t min_q[MQ], mi_w, mi_r;
@@ -107,12 +118,11 @@ void plat_midi_out(uint32_t pkt)
     if (midi_log)
         fprintf(midi_log, "%u ms: %02X %02X %02X\n", now_ms, (pkt >> 8) & 0xFF, (pkt >> 16) & 0xFF, (pkt >> 24) & 0xFF);
 }
-/* the engine's MIDI out, as the device's glue sends it (USB-MIDI packet, cable 0) */
-void om_midi_out(uint32_t st, uint32_t d1, uint32_t d2) { plat_midi_out(st >> 4 | st << 8 | d1 << 16 | d2 << 24); }
 
-/* flash: one buffer per object, kept across a simulated reboot */
-static uint8_t store[OBJ_NOBJ][PLAT_STORE_MAX];
-static int store_len[OBJ_NOBJ] = {-1, -1};
+/* flash: two copies per object (the current and the one before, as storage.c keeps), kept across a
+ * simulated reboot */
+static uint8_t store[OBJ_NOBJ][PLAT_STORE_MAX], store_prev[OBJ_NOBJ][PLAT_STORE_MAX];
+static int store_len[OBJ_NOBJ] = {[0 ... OBJ_NOBJ - 1] = -1}, store_prev_len[OBJ_NOBJ] = {[0 ... OBJ_NOBJ - 1] = -1};
 static uint32_t store_writes;
 int plat_store_load(uint32_t obj, void *dst, uint32_t max)
 {
@@ -124,36 +134,82 @@ int plat_store_load(uint32_t obj, void *dst, uint32_t max)
     memcpy(dst, store[obj], (size_t)n);
     return n;
 }
+int plat_store_load_prev(uint32_t obj, void *dst, uint32_t max)
+{
+    int n;
+    if (obj >= OBJ_NOBJ || (n = store_prev_len[obj]) < 0)
+        return -1;
+    if ((uint32_t)n > max)
+        n = (int)max;
+    memcpy(dst, store_prev[obj], (size_t)n);
+    return n;
+}
 int plat_store_save(uint32_t obj, const void *src, uint32_t len)
 {
     if (obj >= OBJ_NOBJ || len > PLAT_STORE_MAX)
         return -1;
+    if (store_len[obj] >= 0) {
+        memcpy(store_prev[obj], store[obj], (size_t)store_len[obj]);
+        store_prev_len[obj] = store_len[obj];
+    }
     memcpy(store[obj], src, len);
     store_len[obj] = (int)len;
     store_writes++;
     return 0;
 }
 
-static uint32_t cpu_pct;
+static uint32_t cpu_pct, cpu_peak;
+static int load_force = -1;             /* script "load N": the guard sees N %, -1 measured */
 uint32_t plat_cpu_pct(void) { return cpu_pct; }
+uint32_t plat_cpu_peak_pct(void)
+{
+    uint32_t p = cpu_peak;
+    cpu_peak = 0;
+    return p;
+}
 uint32_t plat_xruns(void) { return 0; }
+uint32_t plat_cycles(void)              /* the profiler's clock: nanoseconds / 10 here */
+{
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (uint32_t)((uint64_t)t.tv_sec * 100000000ull + (uint64_t)t.tv_nsec / 10u);
+}
+/* the second core, simulated: a job runs at once, in order (the split path, the same sums) */
+static int cpu2_on = 1;
+int plat_cpu2_set(int on) { cpu2_on = on; return 0; }
+int plat_cpu2_on(void) { return cpu2_on; }
+int plat_cpu2_run(void (*fn)(uint32_t), uint32_t arg)
+{
+    if (!cpu2_on)
+        return 0;
+    fn(arg);
+    return 1;
+}
+int plat_cpu2_wait(void) { return 0; }
+int plat_cpu2_gave_up(void) { return 0; }
+uint32_t plat_cpu2_bad(void) { return 0; }
+int plat_cpu2_barred(void) { return 0; }
+int plat_vdc14_mv(void) { return 1600; }
+int plat_sysvdd_mv(void) { return 1380; }
+int plat_last_crash(uint32_t v[5]) { (void)v; return 0; }
 
 /* -------------------------------------------------------------- app --- */
 #include "../firmware/src/app/app.h"
-#define ANN_NAME "FoMni-1 " OM_VERSION
+#include "../firmware/src/app/engine.h"
+#define ANN_NAME "XY-1 " XY_VERSION
 #include "ann_words.h"                                  /* the words file's link (tools/gen_words.py) */
 #include "../firmware/src/announce.c"
 /* what the reader is told: every SAY to stdout with "said:" (listen), and kept for the "said" check */
 static char said_last[ANN_MAX + 1], said_log[16384];   /* said_log: every SAY since the last "said" check */
 static uint32_t said_len;
 static int said_print = 1, sim_listen;
-static FILE *said_log_f;                                /* OMNI_SAID_LOG=FILE: every SAY, for fm1-reader's audit */
-#ifdef OM_WEB
+static FILE *said_log_f;                                /* XY_SAID_LOG=FILE: every SAY, for fm1-reader's audit */
+#ifdef XY_WEB
 static void web_said(const uint8_t *p, uint32_t n);
 #endif
 static int ann_wire_send(const uint8_t *p, uint32_t n)
 {
-#ifdef OM_WEB
+#ifdef XY_WEB
     web_said(p, n);
 #endif
     if (n >= 7u && p[4] == ANN_SAY) {
@@ -167,7 +223,7 @@ static int ann_wire_send(const uint8_t *p, uint32_t n)
             said_log[said_len++] = '\n';
             said_log[said_len] = 0;
         }
-#ifndef OM_WEB
+#ifndef XY_WEB
         if (said_print)
             printf("said%s: %s\n", (p[5] & ANN_NOW) ? "!" : "", said_last);
         if (said_log_f)
@@ -176,8 +232,11 @@ static int ann_wire_send(const uint8_t *p, uint32_t n)
     }
     return 0;
 }
+#include "../firmware/src/app/engine.c"
 #include "../firmware/src/app/project.c"
+#include "../firmware/src/app/pages.c"
 #include "../firmware/src/app/ui.c"
+const char *ui_page_name(void);                          /* ui.c: the page shown, for "expect page" */
 
 /* ---------------------------------------------------------- outputs --- */
 static void png_write(const char *path)
@@ -312,9 +371,11 @@ static double now_ns(void)
 
 static void boot(void)
 {
-    om_init();
-    project_load();
+    project_load(0);
+    presets_load();
+    engine_init(&pats, proj_par);
     project_apply();
+    engine_set_core2(plat_cpu2_run, plat_cpu2_wait);
     lcd_fill(0, 0, 240, 240, 0);
     ui_init();
 }
@@ -325,16 +386,23 @@ static void run_ms(uint32_t ms)
     uint32_t i, k;
     for (i = 0; i < ms; i++) {
         now_ms++;
-        while (audio_due_ms <= (double)now_ms) {      /* 256-frame blocks, as the device renders them */
+        while (audio_due_ms <= (double)now_ms) {      /* 256-frame renders, as the device makes them (two a half) */
             double t0 = now_ns(), dt;
-            om_render(blk, 256, master);
-#ifdef OM_WEB
+            engine_render(blk, 256, master);
+#ifdef XY_WEB
             web_audio(blk, 256);
 #endif
             dt = now_ns() - t0;
             render_ns_total += dt;
             render_budget_ns_total += 256.0 * 1e9 / 44100.0;
             cpu_pct = (uint32_t)(100.0 * dt / (256.0 * 1e9 / 44100.0));
+            if (cpu_pct > cpu_peak)
+                cpu_peak = cpu_pct;
+#ifdef XY_WEB
+            engine_load(load_force >= 0 ? (uint32_t)load_force : 0u);   /* a browser's timing is not the FM-1's */
+#else
+            engine_load(load_force >= 0 ? (uint32_t)load_force : cpu_pct);
+#endif
             for (k = 0; k < 256; k++) {
                 float l = (float)blk[2 * k] / 8388608.0f, r = (float)blk[2 * k + 1] / 8388608.0f;
                 int16_t s[2];
@@ -368,6 +436,9 @@ static void run_ms(uint32_t ms)
 static const char *const BTN_N[NB] = {"FX", "SEL", "ENV", "LFO", "EDIT", "GLO", "HOME", "SAVE", "ARP", "SEQ",
                                       "PLAY", "REC", "OCT-", "OCT+"};
 static const char *const ENC_N[NE] = {"SELECT", "ALGO", "PRESET", "K1", "K2", "K3", "K4"};
+/* the FM-1's keys, F3..G5: the white and the black ones by number */
+static const uint8_t HOST_WHITE[16] = {0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19, 21, 23, 24, 26};
+static const uint8_t HOST_BLACK[11] = {1, 3, 5, 8, 10, 13, 15, 17, 20, 22, 25};
 
 static int find_name(const char *const *t, int n, const char *s)
 {
@@ -381,59 +452,95 @@ static int find_name(const char *const *t, int n, const char *s)
 static int key_of(const char *s)
 {
     if (s[0] == 'w')
-        return WHITE_K[atoi(s + 1) & 15];
+        return HOST_WHITE[atoi(s + 1) & 15];
     if (s[0] == 'b')
-        return BLACK_K[atoi(s + 1) % 11];
+        return HOST_BLACK[atoi(s + 1) % 11];
     return atoi(s);
 }
 
-static int expect(const char *what, const char *val)
+static tpat_t *pat_of(int t, int p)             /* track T, pattern P (1-based; P 0 = the one playing) */
+{
+    if (t < 1 || t > NSEQT)
+        return 0;
+    if (p == 0)
+        p = seq.ppat[t - 1] + 1;
+    if (p < 1 || p > NPATT)
+        return 0;
+    return &pats.pat[t - 1][p - 1];
+}
+
+static void steps_print(int t, int p)
+{
+    tpat_t *tp = pat_of(t, p);
+    int s, k;
+    if (!tp) {
+        printf("steps: no track %d pattern %d\n", t, p);
+        return;
+    }
+    printf("  track %d pattern %d: %d steps, scale %d, nlen %d\n", t, p, tp->len, tp->scale, tp->nlen);
+    for (s = 0; s < tp->len; s++) {
+        const step_t *st = &tp->st[s];
+        if (step_empty(st) && !st->comp && !st->cond)
+            continue;
+        printf("    %2d:", s + 1);
+        for (k = 0; k < SN; k++)
+            if (st->note[k])
+                printf(" %d", st->note[k]);
+        printf("  vel %d len %d nudge %d comp %d/%d cond %d\n", st->vel, st->len, st->nudge, st->comp, st->cval,
+               st->cond);
+    }
+}
+
+static int expect(const char *what, const char *val, const char *b, const char *c)
 {
     int got;
     if (!strcmp(what, "playing"))
-        got = om_playing;
-    else if (!strcmp(what, "view"))
-        got = ui.view;
-    else if (!strcmp(what, "root"))
-        got = ui.root;
-    else if (!strcmp(what, "type"))
-        got = ui.type;
-    else if (!strcmp(what, "pad"))
-        got = ui.pad;
-    else if (!strcmp(what, "hold"))
-        got = proj.hold;
-    else if (!strcmp(what, "sync"))
-        got = proj.sync;
-    else if (!strcmp(what, "armed"))
-        got = ui.armed;
+        got = seq.playing;
+    else if (!strcmp(what, "step"))                 /* expect step T VALUE: the playhead of track T (0-based) */
+        got = eng_step[(atoi(val) - 1) % NSEQT], val = b;
+    else if (!strcmp(what, "scene"))
+        got = seq.scene + 1;
+    else if (!strcmp(what, "voices"))
+        got = eng_voices;
+    else if (!strcmp(what, "guard"))
+        got = eng_voices_max;
+    else if (!strcmp(what, "cores"))
+        got = engine_core2_state();
     else if (!strcmp(what, "dirty"))
-        got = ui.dirty;
+        got = ui_dirty();
     else if (!strcmp(what, "store_writes"))
         got = (int)store_writes;
     else if (!strcmp(what, "clocks_out"))
         got = (int)clock_out_count;
-    else if (!strcmp(what, "step"))
-        got = om_step;
-    else if (!strcmp(what, "ext"))
-        got = om_ext;
     else if (!strcmp(what, "midi_out"))
         got = (int)midi_out_count;
-    else if (!strcmp(what, "chord_level"))
-        got = (int)(om_chord_level * 100.0f);
-    else if (!strcmp(what, "bass_level"))
-        got = (int)(om_bass_level * 100.0f);
-    else if (!strncmp(what, "par", 3))            /* parN: parameter N (omni.h P_*) */
-        got = proj.par[atoi(what + 3)];
-    else if (!strncmp(what, "padroot", 7))
-        got = proj.pad_root[atoi(what + 7)];
-    else if (!strncmp(what, "padtype", 7))
-        got = proj.pad_type[atoi(what + 7)];
-    else if (!strncmp(what, "strnote", 7))         /* strnoteS: string S's note */
-        got = om_str_note[atoi(what + 7)];
-    else if (!strncmp(what, "strlevel", 8))        /* strlevelS: string S's envelope x 100 */
-        got = (int)(om_str_level[atoi(what + 8)] * 100.0f);
-    else if (!strcmp(what, "peak_db_max") || !strcmp(what, "peak_db_min")) {
-        double db = 20.0 * log10(peak_out > 1e-9f ? peak_out : 1e-9f);
+    else if (!strcmp(what, "tempo"))
+        got = (int)(seq_tempo(&seq) + 0.5f);
+    else if (!strcmp(what, "trk"))
+        got = proj.trk_sel + 1;
+    else if (!strcmp(what, "page")) {               /* expect page NAME */
+        const char *p = ui_page_name();
+        int bad = strcmp(p, val) != 0;
+        printf("%s page \"%s\"%s%s\n", bad ? "FAIL" : "  ok", p, bad ? ", expected " : "", bad ? val : "");
+        return bad;
+    } else if (!strcmp(what, "comp")) {             /* expect comp T S VALUE: step S's component on the playing pattern */
+        tpat_t *tp = pat_of(atoi(val), 0);
+        int s = atoi(b) - 1;
+        if (!tp || s < 0 || s >= NSTEP) {
+            printf("FAIL expect comp: no track %s step %s\n", val, b);
+            return 1;
+        }
+        got = tp->st[s].comp;
+        val = c;
+    } else if (!strncmp(what, "par", 3)) {          /* parT.P: parameter P of track T */
+        int t = atoi(what + 3) - 1, p = strchr(what, '.') ? atoi(strchr(what, '.') + 1) : 0;
+        if (t < 0 || t >= NALLTRK || p < 0 || p >= NTP) {
+            printf("FAIL unknown expect %s\n", what);
+            return 1;
+        }
+        got = proj.trk[t].par[p];
+    } else if (!strcmp(what, "peak_db_max") || !strcmp(what, "peak_db_min")) {
+        double db = 20.0 * log10((double)(peak_out > 1e-9f ? peak_out : 1e-9f));
         int bad = what[8] == 'm' && what[9] == 'a' ? db > atof(val) : db < atof(val);
         printf("%s peak %.1f dBFS (%s %s)\n", bad ? "FAIL" : "  ok", db, what + 8, val);
         return bad;
@@ -458,7 +565,7 @@ static int expect(const char *what, const char *val)
     return 0;
 }
 
-#ifndef OM_WEB
+#ifndef XY_WEB
 int main(int argc, char **argv)
 {
     FILE *sc;
@@ -466,7 +573,7 @@ int main(int argc, char **argv)
     const char *dir = argc > 2 ? argv[2] : ".";
     int lineno = 0, fails = 0;
     if (argc < 2) {
-        fprintf(stderr, "usage: omni_host SCRIPT [OUTDIR]\n");
+        fprintf(stderr, "usage: xy_host SCRIPT [OUTDIR]\n");
         return 2;
     }
     sc = fopen(argv[1], "r");
@@ -476,8 +583,8 @@ int main(int argc, char **argv)
     }
     snprintf(out, sizeof out, "%s/midi_out.txt", dir);
     midi_log = fopen(out, "w");
-    if (getenv("OMNI_SAID_LOG")) {                       /* a reader listens from the start, quietly: the log only */
-        said_log_f = fopen(getenv("OMNI_SAID_LOG"), "a");
+    if (getenv("XY_SAID_LOG")) {                         /* a reader listens from the start, quietly: the log only */
+        said_log_f = fopen(getenv("XY_SAID_LOG"), "a");
         sim_listen = 1;
         said_print = 0;
     }
@@ -487,9 +594,9 @@ int main(int argc, char **argv)
         ann_frame(HELLO, sizeof HELLO, now_ms);
     }
     while (fgets(line, sizeof line, sc)) {
-        char cmd[32] = {0}, a[256] = {0}, b[64] = {0}, c[64] = {0};
+        char cmd[32] = {0}, a[256] = {0}, b[64] = {0}, c[64] = {0}, d[64] = {0}, e[64] = {0};
         lineno++;
-        if (line[0] == '#' || sscanf(line, "%31s %255s %63s %63s", cmd, a, b, c) < 1)
+        if (line[0] == '#' || sscanf(line, "%31s %255s %63s %63s %63s %63s", cmd, a, b, c, d, e) < 1)
             continue;
         if (!strcmp(cmd, "wait"))
             run_ms((uint32_t)atoi(a));
@@ -523,32 +630,32 @@ int main(int argc, char **argv)
         } else if (!strcmp(cmd, "strum")) {          /* strum A B [MS]: a finger across the white keys */
             int x = atoi(a), y = atoi(b), gap = c[0] ? atoi(c) : 25, s = y >= x ? 1 : -1;
             for (;; x += s) {
-                held_keys |= 1u << WHITE_K[x & 15];
+                held_keys |= 1u << HOST_WHITE[x & 15];
                 run_ms((uint32_t)gap);
-                held_keys &= ~(1u << WHITE_K[x & 15]);
+                held_keys &= ~(1u << HOST_WHITE[x & 15]);
                 if (x == y)
                     break;
             }
             run_ms(2);
         } else if (!strcmp(cmd, "turn")) {
-            int e = find_name(ENC_N, NE, a), n = atoi(b), s = n > 0 ? 1 : -1;
+            int en = find_name(ENC_N, NE, a), n = atoi(b), s = n > 0 ? 1 : -1;
             uint32_t gap = c[0] ? (uint32_t)atoi(c) : 80u;
-            if (e < 0) {
+            if (en < 0) {
                 printf("line %d: no encoder %s\n", lineno, a);
                 return 2;
             }
             for (; n; n -= s) {
-                enc_acc[e] += s;
+                enc_acc[en] += s;
                 run_ms(gap);
             }
         } else if (!strcmp(cmd, "spin")) {
-            int e = find_name(ENC_N, NE, a);
-            if (e < 0) {
+            int en = find_name(ENC_N, NE, a);
+            if (en < 0) {
                 printf("line %d: no encoder %s\n", lineno, a);
                 return 2;
             }
-            enc_acc[e] += atoi(b);
-            accel_off = 1;
+            enc_acc[en] += atoi(b);
+            accel_off = 1;                           /* a test's exact values, not a hand's speed (ui.c) */
             run_ms(1);
             accel_off = 0;
         } else if (!strcmp(cmd, "master"))
@@ -557,7 +664,39 @@ int main(int argc, char **argv)
             uint32_t s = (uint32_t)strtoul(a, 0, 16), d1 = (uint32_t)strtoul(b, 0, 16), d2 = (uint32_t)strtoul(c, 0, 16);
             uint32_t cin = s >= 0xF0 ? 0x0F : s >> 4;
             min_q[mi_w++ % MQ] = cin | s << 8 | d1 << 16 | d2 << 24;
-        } else if (!strcmp(cmd, "wav")) {
+        } else if (!strcmp(cmd, "param")) {          /* param T P V */
+            int t = atoi(a) - 1, p = atoi(b), v = atoi(c);
+            if (t < 0 || t >= NALLTRK || p < 0 || p >= NTP) {
+                printf("line %d: no param %s %s\n", lineno, a, b);
+                return 2;
+            }
+            proj.trk[t].par[p] = (uint8_t)v;
+            engine_set(t, p, v);
+            run_ms(1);
+        } else if (!strcmp(cmd, "load"))
+            load_force = atoi(a);
+        else if (!strcmp(cmd, "steps"))
+            steps_print(atoi(a), atoi(b));
+        else if (!strcmp(cmd, "step")) {             /* step T PAT S NOTE VEL */
+            tpat_t *tp = pat_of(atoi(a), atoi(b));
+            int s = atoi(c) - 1, note = atoi(d), vel = e[0] ? atoi(e) : 100;
+            if (!tp || s < 0 || s >= NSTEP) {
+                printf("line %d: no step %s %s %s\n", lineno, a, b, c);
+                return 2;
+            }
+            if (note <= 0) {
+                memset(&tp->st[s], 0, sizeof tp->st[s]);
+            } else {
+                uint8_t n1 = (uint8_t)note;
+                step_set_notes(&tp->st[s], &n1, 1, vel);
+            }
+        } else if (!strcmp(cmd, "scene"))
+            seq_set_scene(&seq, (atoi(a) - 1) & (NSCENE - 1));
+        else if (!strcmp(cmd, "bpm"))
+            seq.bpm = (float)atof(a);
+        else if (!strcmp(cmd, "cores"))
+            plat_cpu2_set(atoi(a));
+        else if (!strcmp(cmd, "wav")) {
             snprintf(out, sizeof out, "%s/%s", dir, a);
             wav_open(out);
         } else if (!strcmp(cmd, "wavstop"))
@@ -575,14 +714,23 @@ int main(int argc, char **argv)
                     printf(" %s", BTN_N[i]);
             printf(" | white ");
             for (i = 0; i < 16; i++)
-                printf("%c", (lit_keys >> WHITE_K[i] & 1u) ? '#' : '.');
+                printf("%c", (lit_keys >> HOST_WHITE[i] & 1u) ? '#' : '.');
             printf(" black ");
             for (i = 0; i < 11; i++)
-                printf("%c", (lit_keys >> BLACK_K[i] & 1u) ? '#' : '.');
+                printf("%c", (lit_keys >> HOST_BLACK[i] & 1u) ? '#' : '.');
             printf("\n");
-        } else if (!strcmp(cmd, "expect"))
-            fails += expect(a, b);
-        else if (!strcmp(cmd, "reboot")) {
+        } else if (!strcmp(cmd, "expect")) {
+            if (!strcmp(a, "note")) {                /* expect note T PAT S VALUE: five words */
+                tpat_t *tp = pat_of(atoi(b), atoi(c));
+                int s = atoi(d) - 1, got = tp && s >= 0 && s < NSTEP ? tp->st[s].note[0] : -1;
+                if (got != atoi(e)) {
+                    printf("FAIL expect note %s %s %s == %s, got %d\n", b, c, d, e, got);
+                    fails++;
+                } else
+                    printf("  ok note %s %s %s == %d\n", b, c, d, got);
+            } else
+                fails += expect(a, b, c, d);
+        } else if (!strcmp(cmd, "reboot")) {
             memset(&proj, 0, sizeof proj);
             boot();
         } else if (!strcmp(cmd, "listen")) {
@@ -599,12 +747,12 @@ int main(int argc, char **argv)
             ann_frame(WHERE, sizeof WHERE, now_ms);
             run_ms(40);
         } else if (!strcmp(cmd, "said")) {
-            char *t = line + 4, *e;
+            char *t = line + 4, *en;
             while (*t == ' ')
                 t++;
-            e = t + strlen(t);
-            while (e > t && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' '))
-                *--e = 0;
+            en = t + strlen(t);
+            while (en > t && (en[-1] == '\n' || en[-1] == '\r' || en[-1] == ' '))
+                *--en = 0;
             if (!strstr(said_log, t)) {
                 printf("FAIL line %d: said \"%s\": not said (since the last check: %s)\n", lineno, t,
                        said_len ? said_log : "nothing\n");
@@ -629,4 +777,4 @@ int main(int argc, char **argv)
            fails ? ", EXPECTATIONS FAILED" : "");
     return fails ? 1 : 0;
 }
-#endif /* OM_WEB */
+#endif /* XY_WEB */

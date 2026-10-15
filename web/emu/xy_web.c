@@ -1,15 +1,15 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* OMNI in the browser: the host simulator (host/omni_host.c: the whole app, UI and instrument,
- * against a simulated FM-1) compiled to WebAssembly and run in an AudioWorklet (from X0X's). The worklet asks
- * for audio; producing it advances the device's clock one millisecond at a time, which runs the
- * engine every 256 samples (the I2S half buffer) and the UI every 16 ms, as on the FM-1. The page
- * sends input, and reads the screen, the lights and the saved objects back through these exports.
+/* XY-1 in the browser: the host simulator (host/xy_host.c: the whole app, UI, sequencer and engine,
+ * against a simulated FM-1) compiled to WebAssembly and run in an AudioWorklet (from X0X's). The
+ * worklet asks for audio; producing it advances the device's clock one millisecond at a time, which
+ * runs the engine every 256 samples and the UI every 16 ms, as on the FM-1. The page sends input,
+ * and reads the screen, the lights and the saved objects back through these exports.
  *
- *   web/emu/build.sh   ->  build/emu/omni.wasm (+ the page) */
+ *   web/emu/build.sh   ->  build/emu/xy.wasm (+ the page) */
 #include <stdint.h>
 
 static void web_audio(const int32_t *blk, uint32_t n);
-#include "../../host/omni_host.c"
+#include "../../host/xy_host.c"
 
 #undef __attribute__
 

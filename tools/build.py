@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
-"""Build OMNI (built on Felucca, as X0X is): the app, the update loader and an installable .fwsc package.
+"""Build XY-1 (built on Felucca, as X0X is): the app, the update loader and an installable .fwsc package.
 
   tools/build.py [--release X.Y[-suffix]]
 
-Outputs in build/: omni.bin (app), loader/ota.bin (update loader, Felucca's, unchanged),
-omni.fwsc (package). See BUILDING.md for the toolchain and the SDK.
+Outputs in build/: xy.bin (app), loader/ota.bin (update loader, Felucca's, unchanged),
+xy.fwsc (package). See BUILDING.md for the toolchain and the SDK.
 
 The JieLi toolchain is Linux x86-64 only. JIELI_TOOLCHAIN points at it; on
 macOS (or with JIELI_DOCKER=1) each tool runs in a linux/amd64 container.
@@ -40,8 +40,8 @@ CFLAGS = ["-Os", "-ffunction-sections", "-fno-builtin", "-Wall", "-Wno-unused-fu
 # the AC79's single-precision FPU (the SDK's own flags); no fused multiply-add, so the host
 # build (-ffp-contract=off) computes the same samples
 FPU = ["-mcpu=r3", "-mfprev1", "-ffp-contract=off"]
-# the instrument: a separate unit at -O2
-O2_UNITS = ["dsp/omni.c"]
+# the DSP units and the sequencer: separate units at -O2 (the rest, the unity build firmware/src/main.c, is -Os)
+O2_UNITS = ["dsp/synth.c", "dsp/drumline.c", "dsp/fx.c", "seq/pattern.c", "seq/seq.c"]
 LINE = re.compile(r"^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2} )+)\s*\t(.*)$")
 
 # SDK files of AC79NN_SDK_V1.2.1_2023-12-13 (the tested version)
@@ -51,8 +51,8 @@ SDK_SHA256 = {
     "cfg/eq_cfg_hw.bin": "41167491bffed4651750719c973d2758adeb9021a5670d02d6a53c85ed80ea7d",
 }
 
-PRODUCT = "FM-1_800"                # package identity; release builds are FM-1_8XXYYZZ (see main)
-VERSION = None                      # FELUCCA_VERSION for release builds (default: firmware/src/ui.c)
+PRODUCT = "FM-1_1000"               # package identity; release builds are FM-1_10XXYYZZ (see main)
+VERSION = None                      # XY_VERSION for release builds (default: "DEV", app.h)
 
 
 def toolchain():
@@ -120,16 +120,35 @@ def tc(tool, *args):
 
 def tc_all(*cmds):
     # at most 4 at once: a podman machine drops concurrent container connections (ssh EOF)
-    with ThreadPoolExecutor(min(len(cmds), int(os.environ.get("OM_JOBS", "4")))) as ex:
+    with ThreadPoolExecutor(min(len(cmds), int(os.environ.get("XY_JOBS", "4")))) as ex:
         return list(ex.map(lambda c: tc(*c), cmds))
 
 
+WORDS_MIN = """# XY-1's words for the screen reader (fm1-reader): the screen's text <TAB> what to say. "#" a number,
+# "*" a word left out. tools/gen_words.py makes web/words/<id>.json (published with the site) and the link
+# the FM-1 sends. Change a line and a new file is made: keep the old ones (devices point at them).
+# url: https://charlesvestal.github.io/fm1-xy/words/
+BPM\tbeats per minute
+FX\teffects
+"""
+
+
 def generate():
-    """generated headers: the font (Felucca's), the screen reader's words link (fm1-reader)"""
+    """generated headers: the font (Felucca's), the screen reader's words link (fm1-reader), the
+    wavetables (tools/gen_wavetables.py, the synth's)"""
     GEN.mkdir(parents=True, exist_ok=True)
     tools = SRC / "tools"
-    for c in [[tools / "gen_font.py", GEN / "felucca_font.h"],
-              [tools / "gen_words.py", SRC / "firmware" / "words.tsv", SRC / "web" / "words", GEN / "ann_words.h"]]:
+    words = SRC / "firmware" / "words.tsv"
+    if not words.exists():          # the UI's words are not written yet: a minimal file so the build runs
+        words.write_text(WORDS_MIN)
+        print("build: firmware/words.tsv was missing: wrote a minimal one")
+    jobs = [[tools / "gen_font.py", GEN / "felucca_font.h"],
+            [tools / "gen_words.py", words, SRC / "web" / "words", GEN / "ann_words.h"]]
+    if (tools / "gen_wavetables.py").exists():
+        jobs.append([tools / "gen_wavetables.py", GEN / "wavetables.h"])
+    else:
+        print("build: no tools/gen_wavetables.py yet: build/gen/wavetables.h not generated")
+    for c in jobs:
         r = subprocess.run([sys.executable, *map(str, c)], capture_output=True, text=True)
         sys.stdout.write(r.stdout)
         if r.returncode:
@@ -200,14 +219,14 @@ def build_loader():
 # ---- app
 
 def build_app():
-    flags = [*CFLAGS, *FPU, "-Ifirmware/hal", "-Ifirmware/src", "-Ibuild/gen"]
-    for flag in ("OM_CDC",):
+    flags = [*CFLAGS, *FPU, "-Ifirmware/hal", "-Ifirmware/src", "-Ifirmware/src/dsp", "-Ibuild/gen"]
+    for flag in ("XY_CDC",):
         v = os.environ.get(flag)    # unset: the default in firmware/src/main.c
         if v in ("0", "1"):
             flags.append(f"-D{flag}={v}")
     flags.append(f'-DFELUCCA_ID="{PRODUCT}"')
     if VERSION:
-        flags.append(f'-DOM_VERSION="{VERSION}"')
+        flags.append(f'-DXY_VERSION="{VERSION}"')
     o2 = [f if f != "-Os" else "-O2" for f in flags]
     units = [("cc", "-c", FW / "crt0.S", "-o", OUT / "crt0.o"),
              ("cc", "-c", FW / "hal" / "fm1_vec.S", "-o", OUT / "fm1_vec.o"),
@@ -221,7 +240,7 @@ def build_app():
         units.append(("cc", *o2, "-c", FW / "src" / u, "-o", o))
         objs.append(o)
     tc_all(*units)
-    elf = OUT / "omni.elf"
+    elf = OUT / "xy.elf"
     # unreferenced functions (each in its own section: -ffunction-sections) are dropped: the DSP keeps
     # mono reference paths for the host tests that the firmware no longer calls
     tc("pi32v2/bin/ld", "--gc-sections", "-e", "_start", "-T", FW / "app.ld", *objs, "-o", elf)
@@ -234,7 +253,7 @@ def build_app():
                                ("common/bin/objdump", "-t", elf),
                                ("common/bin/objdump", "-d", elf),
                                ("common/bin/objdump", "-d", "-j", ".ram_text", elf))
-    (OUT / "omni.dis").write_text(dis)
+    (OUT / "xy.dis").write_text(dis)
 
     def symv(name):
         return int(re.search(r"^([0-9a-f]+) .*\s" + name + r"$", syms, re.M).group(1), 16)
@@ -251,7 +270,7 @@ def build_app():
             img += b"\xff" * (load - APP_XIP - len(img))
             img += blob
     img += b"\xff" * (-len(img) % 4)
-    (OUT / "omni.bin").write_bytes(img)
+    (OUT / "xy.bin").write_bytes(img)
     return bytes(img), syms, dis, rt
 
 
@@ -344,20 +363,20 @@ def mmio_check():
 def main():
     global PRODUCT, VERSION
     ap = argparse.ArgumentParser()
-    ap.add_argument("--release", metavar="X.Y[.Z]", help="release build: identity FM-1_8XXYYZZ, version string X.Y[.Z]")
+    ap.add_argument("--release", metavar="X.Y[.Z]", help="release build: identity FM-1_10XXYYZZ, version string X.Y[.Z]")
     ap.add_argument("--sdk", type=Path, help="JieLi AC79 SDK checkout (default: $AC79_SDK)")
     a = ap.parse_args()
-    name = "omni.fwsc"
+    name = "xy.fwsc"
     if a.release:
-        # identity FM-1_8 + major, minor, patch as two digits each (0.1 -> FM-1_8000100): FM-1 is the
-        # model the update tools match on; the number is ours (X0X is FM-1_9...). Digits only after the
-        # underscore, as the tools parse it.
+        # identity FM-1_10 + major, minor, patch as two digits each (0.1 -> FM-1_10000100): FM-1 is the
+        # model the update tools match on; the number is ours (every single digit is taken: X0X 9, FoMni
+        # 8 ... SPH-16 0). Digits only after the underscore, as the tools parse it.
         m = re.fullmatch(r"(\d{1,2})\.(\d{1,2})(?:\.(\d{1,2}))?(-[A-Za-z0-9]+)?", a.release)
         if not m:
             raise SystemExit(f"--release {a.release}: use X.Y[.Z][-suffix], up to two digits each")
-        PRODUCT = "FM-1_8%02d%02d%02d" % (int(m[1]), int(m[2]), int(m[3] or 0))
+        PRODUCT = "FM-1_10%02d%02d%02d" % (int(m[1]), int(m[2]), int(m[3] or 0))
         VERSION = a.release.upper() if "BETA" in a.release.upper() else a.release.upper() + " BETA"
-        name = f"omni-{a.release}.fwsc"
+        name = f"xy-{a.release}.fwsc"
     fm1pkg_make.SDK = a.sdk
     for rel, sha in SDK_SHA256.items():          # fail early without the SDK
         if hashlib.sha256(fm1pkg_make.sdk_file(rel)).hexdigest() != sha:
@@ -381,7 +400,7 @@ def main():
         raise SystemExit("build: checks failed")
     pkg = fm1pkg_make.ufw(fm1pkg_make.flash_image(img, fm1pkg_make.KEY), ota, PRODUCT)
     (OUT / name).write_bytes(pkg)
-    print(f"app      {OUT / 'omni.bin'}  {len(img)} B")
+    print(f"app      {OUT / 'xy.bin'}  {len(img)} B")
     print(f"loader   {LDR / 'ota.bin'}  {len(ota)} B")
     print(f"package  {OUT / name}  {len(pkg)} B, identity {PRODUCT}")
     return 0

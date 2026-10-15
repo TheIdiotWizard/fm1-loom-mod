@@ -15,7 +15,7 @@ extern const char *const FXT_KNOB[NFXT][4];
  * distortion: drive, amount, low cut, high cut; lofi: rate, bits, quality, drift;
  * phaser: frequency, depth, rate, feedback; reverb: size, modulation, rate, feedback (wet) */
 
-#define FX_DLY_LEN 33075              /* int16 samples a side: 0.75 s */
+#define FX_DLY_LEN 22400              /* int16 samples a side: 0.5 s plus the line's 256-sample margin (the pool's budget) */
 #define FX_RV_LEN 12000               /* int16 samples: the reverb's combs and allpasses */
 typedef struct fxslot fxslot_t;
 #define FXSLOT_BYTES 9216             /* the chorus line (float) and the states */
@@ -32,7 +32,9 @@ int fx_has(const fxslot_t *f, int type);                    /* the slot can do t
 
 /* ---- tape: a quarter-rate mono ring of the last 16 steps; the keys loop a segment while held ---- */
 #define TAPE_RATE 4                   /* 44100 / 4 */
-#define TAPE_LEN 32768                /* int16 samples: 2.97 s, 16 steps down to 90 BPM at scale 1 */
+#define TAPE_LEN 24576                /* int16 samples: 2.23 s, 16 steps down to 108 BPM at scale 1 (the pool's budget) */
+/* the ring wraps by comparison, not a mask: the length need not be a power of two */
+#define TAPE_WRAP(i) ((i) >= TAPE_LEN ? (i) - TAPE_LEN : (i) < 0 ? (i) + TAPE_LEN : (i))
 typedef struct tape tape_t;
 #define TAPE_BYTES 512
 void tape_init(tape_t *t, int16_t *buf);

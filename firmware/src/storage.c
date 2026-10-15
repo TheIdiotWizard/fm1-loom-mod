@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
- * X0X / OMNI: object map changed (see below). */
+ * X0X / XY-1: object map changed (see below). */
 /* Persistent storage on the SPI NOR.
  *
  * Every object has an A/B sector pair. A save goes to the copy that is not
@@ -17,9 +17,11 @@
 #define ST_PAYLOAD_OFF 256u
 #define ST_PAYLOAD_MAX (ST_SECTOR - ST_PAYLOAD_OFF)
 
-/* flash map, OMNI (plat.h OBJ_*): the project at 0xFC000 (Felucca's FL_GLOB), the panel calibration at
- * 0xDC000 (Felucca's user-preset area). Nothing above 0xDFFFF: 0xE0000.. is the update loader's
- * staging area. The magic is X0X's, so a project is told apart by its own magic (project.c). */
+/* flash map, XY-1 (plat.h OBJ_*), all in Felucca's data area 0x97000..0xDFFFF: the four project slots'
+ * objects (PROJ_NOBJ each, two 4 KB sectors an object) from 0x97000 up to 0xCF000, the panel calibration
+ * at 0xDC000 (Felucca's user-preset area, as FoMni), the user presets at 0xDE000. Nothing above
+ * 0xDFFFF: 0xE0000.. is the update loader's staging area (FL_OTA_LO). The magic is X0X's, so a project
+ * is told apart by its own magic (project.c). */
 typedef struct {
     uint32_t magic;
     uint16_t type, slot;
@@ -48,7 +50,11 @@ static uint32_t st_crc32(const void *p, uint32_t n)   /* zlib CRC-32, 4 bits per
 
 static uint32_t st_sector(uint32_t obj, uint32_t copy)  /* flash offset of copy A (0) / B (1) */
 {
-    return (obj == OBJ_PANEL ? 0xDC000u : 0xFC000u) + copy * ST_SECTOR;
+    if (obj == OBJ_PANEL)
+        return 0xDC000u + copy * ST_SECTOR;
+    if (obj == OBJ_PRESETS)
+        return 0xDE000u + copy * ST_SECTOR;
+    return 0x97000u + (obj - OBJ_PROJ0) * 2u * ST_SECTOR + copy * ST_SECTOR;
 }
 
 static uint8_t st_buf[ST_PAYLOAD_MAX] __attribute__((aligned(4)));
@@ -101,6 +107,22 @@ static int st_load(uint32_t obj, void *dst, uint32_t max)
     uint32_t i;
     st_hdr_t h;
     if (st_current(obj, &h) < 0)
+        return -1;
+    if (h.len > max)
+        h.len = max;
+    for (i = 0; i < h.len; i++)
+        ((uint8_t *)dst)[i] = st_buf[i];
+    return (int)h.len;
+}
+
+/* the copy before the current one, if it is valid too: its length, or -1 (a stream torn across
+ * objects falls back to the copies of the save before: project.c load_stream) */
+static int st_load_prev(uint32_t obj, void *dst, uint32_t max)
+{
+    uint32_t i;
+    st_hdr_t h;
+    int cur = st_current(obj, &h);
+    if (cur < 0 || st_head(obj, (uint32_t)!cur, &h) || st_body(obj, (uint32_t)!cur, &h))
         return -1;
     if (h.len > max)
         h.len = max;

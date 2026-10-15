@@ -1,54 +1,58 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Boot, audio ISR and main loop adapted from Felucca's main.c / audio.c, Copyright (C) 2026
  * Leo Kuroshita (@kurogedelic), Hugelton Instruments. */
-/* FoMni on the FM-1 (from X0X's): boot (WDT first, boot-loop guard, guards), LCD, input (TIMER5
+/* XY-1 on the FM-1 (NuSaw's, from X0X's): boot (WDT first, boot-loop guard, guards), LCD, input (TIMER5
  * 10 kHz), audio (ALNK0), USB; then the main loop: UI at ~60 frames/s, input polled in between. */
 extern uint32_t _data_start[], _data_end[], _data_load[], _bss_start[], _bss_end[];
-extern uint32_t _pool_start[], _pool_end[], _rt_start[], _rt_end[], _rt_load[];
+extern uint32_t _pool_start[], _pool_end[], _rt_start[], _rt_end[], _rt_load[], _c1_start[], _c1_end[], _c1_load[];
 
 /* --------------------------------------------------------------- audio --- */
-/* Felucca's 256-frame halves (5.8 ms): FoMni's render is light, and a strum wants the short latency */
-#define HALF_FRAMES 256u                    /* I2S half buffer: 5.8 ms at 44.1 kHz */
+/* X0X's 512-frame halves (11.6 ms): the sequencer's cost averages over a longer block, and a voice-heavy
+ * stretch has room; the render works in 256-frame calls, half the voices on the second core */
+#define HALF_FRAMES 512u                    /* I2S half buffer: 11.6 ms at 44.1 kHz */
 #define HALF_WORDS (HALF_FRAMES * 2u)
 #define FS 44100u
-#define REND_FRAMES 256u                    /* om_render's frames per call */
+#define REND_FRAMES 256u                    /* engine_render's frames per call */
 #if FELUCCA_UAC
 _Static_assert(REND_FRAMES == UA_HALF, "usb.c sizes the USB audio ring band for this block");
 #endif
 static int32_t abuf[2u * HALF_WORDS] __attribute__((aligned(4)));
 
 #define DBG_MAGIC 0x44424731u                       /* "DBG1": read with `fm1t memr` */
-struct om_dbg {
+struct xy_dbg {
     uint32_t magic, halves, max_us, nested, in_audio, late, timer_irqs, ui_frames;
     uint32_t last_us, cpu_q8, boots, stage;
     uint32_t crash_seen;                            /* the crash count already reported at a boot */
-} om_dbg __attribute__((section(".noinit")));
+} xy_dbg __attribute__((section(".noinit")));
 static uint8_t safe_mode;                           /* two failed boots: no audio, USB on (safe_main) */
 
 static void render_block(int32_t *o)                /* ALNK0: one half, measured */
 {
     uint32_t t0 = fm1_ticks(), us, budget = HALF_FRAMES * 1000000u / FS;
-    om_dbg.in_audio = 1;
+    xy_dbg.in_audio = 1;
 #if FELUCCA_UAC
     uac_render_start();
 #endif
     {
         uint32_t k;
         for (k = 0; k < HALF_FRAMES; k += REND_FRAMES) {
-            om_render(o + 2u * k, REND_FRAMES, master_q12);
+            engine_render(o + 2u * k, REND_FRAMES, master_q12);
 #if FELUCCA_UAC
             uac_tap(o + 2u * k, REND_FRAMES);       /* the USB audio input: the same master output */
 #endif
         }
     }
     us = (fm1_ticks() - t0) / FM1_TICKS_PER_US;
-    om_dbg.cpu_q8 = (om_dbg.cpu_q8 * 15u + (us * 256u) / budget) / 16u;
-    audio_cpu_pct = (om_dbg.cpu_q8 * 100u) >> 8;
-    om_dbg.halves++;
-    om_dbg.last_us = us;
-    if (us > om_dbg.max_us)
-        om_dbg.max_us = us;
-    om_dbg.in_audio = 0;
+    xy_dbg.cpu_q8 = (xy_dbg.cpu_q8 * 15u + (us * 256u) / budget) / 16u;
+    audio_cpu_pct = (xy_dbg.cpu_q8 * 100u) >> 8;
+    if (us * 100u / budget > audio_peak_pct)
+        audio_peak_pct = us * 100u / budget;        /* the Status page's peak (read and reset) */
+    engine_load(us * 100u / budget);                /* the overload guard's input */
+    xy_dbg.halves++;
+    xy_dbg.last_us = us;
+    if (us > xy_dbg.max_us)
+        xy_dbg.max_us = us;
+    xy_dbg.in_audio = 0;
 }
 
 void fm1_alnk0_irq(void)                            /* via isr_alnk0 (hal/fm1_isr.S) */
@@ -60,7 +64,7 @@ void fm1_alnk0_irq(void)                            /* via isr_alnk0 (hal/fm1_is
         render_block(&abuf[half * HALF_WORDS]);
         fm1_audio_ack_half();
         if (fm1_audio_free_half() != half) {
-            om_dbg.late++;                         /* the DMA moved on while we rendered */
+            xy_dbg.late++;                         /* the DMA moved on while we rendered */
             audio_xruns++;
         }
     }
@@ -88,9 +92,9 @@ void fm1_timer5_irq(void)
 {
     static uint32_t sub;
     fm1_timer5_ack();
-    om_dbg.timer_irqs++;
-    if (om_dbg.in_audio)
-        om_dbg.nested++;
+    xy_dbg.timer_irqs++;
+    if (xy_dbg.in_audio)
+        xy_dbg.nested++;
     fm1_input_tick();
     /* 2 kHz: all USB SIE traffic lives here. This ISR now nests into the audio render (so the key
      * matrix keeps its rhythm, below); USB shares the MIDI queues with the audio ISR, so a poll that
@@ -101,14 +105,14 @@ void fm1_timer5_irq(void)
         /* the USB audio stream cannot wait for the render (one packet per 1 ms frame, a render takes
          * up to ~11.6 ms): it runs nested too. It touches only EP4 (INDEX is set on every access) and
          * the consumer side of its ring, and usb_poll never runs nested, so the two never interleave */
-        if (om_dbg.in_audio)
+        if (xy_dbg.in_audio)
             uac_service();
 #endif
     }
-    if (usb_due && !om_dbg.in_audio) {
+    if (usb_due && !xy_dbg.in_audio) {
         usb_due = 0;
         usb_poll();
-#if OM_TRS
+#if XY_TRS
         uart_midi_poll();                           /* the TRS jack: same context, same queue */
 #endif
     }
@@ -143,9 +147,11 @@ static void fm1_fault(const fm1_crash_t *c)
 {
     char b[12];
     uint32_t t0;
+    if (fm1_c1_on)
+        fm1_cpu1_bar();                             /* a crash beside the second core: one core until power-off */
     fm1_audio_stop();
     lcd_fill(0, 0, 240, 240, RGB(160, 0, 0));
-    draw_text_box(0, 8, 240, &FONT_S, "FoMni CRASH", C_WHITE, 1);
+    draw_text_box(0, 8, 240, &FONT_S, "XY-1 CRASH", C_WHITE, 1);
     hexs(b, c->vec);
     draw_text_box(10, 40, 220, &FONT_S, b, C_WHITE, 0);
     hexs(b, c->pc);
@@ -174,21 +180,22 @@ static void enter_uboot(const char *why)
     fm1_enter_uboot();
 }
 
-/* SAFE MODE: FoMni crashed (or hung) twice while starting. Nothing that makes sound runs: no audio,
- * no engine, no UI; USB is on, so the web installer (FoMni, or the stock firmware) and M-UPGRADE can
- * reach it. PLAY tries FoMni again. The chip's own update mode stays the last resort (fm1_cstart). */
+/* SAFE MODE: XY-1 crashed (or hung) twice while starting. Nothing that makes sound runs: no audio,
+ * no engine, no UI; USB is on, so the web installer (XY-1, or the stock firmware) and M-UPGRADE can
+ * reach it. PLAY tries XY-1 again. The chip's own update mode stays the last resort (fm1_cstart). */
 static void safe_main(void)
 {
     char b[24];
-    uint32_t t0, play;
+    uint32_t t0, play, both, t_oct;
     lcd_fill(0, 0, 240, 240, C_BLACK);
-    draw_text_box(0, 18, 240, &FONT_B, "FoMni SAFE MODE", C_HI, 1);
+    draw_text_box(0, 18, 240, &FONT_B, "XY-1 SAFE MODE", C_HI, 1);
     draw_text_box(0, 52, 240, &FONT_S, "IT CRASHED TWICE", C_WHITE, 1);
     draw_text_box(0, 72, 240, &FONT_S, "WHILE STARTING.", C_WHITE, 1);
     draw_text_box(0, 102, 240, &FONT_S, "NO SOUND. USB IS ON:", C_WHITE, 1);
     draw_text_box(0, 122, 240, &FONT_S, "REINSTALL FROM THE", C_WHITE, 1);
     draw_text_box(0, 142, 240, &FONT_S, "WEB INSTALLER.", C_WHITE, 1);
     draw_text_box(0, 172, 240, &FONT_S, "PLAY: TRY AGAIN", C_HI, 1);
+    draw_text_box(0, 190, 240, &FONT_S, "HOLD OCT- + OCT+: UPDATE", C_GRAY, 1);
     if (fm1_crash.magic == FM1_CRASH_MAGIC) {
         b[0] = 'P';
         b[1] = 'C';
@@ -203,20 +210,26 @@ static void safe_main(void)
     fm1_guard_lock_top();
     fm1_irq_enable_all();
     play = 1u << panel.btn[B_PLAY];
-    t0 = fm1_ms;
+    both = (1u << panel.btn[B_OCTDN]) | (1u << panel.btn[B_OCTUP]);
+    t0 = t_oct = fm1_ms;
     for (;;) {
         fm1_wdt_feed();
         usb_retry(fm1_ms);
         if (bootguard.pending && fm1_ms - t0 > 10000u)
             bootguard.pending = 0;                  /* safe mode itself is up: not another failed boot */
         if ((fm1_in.buttons & play) && fm1_ms - t0 > 500u) {
-            bootguard.failed = 0;                   /* try FoMni again, from scratch */
+            bootguard.failed = 0;                   /* try XY-1 again, from scratch */
             bootguard.pending = 0;
-            draw_text_box(0, 172, 240, &FONT_S, "STARTING FoMni...", C_HI, 1);
+            draw_text_box(0, 172, 240, &FONT_S, "STARTING XY-1...", C_HI, 1);
             usb_detach();
             fm1_delay_ms(30);
             fm1_reboot();
         }
+        if ((fm1_in.buttons & both) != both)        /* OCT- + OCT+ held 5 s: the chip's update mode, as in X0X
+                                                     * (fm1-x0x#20: with USB gone, the only way left) */
+            t_oct = fm1_ms;
+        else if (fm1_ms - t_oct > 5000u)
+            enter_uboot("UBOOT");
         ota_service();
         if (usb.ota_req) {
             usb.ota_req = 0;
@@ -230,13 +243,13 @@ static void safe_main(void)
 
 static void splash(void)
 {
-    lcd_fill(0, 0, 240, 240, RGB(250, 244, 232));
-    cv_begin(240, 64, RGB(250, 244, 232));
+    lcd_fill(0, 0, 240, 240, RGB(251, 248, 241));
+    cv_begin(240, 64, RGB(251, 248, 241));
     {
-        int32_t w = text_w(&FONT_L, "FoMni");
-        cv_text((240 - w) / 2, 0, &FONT_L, "FoMni", RGB(242, 120, 72));
-        w = text_w(&FONT_S, "A chord harp for the FM-1");
-        cv_text((240 - w) / 2, 42, &FONT_S, "A chord harp for the FM-1", RGB(150, 136, 118));
+        int32_t w = text_w(&FONT_L, "XY-1");
+        cv_text((240 - w) / 2, 0, &FONT_L, "XY-1", RGB(229, 72, 46));
+        w = text_w(&FONT_S, "a pocket groovebox");
+        cv_text((240 - w) / 2, 42, &FONT_S, "a pocket groovebox", RGB(122, 128, 152));
     }
     cv_blit(0, 92);
     lcd_sync();
@@ -248,6 +261,10 @@ static void fm1_main(void)
     uint32_t last_frame = 0;
     {
         uint32_t f = irq_save();
+        fm1_vdc14_raise(7);                         /* M-VAVE's own supplies before anything loads them: */
+        fm1_sysvdd_raise(15);                       /* 1.60 V, then 1.38 V (fm1_sys.h) */
+        plat_vdc14_level = (uint8_t)fm1_vdc14();
+        plat_sysvdd_level = (uint8_t)fm1_sysvdd();
         flash_ok = FL_FAR(fl_jedec_ram)() == 0x856014u;   /* the expected 1 MiB part, else RAM only */
         irq_restore(f);
         if (flash_ok)
@@ -256,37 +273,48 @@ static void fm1_main(void)
     lcd_init();
     palette_set(1);
     splash();
-    if (om_dbg.magic != DBG_MAGIC) {
-        memset(&om_dbg, 0, sizeof om_dbg);
-        om_dbg.magic = DBG_MAGIC;
+    if (xy_dbg.magic != DBG_MAGIC) {
+        memset(&xy_dbg, 0, sizeof xy_dbg);
+        xy_dbg.magic = DBG_MAGIC;
     }
     if (safe_mode)
         safe_main();                                /* never returns */
-    if (fm1_crash.magic == FM1_CRASH_MAGIC && fm1_crash.count != om_dbg.crash_seen) {
+    if (fm1_crash.magic == FM1_CRASH_MAGIC && fm1_crash.count != xy_dbg.crash_seen) {
         char b[16];                                 /* a crash since the last boot: say so, a moment */
-        om_dbg.crash_seen = fm1_crash.count;
+        xy_dbg.crash_seen = fm1_crash.count;
         b[0] = 'P';
         b[1] = 'C';
         b[2] = ' ';
         hexs(b + 3, fm1_crash.pc);
-        draw_text_box(0, 176, 240, &FONT_S, "RESTARTED AFTER A CRASH", RGB(255, 80, 60), 1);
+        draw_text_box(0, 176, 240, &FONT_S, fm1_crash.core == 1 ? "THE SECOND CORE CRASHED"
+                      : "RESTARTED AFTER A CRASH", RGB(255, 80, 60), 1);
         draw_text_box(0, 196, 240, &FONT_S, b, C_GRAY, 1);
         fm1_wdt_feed();
         fm1_delay_ms(2500);
         fm1_wdt_feed();
     }
-    om_dbg.boots++;
-    om_dbg.max_us = 0;
+    xy_dbg.boots++;
+    xy_dbg.max_us = 0;
+    plat_perf_init();                               /* the profiler's clock */
     fm1_input_init();
     fm1_adc_init();
     panel_init();
     led_pos_init();
-    om_init();
-    project_load();                                 /* defaults when nothing (or another format) is saved */
+    project_load(0);                                /* defaults when nothing (or another format) is saved */
+    presets_load();
+    engine_init(&pats, proj_par);
     project_apply();
+    if (plat_cpu2_barred() && !proj.one_core) {     /* it crashed (or was given up) with two cores: one from now on */
+        proj.one_core = 1;
+        project_save(proj_slot);                    /* written now, on one core, the project as it loaded;
+                                                     * Setup > 2nd core turns it back on */
+    }
+    if (!proj.one_core && !bootguard.failed &&      /* after a failed start, one core (as X0X) */
+        plat_cpu2_set(1) == 0)                      /* the second core: at power-on, before the audio and the */
+        engine_set_core2(plat_cpu2_run, plat_cpu2_wait);   /* timers, as X0X starts it; if it does not answer, one core */
     audio_init();
     usb_start();
-#if OM_TRS
+#if XY_TRS
     uart_midi_init();                               /* before TIMER5: it read-modify-writes port H too */
 #endif
     /* above ALNK0 (3): the key / encoder / LED matrix is scanned one column per tick and must keep
@@ -344,20 +372,20 @@ static void fm1_main(void)
         ota_service();                              /* M-UPGRADE handshake (other SysEx is dropped) */
         if (usb.ota_req) {
             usb.ota_req = 0;
-            om_play(0);
-            om_panic();
+            engine_transport(0);
+            engine_panic();
             if (flash_ok)
                 ota_session();                      /* returns only if nothing was committed */
             ui_init();
         }
         if (usb.uboot_req)
             enter_uboot("UBOOT (USB)");
-#if OM_CDC
+#if XY_CDC
         cdc_task();
 #endif
         if (fm1_ms - last_frame >= 16u) {           /* ~60 frames/s at most; input in between */
             last_frame = fm1_ms;
-            om_dbg.ui_frames++;
+            xy_dbg.ui_frames++;
             ui_frame();
         } else {
             ui_input_only();
@@ -368,6 +396,8 @@ static void fm1_main(void)
 void fm1_cstart(void)
 {
     uint32_t *s, *d, p3, src, wdt;
+    fm1_cpu1_halt();                                /* a second core left running by the reset would read
+                                                     * the RAM cleared below (Jangada, fm1-x0x#10) */
     fm1_time_init();
     fm1_reset_reason();
     p3 = fm1_boot.p3_rst;
@@ -397,6 +427,8 @@ void fm1_cstart(void)
         *d = *s;
     for (s = _rt_load, d = _rt_start; d < _rt_end; s++, d++)
         *d = *s;
+    for (s = _c1_load, d = _c1_start; d < _c1_end; s++, d++)
+        *d = *s;                                    /* the second core's loop (fm1_cpu1.h) */
     fm1_mailbox_clear();
     fm1_guard_enable(FM1_GUARD_STACK | FM1_GUARD_WRITE | FM1_GUARD_BUS | FM1_GUARD_PC);
     safe_mode = (uint8_t)(p3 >> 8);

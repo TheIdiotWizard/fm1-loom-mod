@@ -1,0 +1,40 @@
+# the screen reader: what it hears on the main paths
+wait 200
+listen
+where
+said Steps
+tap EDIT
+wait 400
+said Engine
+turn K1 1
+wait 400
+said 
+tap HOME
+wait 400
+said Arrange
+turn K1 1
+wait 400
+said TEMPO
+tapkey w1
+wait 300
+said NEW S2
+tap SEQ
+wait 400
+tapkey w0
+said step 1 on
+press REC
+wait 1000
+release REC
+wait 400
+said REC button
+tap SEL
+wait 400
+said list
+tap HOME
+tap PLAY
+wait 300
+said Play
+tap PLAY
+wait 300
+said Stop
+speakdump

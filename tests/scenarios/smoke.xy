@@ -1,0 +1,14 @@
+# smoke: it boots, draws, plays two seconds and stops; the output is sane
+wait 200
+shot boot.png
+expect playing 0
+wav smoke.wav
+tap PLAY
+wait 2000
+expect playing 1
+tap PLAY
+wait 300
+expect playing 0
+wavstop
+expect peak_db_max 0
+shot after.png

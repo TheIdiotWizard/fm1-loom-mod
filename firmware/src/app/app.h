@@ -48,11 +48,15 @@ typedef struct {
 } user_preset_t;
 
 extern settings_t proj;                 /* the project's settings (RAM) */
+extern uint8_t proj_par[NALLTRK][NTP];  /* the tracks' par[] as one contiguous array: what the synth and the
+                                         * sequencer read (engine_init gets it); engine_set / engine_set_all
+                                         * keep it in step with proj.trk[].par (the UI writes those) */
 extern patterns_t pats;                 /* its patterns, lanes, scenes, song (pool) */
 extern user_preset_t user_presets[NUSER_PRESETS];
 extern uint8_t proj_slot;               /* the slot loaded */
 
 void project_defaults(void);
+int project_mem_pct(void);              /* how full the patterns' room in flash is, % (the last save or load) */
 int project_load(int slot);             /* 0 = loaded; else defaults are in place */
 int project_save(int slot);             /* 0 = saved and verified; -1 = full / failed */
 void project_apply(void);               /* every value to the engine (boot, load) */

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The browser build in Node: boot it, strum across the white keys, expect sound and screen frames.
+// The browser build in Node: boot it, go to the Engine page (EDIT) and play the white keys, expect sound and screen frames.
 import fs from "fs";
 const wasm = fs.readFileSync(process.argv[2]);
 let mem;
@@ -11,6 +11,8 @@ if (ex._initialize) ex._initialize();
 ex.web_master(2800); ex.web_boot();
 let peak = 0;
 const WHITE = [0,2,4,6,7,9,11,12,14,16,18,19,21,23,24,26];
+const B_EDIT = 4;                                   // plat.h: the Engine page, where the keys play
+ex.web_render(4096); ex.web_buttons(1 << B_EDIT); ex.web_render(4096); ex.web_buttons(0); ex.web_render(4096);
 for (let i = 0; i < 400; i++) {
   if (i % 20 === 0 && i < 340) ex.web_keys(1 << WHITE[(i / 20) % 16]);
   ex.web_render(128);

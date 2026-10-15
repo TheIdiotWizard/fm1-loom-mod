@@ -15,7 +15,7 @@ extern const char *const DL_SOUND_NAME[DL_NSOUND];     /* the default kit: "kick
 extern const uint8_t DL_DEFAULT_KIT[DL_NSOUND][6];     /* DP_* of each sound of a new drum track */
 
 typedef struct drumline drumline_t;
-#define DRUMLINE_BYTES 2048
+#define DRUMLINE_BYTES 4096                            /* 8 voices and two resonator strings (int16, 512 each) */
 
 void drumline_init(drumline_t *d, const uint8_t *par);  /* par: the track's par[] (reads TP_DRUM0..) */
 void drumline_hit(drumline_t *d, int sound, int vel, int pitch_semi, int short_gate, int long_tail);

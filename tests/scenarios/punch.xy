@@ -1,0 +1,25 @@
+# punch-in fx: HOME + a key on any page; on the PUNCH track the keys fire directly
+wait 200
+tap PLAY
+wait 500
+press HOME
+key 0 down
+wait 300
+shot punch_home.png
+key 0 up
+release HOME
+spin ALGO 9
+expect trk 10
+tap EDIT
+key 1 down
+key 14 down
+wait 300
+shot punch_page.png
+key 1 up
+key 14 up
+spin K1 1
+tapkey 3
+wait 200
+shot punch_latched.png
+tapkey 3
+tap PLAY

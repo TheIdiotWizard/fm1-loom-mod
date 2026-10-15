@@ -1,0 +1,59 @@
+# a bass line on track 3 with components: notes remembered from the keys, then steps, a ramp and a chance
+wait 200
+spin ALGO 2
+expect trk 3
+tap EDIT
+expect page Engine
+wait 40
+shot bass_engine.png
+turn PRESET 1
+wait 40
+shot bass_preset.png
+# play a note (remembered), then write it on four steps
+tapkey 0
+tap SEQ
+tapkey w0
+tapkey w3
+tapkey w6
+tapkey w10
+expect note 3 1 1 53
+wait 40
+shot bass_steps.png
+# a longer note: hold step 1 and press step 3
+key w0 down
+wait 100
+tapkey w2
+key w0 up
+# a ramp up on step 4, chance on step 7
+key w3 down
+wait 100
+tapkey b4
+key w3 up
+expect comp 3 4 5
+key w6 down
+wait 100
+spin K3 50
+wait 40
+shot bass_chance.png
+key w6 up
+# a lock: hold step 11, press FX, turn K1 (cutoff)
+key w10 down
+wait 100
+tap FX
+wait 40
+shot bass_lock.png
+spin K1 -20
+key w10 up
+wait 40
+shot bass_done.png
+tap PLAY
+wait 2500
+tap PLAY
+# undo the last edit, redo it
+press HOME
+tap REC
+release HOME
+press HOME
+tap PLAY
+release HOME
+expect playing 0

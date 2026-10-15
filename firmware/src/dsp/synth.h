@@ -62,6 +62,10 @@ typedef struct {
 } tp_info_t;
 const tp_info_t *tp_info(int p, int engine);        /* engine: the track's (TP_E1..E4 names depend on it) */
 void tp_text(int p, int v, int engine, char *num, char *unit);   /* the value as the screen shows it (<= 11, <= 4) */
+/* the same, knowing the whole track: the player's knobs (TP_P1..P4) and the LFO's fields (TP_LAMT, TP_LDEST,
+ * TP_LX) take their names, ranges and kinds from TP_PLAYER / TP_LTYPE */
+const tp_info_t *tp_info_par(int p, const uint8_t *par);
+void tp_text_par(int p, int v, const uint8_t *par, char *num, char *unit);
 void sound_default(uint8_t *par, int engine);       /* par[NTP] for a fresh track of this engine */
 
 /* factory presets: the sound part of par[] */
@@ -95,8 +99,18 @@ void synth_note_off(synth_t *s, int trk, uint32_t tag);
 void synth_all_off(synth_t *s, int trk);            /* -1: every track (panic) */
 void synth_bend(synth_t *s, int trk, int cents);    /* performance bend (the bend component, MIDI) */
 perf_t *synth_perf(synth_t *s, int trk);            /* the track's performance state (write from the interrupt) */
+#ifndef LOCK_NONE
+#define LOCK_NONE 0xFFu               /* seq/pattern.h's: no lock */
+#endif
 void synth_lock(synth_t *s, int trk, int param, int val);   /* a parameter lock in effect (LOCK_NONE: the knob's) */
-/* render n frames (any n; chunks inside): dry L/R and the three sends, added into the buffers.
+void synth_duck_trigger(synth_t *s, int src_trk);  /* a hit on src_trk (0..7, 8 = metronome): duck LFOs listening drop */
+/* a block: synth_prepare(n) once (the tracks' LFO, tremolo and duck values for every chunk boundary inside
+ * the next n frames, n <= 512, and the meters), then synth_render(n) for each voice range, on any core: a
+ * render touches only its voices' state, so 0..8 on one core and 8..16 on the other may run at once.
+ * Notes, locks, bends and perf writes happen between blocks (the command queue), never during a render.
+ * Every voice range must be rendered each block, with the n given to prepare. */
+void synth_prepare(synth_t *s, uint32_t n);
+/* render n frames (any n; chunks inside): dry L/R and the three sends (mono), added into the buffers.
  * v0..v1 is the range of voices to render (the two cores split the pool) */
 void synth_render(synth_t *s, int v0, int v1, float *l, float *r, float *s1, float *s2, float *st, uint32_t n);
 int synth_sounding(const synth_t *s, int v0, int v1);          /* a voice in the range is sounding */

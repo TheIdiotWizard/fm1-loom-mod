@@ -1,0 +1,28 @@
+# save and reboot: the beat, the tempo and the selected track survive
+wait 200
+tapkey w0
+tapkey w4
+tap HOME
+spin K1 10
+expect dirty 1
+tap SAVE
+expect dirty 0
+wait 40
+shot saved.png
+reboot
+wait 300
+expect note 1 1 1 1
+expect note 1 1 5 1
+expect dirty 0
+# a slot: hold SAVE and press white key 2
+press SAVE
+tapkey w1
+release SAVE
+wait 100
+shot save_slot.png
+tap GLO
+turn SELECT 4
+tap SEL
+wait 40
+shot setup_list.png
+tap HOME

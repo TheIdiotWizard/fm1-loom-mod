@@ -32,6 +32,7 @@ uint32_t plat_master(void);            /* MASTER pot, 0..4096 gain Q12 */
 void plat_leds(uint32_t buttons, uint32_t keys);   /* lit: bit B_*, bit key */
 void plat_glow(int on);                /* the unlit buttons glow dimly, readable in the dark (call before plat_leds) */
 void plat_play_red(int red);           /* PLAY lights green; red (its other LED) while recording (before plat_leds) */
+void plat_keys_dim(uint32_t keys);     /* keys lit dim (one scan frame in four; call before plat_leds) */
 
 /* USB MIDI, 4-byte USB-MIDI event packets (cable 0) */
 int plat_midi_in(uint32_t *pkt);       /* 1 = got one (called from the audio ISR) */
@@ -40,6 +41,7 @@ void plat_midi_out(uint32_t pkt);      /* queue one (audio ISR or main loop) */
 /* persistent storage (Felucca storage.c objects: A/B sectors, CRC, torn-write safe) */
 int plat_store_load(uint32_t obj, void *dst, uint32_t max);   /* bytes loaded, < 0 = none / bad */
 int plat_store_save(uint32_t obj, const void *src, uint32_t len);   /* 0 = ok */
+int plat_store_load_prev(uint32_t obj, void *dst, uint32_t max);   /* the copy before the current one (a torn stream) */
 #define PLAT_STORE_MAX 3840u           /* bytes per object */
 /* objects: the panel calibration, the user presets, then NPROJ project slots of PROJ_NOBJ objects each
  * (the settings, then the LZ chunks of the patterns). Flash map in storage.c (Felucca's data area). */
@@ -61,3 +63,6 @@ int plat_cpu2_wait(void);              /* ISR: 0 = done; -1 = it failed (and is 
 int plat_cpu2_gave_up(void);           /* why it is off: 0 no, 1 it read a wrong job, 2 one did not finish, 3 barred */
 uint32_t plat_cpu2_bad(void);
 int plat_cpu2_barred(void);            /* 1: since power-on it was given up, or core 0 crashed beside it */
+int plat_vdc14_mv(void);               /* VDC14 as set at start, mV (the Status page) */
+int plat_sysvdd_mv(void);
+int plat_last_crash(uint32_t v[5]);    /* 1: a crash since power-on (vec, pc, emu, dbg, rets as its red screen) */

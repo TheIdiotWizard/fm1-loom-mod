@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* OMNI firmware for the M-VAVE FM-1: one compilation unit for the platform and the app
+/* XY-1 firmware for the M-VAVE FM-1: one compilation unit for the platform and the app
  * (Felucca's layout, as X0X: the HAL is header-only, so everything that touches it is here).
- * The instrument (dsp/omni.c) is a separate unit compiled at -O2 by tools/build.py; this one is
- * -Os. Order matters. */
+ * The DSP units (dsp/synth.c, dsp/drumline.c, dsp/fx.c) and the sequencer (seq/pattern.c, seq/seq.c)
+ * are separate units compiled at -O2 by tools/build.py; this one is -Os. Order matters. */
 #include <stdint.h>
 #include "fm1_time.h"
 #include "fm1_sys.h"
@@ -13,6 +13,7 @@
 #include "fm1_audio.h"
 #include "fm1_adc.h"
 #include "fm1_lcd_hw.h"
+#include "fm1_cpu1.h"
 #include "fm1_flash.h"
 #include "fm1_xip.h"
 #include "fm1_perf.h"
@@ -28,22 +29,22 @@ static inline int32_t clamp(int32_t v, int32_t lo, int32_t hi) { return v < lo ?
 #include "app/plat.h"
 
 #define FELUCCA_OTA 1             /* M-UPGRADE update entry: keeps the web installer working */
-#ifndef OM_CDC
-#define OM_CDC 0                  /* USB serial console off: one plain MIDI interface */
+#ifndef XY_CDC
+#define XY_CDC 0                  /* USB serial console off: one plain MIDI interface */
 #endif
-#define FELUCCA_CDC OM_CDC
-#ifndef OM_UAC
-#define OM_UAC 1                  /* USB audio input: the master output, recordable over the cable */
+#define FELUCCA_CDC XY_CDC
+#ifndef XY_UAC
+#define XY_UAC 1                  /* USB audio input: the master output, recordable over the cable */
 #endif
-#define FELUCCA_UAC OM_UAC
+#define FELUCCA_UAC XY_UAC
 #ifndef FELUCCA_ID
-#define FELUCCA_ID "FM-1_800"     /* package identity (tools/build.py) */
+#define FELUCCA_ID "FM-1_1000"    /* package identity (tools/build.py) */
 #endif
 #include "usb.c"
-#ifndef OM_TRS
-#define OM_TRS 1                  /* MIDI IN on the TRS jack */
+#ifndef XY_TRS
+#define XY_TRS 1                  /* MIDI IN on the TRS jack */
 #endif
-#if OM_TRS
+#if XY_TRS
 #include "midi_uart.c"
 #endif
 
@@ -123,9 +124,10 @@ static void ota_commit(const uint8_t *parm)
 }
 
 #include "app/app.h"
-#define ANN_NAME "FoMni-1 " OM_VERSION
-#define ANN_DATA OM_POOL
-#include "ann_words.h"            /* the link to FoMni's words file (tools/gen_words.py, from firmware/words.tsv) */
+#include "app/engine.h"
+#define ANN_NAME "XY-1 " XY_VERSION
+#define ANN_DATA XY_POOL
+#include "ann_words.h"            /* the link to XY-1's words file (tools/gen_words.py, from firmware/words.tsv) */
 #include "announce.c"             /* the screen as text for a screen reader (fm1-reader) */
 static int ann_wire_send(const uint8_t *p, uint32_t n)   /* never waits: no room (nobody reading), not sent */
 {
@@ -135,6 +137,10 @@ static int ann_wire_send(const uint8_t *p, uint32_t n)   /* never waits: no room
 }
 #include "app/panel.c"
 #include "app/plat_fm1.c"
+/* the sequencer (seq/pattern.c, seq/seq.c) is its own -O2 unit, as the DSP: it runs in the interrupt, and
+ * its file-local names stay its own. The engine and the project are plain C in this unit. */
+#include "app/engine.c"
 #include "app/project.c"
+#include "app/pages.c"
 #include "app/ui.c"
 #include "app/main_fm1.c"

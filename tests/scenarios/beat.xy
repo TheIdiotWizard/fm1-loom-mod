@@ -1,0 +1,43 @@
+# a beat on track 1: the kick on 1 5 9 13, the snare on 5 and 13, hats on every other step
+wait 200
+expect page Steps
+tapkey w0
+tapkey w4
+tapkey w8
+tapkey w12
+wait 40
+shot beat_kick.png
+# the snare: black key 2 picks the sound
+tapkey b1
+tapkey w4
+tapkey w12
+tapkey b2
+tapkey w0
+tapkey w2
+tapkey w4
+tapkey w6
+tapkey w8
+tapkey w10
+tapkey w12
+tapkey w14
+wait 40
+shot beat_hats.png
+steps 1 1
+tap PLAY
+expect playing 1
+wait 1200
+shot beat_playing.png
+leds
+# a component on step 7: hold it, press black key 3 (multiply), set its value with K4
+key w6 down
+wait 100
+shot step_held.png
+tapkey b2
+spin K4 2
+wait 40
+shot step_component.png
+key w6 up
+expect comp 1 7 3
+wait 1500
+tap PLAY
+expect playing 0

@@ -1,65 +1,586 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* OMNI project: one flash object (OBJ_PROJ). A project of another format, or none, gives the
- * defaults. Part of the unity build, after app.h. */
-project_t proj;
+/* XY-1 project: the settings (tempo, tracks' sounds and mix, master), the patterns, lanes, scenes
+ * and song, and the user presets; four slots in flash.
+ *
+ * The settings are one storage object, stored raw (small, validated on load). The patterns, lanes,
+ * scenes and song (~64 KB, mostly empty steps) are one stream packed with lz.c across the slot's
+ * other six objects (X0X's project.c). The first carries the raw length and a CRC of the raw bytes,
+ * so a stream torn by a power cut between two objects, or one that does not unpack, is never loaded
+ * as garbage: the objects' previous copies (storage.c keeps two) are tried instead, which give the
+ * save before; only when no mix of copies checks out, the defaults. A save packs once to measure
+ * (nothing is written if it would not fit: "MEMORY FULL") and once to write; an object whose bytes
+ * did not change is not written again.
+ *
+ * Aux tracks keep their settings in the same par[] as the instruments: FX I / II: TP_ENGINE the
+ * effect (FXT_*), TP_E1..E4 its four knobs, TP_FENV its high-pass, TP_CUT its low-pass, TP_LEVEL
+ * the return, TP_SEND2 of FX I its feed into FX II; TAPE: TP_E1..E4 pitch, speed, length, mix,
+ * TP_LEVEL the loop's level; BRAIN: TP_E1..E4 mode, key, scale, degree; PUNCH: TP_E1 latch.
+ * Part of the unity build, after app.h and engine.h. */
+#include "app.h"
+#include "engine.h"
+#include "../dsp/drumline.h"
+#include "lz.c"
 
-/* the factory chord buttons, left to right, in C: the primary chords on the first group of three,
- * their relative minors on the next two, then the dominants that lead into them */
-static const uint8_t PAD_ROOT[NPADS] = {5, 0, 7, 2, 9, 4, 7, 4, 2, 10, 9};
-static const uint8_t PAD_TYPE[NPADS] = {CH_MAJ, CH_MAJ, CH_MAJ, CH_MIN, CH_MIN, CH_MIN, CH_7, CH_7, CH_7, CH_MAJ,
-                                        CH_7};
+settings_t proj;
+uint8_t proj_par[NALLTRK][NTP];
+patterns_t pats XY_POOL;
+user_preset_t user_presets[NUSER_PRESETS];
+uint8_t proj_slot;
+
+#define PROJ_STREAM 2u                  /* the format word of the packed objects */
+#define NSTREAM (PROJ_NOBJ - 1)
+#define STREAM_HDR 16u                  /* in the first object: format, raw length, raw CRC, packed length */
+#define STREAM_CAP ((uint32_t)NSTREAM * (PLAT_STORE_MAX - 4u) - (STREAM_HDR - 4u))
+#define RAW_LEN sizeof(patterns_t)
+typedef char raw_fits[(RAW_LEN < 0xFFFFu) ? 1 : -1];
+typedef char settings_fit[(sizeof(settings_t) <= PLAT_STORE_MAX) ? 1 : -1];
+typedef char presets_fit[(sizeof user_presets + 4u <= PLAT_STORE_MAX) ? 1 : -1];
+#define PRESETS_FORMAT 1u
+
+static uint32_t packed_len;             /* the last save's (or load's) packed stream, bytes */
+int project_mem_pct(void) { return (int)((packed_len * 100u + STREAM_CAP - 1u) / STREAM_CAP); }
+
+/* ---- defaults ------------------------------------------------------------------------------- */
+
+static void apply_preset(trk_t *t, int k)
+{
+    int i;
+    if (k < 0 || k >= NPRESETS)
+        return;
+    for (i = 0; i < NTP_SOUND; i++)
+        t->par[i] = PRESETS[k].par[i];
+    for (i = 0; i < NAME_LEN - 1 && PRESETS[k].name[i]; i++)
+        t->name[i] = PRESETS[k].name[i];
+    t->name[i] = 0;
+}
+
+static int preset_named(int engine, const char *word)   /* the engine's first preset whose name has the word */
+{
+    int k, first = preset_first(engine);
+    for (k = 0; k < NPRESETS; k++) {
+        const char *n = PRESETS[k].name, *w;
+        int j;
+        if (PRESETS[k].par[TP_ENGINE] != engine)
+            continue;
+        for (j = 0; n[j]; j++) {
+            int m = 0;
+            for (w = word; w[m] && n[j + m]; m++) {
+                char a = n[j + m], b = w[m];
+                if (a >= 'A' && a <= 'Z')
+                    a = (char)(a + 32);
+                if (a != b)
+                    break;
+            }
+            if (!w[m])
+                return k;
+        }
+    }
+    return first;
+}
+
+static void set_name(trk_t *t, const char *s)
+{
+    int i;
+    for (i = 0; i < NAME_LEN - 1 && s[i]; i++)
+        t->name[i] = s[i];
+    t->name[i] = 0;
+}
+
+static void aux_defaults(void)
+{
+    int t, k;
+    for (t = NTRK; t < NALLTRK; t++) {
+        uint8_t *p = proj.trk[t].par;
+        sound_default(p, EG_SIMPLE);                     /* mix and sends at their defaults */
+        for (k = TP_ENGINE; k <= TP_E4; k++)
+            p[k] = 0;
+        p[TP_LEVEL] = 100;
+        p[TP_PAN] = 64;
+        p[TP_SEND1] = p[TP_SEND2] = p[TP_SENDT] = 0;
+        p[TP_CHAN] = 0;
+        p[TP_BRAIN] = 0;
+    }
+    set_name(&proj.trk[AUX_BRAIN], "brain");
+    set_name(&proj.trk[AUX_PUNCH], "punch");
+    set_name(&proj.trk[AUX_TAPE], "tape");
+    set_name(&proj.trk[AUX_FX1], "reverb");
+    set_name(&proj.trk[AUX_FX2], "delay");
+    proj.trk[AUX_TAPE].par[TP_E1] = 64;                  /* pitch: as recorded */
+    proj.trk[AUX_TAPE].par[TP_E2] = 64;                  /* speed: as recorded */
+    proj.trk[AUX_TAPE].par[TP_E3] = 64;                  /* length */
+    proj.trk[AUX_TAPE].par[TP_E4] = 127;                 /* mix: the loop replaces the dry */
+    proj.trk[AUX_FX1].par[TP_ENGINE] = FXT_REVERB;       /* FX I: a room (size, modulation, rate, feedback) */
+    proj.trk[AUX_FX1].par[TP_E1] = 70;
+    proj.trk[AUX_FX1].par[TP_E2] = 30;
+    proj.trk[AUX_FX1].par[TP_E3] = 40;
+    proj.trk[AUX_FX1].par[TP_E4] = 64;
+    proj.trk[AUX_FX1].par[TP_CUT] = 127;
+    proj.trk[AUX_FX1].par[TP_FENV] = 20;                 /* a little high-pass: no mud */
+    proj.trk[AUX_FX2].par[TP_ENGINE] = FXT_DELAY;        /* FX II: a dotted-ish echo (size, amount, fine, dry) */
+    proj.trk[AUX_FX2].par[TP_E1] = 40;
+    proj.trk[AUX_FX2].par[TP_E2] = 55;
+    proj.trk[AUX_FX2].par[TP_E3] = 64;
+    proj.trk[AUX_FX2].par[TP_E4] = 0;
+    proj.trk[AUX_FX2].par[TP_CUT] = 110;
+    proj.trk[AUX_FX2].par[TP_FENV] = 30;
+}
 
 void project_defaults(void)
 {
-    int i;
-    memset(&proj, 0, sizeof proj);
+    static const uint8_t ORDER[NTRK] = {EG_DRUMLINE, EG_PRISM, EG_SIMPLE, EG_WAVETABLE, EG_AXIS, EG_EPIANO,
+                                        EG_ORGAN, EG_HARDSYNC};
+    int t, k;
+    uint8_t *z = (uint8_t *)&proj;
+    for (k = 0; k < (int)sizeof proj; k++)
+        z[k] = 0;
     proj.magic = PROJ_MAGIC;
     proj.format = PROJ_FORMAT;
-    for (i = 0; i < P_NPARAMS; i++)
-        proj.par[i] = om_param_info(i)->def;
-    for (i = 0; i < NPADS; i++) {
-        proj.pad_root[i] = PAD_ROOT[i];
-        proj.pad_type[i] = PAD_TYPE[i];
+    proj.name[0] = 'N';
+    proj.name[1] = 'E';
+    proj.name[2] = 'W';
+    proj.name[3] = 0;
+    proj.tempo_x10 = 1200;
+    proj.swing = 50;
+    proj.groove = 0;
+    proj.metronome = 1;                                   /* while recording */
+    proj.lights = 1;
+    proj.send_clock = 1;
+    proj.send_notes = 0;
+    proj.one_core = 0;
+    proj.usb_full = 0;
+    proj.scene = 0;
+    proj.trk_sel = 0;
+    for (t = 0; t < NTRK; t++) {
+        trk_t *tr = &proj.trk[t];
+        sound_default(tr->par, ORDER[t]);
+        if (ORDER[t] == EG_DRUMLINE) {
+            for (k = 0; k < DL_NSOUND; k++) {
+                int j;
+                for (j = 0; j < DP_N; j++)
+                    tr->par[TP_DRUM(k, j)] = DL_DEFAULT_KIT[k][j];
+            }
+            set_name(tr, "drumline");
+        } else if (t == 1) {
+            apply_preset(tr, preset_named(EG_PRISM, "bass"));   /* a prism bass under everything */
+        } else {
+            apply_preset(tr, preset_first(ORDER[t]));
+        }
+        if (!tr->name[0])
+            set_name(tr, EG_NAME[ORDER[t]]);
+        tr->par[TP_ENGINE] = ORDER[t];                    /* (a preset carries its engine; the kit keeps its own) */
+        tr->par[TP_CHAN] = 0;
     }
-    proj.leds = 1;
+    aux_defaults();
+    /* the master: blends off (neutral), the groups at unity, a touch of compression */
+    for (k = 0; k < NMS; k++)
+        proj.master[k] = 64;
+    proj.master[MS_EQ_BLEND] = 0;
+    proj.master[MS_SAT_GAIN] = 0;
+    proj.master[MS_SAT_BLEND] = 0;
+    proj.master[MS_PERC] = 100;
+    proj.master[MS_MEL] = 100;
+    proj.master[MS_COMP] = 30;
+    proj.master[MS_LEVEL] = 100;
+    patterns_init(&pats);
 }
 
-static int project_valid(void)
+/* ---- validation ----------------------------------------------------------------------------- */
+
+/* the settings came whole (CRC): what the engine indexes with is checked, a knob out of its range
+ * (a build whose ranges moved) is clamped, not a reason to lose the project */
+static int settings_valid(settings_t *s)
 {
-    int i;
-    if (proj.magic != PROJ_MAGIC || (proj.format != PROJ_FORMAT && proj.format != 1u))
+    int t, k;
+    if (s->magic != PROJ_MAGIC || s->format != PROJ_FORMAT)
         return 0;
-    if (proj.format == 1u) {                     /* 0.1: that slot was Lo-fi (0 / 1) */
-        proj.par[P_CREV] = om_param_info(P_CREV)->def;
-        proj.format = PROJ_FORMAT;
-    }
-    for (i = 0; i < P_NPARAMS; i++) {
-        const om_param_t *p = om_param_info(i);
-        if (proj.par[i] < p->lo || proj.par[i] > p->hi)
+    if (s->tempo_x10 < 400u || s->tempo_x10 > 3000u || s->scene >= NSCENE || s->trk_sel >= NALLTRK)
+        return 0;
+    s->name[NAME_LEN - 1] = 0;
+    for (t = 0; t < NALLTRK; t++) {
+        uint8_t *p = s->trk[t].par;
+        s->trk[t].name[NAME_LEN - 1] = 0;
+        if (t < NTRK && p[TP_ENGINE] >= NENGINE)
             return 0;
-    }
-    for (i = 0; i < NPADS; i++)
-        if (proj.pad_root[i] > 11u || proj.pad_type[i] >= CH_NTYPES)
+        if (t >= AUX_FX1 && p[TP_ENGINE] >= NFXT)
             return 0;
+        if (t < NTRK)
+            for (k = 0; k < NTP; k++) {
+                const tp_info_t *i = tp_info(k, p[TP_ENGINE]);
+                if (i && (p[k] < i->lo || p[k] > i->hi))
+                    p[k] = i->def;
+            }
+    }
+    for (k = 0; k < NMS; k++)
+        if (s->master[k] > 127)
+            s->master[k] = 127;
     return 1;
 }
 
-int project_load(void)
+/* the patterns came from the flash whole (CRC): only the fields the sequencer indexes with are
+ * clamped, so a stray value never reaches past an array */
+static void patterns_clamp(void)
 {
-    int n;
-    memset(&proj, 0, sizeof proj);
-    n = plat_store_load(OBJ_PROJ, &proj, sizeof proj);
-    if (n >= 8 && project_valid())
-        return 0;
-    project_defaults();
-    return -1;
+    int t, p, k;
+    for (t = 0; t < NSEQT; t++)
+        for (p = 0; p < NPATT; p++) {
+            tpat_t *tp = &pats.pat[t][p];
+            if (tp->len < 1 || tp->len > NSTEP)
+                tp->len = 16;
+            if (tp->scale >= NTS)
+                tp->scale = TS_1;
+            if (tp->groove >= NGROOVE)
+                tp->groove = GR_SWING;
+            if (tp->nlen < 1 || tp->nlen > 16)
+                tp->nlen = 4;
+            for (k = 0; k < NSTEP; k++) {
+                step_t *s = &tp->st[k];
+                if (s->comp >= NSC)
+                    s->comp = SC_NONE;
+                if (s->cval > SC_RANDOM_VAL)
+                    s->cval = 0;
+                if (s->cond >= COND_AB + COND_NAB)
+                    s->cond = 0;
+            }
+        }
+    for (k = 0; k < NLANE; k++) {
+        lane_t *l = &pats.lane[k];
+        if (l->used && (l->trk >= NALLTRK || l->pat >= NPATT || l->param >= NTP))
+            l->used = 0;
+    }
+    for (k = 0; k < NSCENE; k++) {
+        scene_t *sc = &pats.scene[k];
+        for (t = 0; t < NSEQT; t++)
+            if (sc->pat[t] >= NPATT)
+                sc->pat[t] = 0;
+        if (sc->brain_scale >= NBS)
+            sc->brain_scale = 0;
+        if (sc->brain_key >= 12)
+            sc->brain_key = 0;
+    }
+    if (pats.song.len > NSONG)
+        pats.song.len = NSONG;
+    for (k = 0; k < NSONG; k++) {
+        if (pats.song.slot[k].scene >= NSCENE)
+            pats.song.slot[k].scene = 0;
+        if (pats.song.slot[k].rep < 1)
+            pats.song.slot[k].rep = 1;
+    }
 }
 
-int project_save(void) { return plat_store_save(OBJ_PROJ, &proj, sizeof proj); }
+/* ---- objects -------------------------------------------------------------------------------- */
 
+static uint8_t io_buf[PLAT_STORE_MAX] __attribute__((aligned(4)));
+
+/* what each object last held on the flash (a hash of its payload), so a save writes only the
+ * objects that changed: a save of a tweaked pattern usually erases one or two sectors, not seven */
+static uint32_t stored_hash[OBJ_NOBJ];
+static uint8_t stored_known[OBJ_NOBJ];
+static uint32_t hash_of(const uint8_t *p, uint32_t n)        /* FNV-1a */
+{
+    uint32_t h = 2166136261u;
+    while (n--)
+        h = (h ^ *p++) * 16777619u;
+    return h;
+}
+static uint32_t get32(const uint8_t *p)
+{
+    return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
+static void put32(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)v;
+    p[1] = (uint8_t)(v >> 8);
+    p[2] = (uint8_t)(v >> 16);
+    p[3] = (uint8_t)(v >> 24);
+}
+static uint32_t crc32_of(const uint8_t *p, uint32_t n)       /* zlib CRC-32, 4 bits per step */
+{
+    static const uint32_t T[16] = {
+        0x00000000u, 0x1DB71064u, 0x3B6E20C8u, 0x26D930ACu, 0x76DC4190u, 0x6B6B51F4u, 0x4DB26158u, 0x5005713Cu,
+        0xEDB88320u, 0xF00F9344u, 0xD6D6A3E8u, 0xCB61B38Cu, 0x9B64C2B0u, 0x86D3D2D4u, 0xA00AE278u, 0xBDBDF21Cu};
+    uint32_t c = 0xFFFFFFFFu;
+    while (n--) {
+        c ^= *p++;
+        c = (c >> 4) ^ T[c & 15u];
+        c = (c >> 4) ^ T[c & 15u];
+    }
+    return ~c;
+}
+
+/* the object is the n bytes of io_buf; written only if they changed */
+static int save_buf(uint32_t obj, uint32_t n)
+{
+    uint32_t h = hash_of(io_buf, n);
+    int rc;
+    if (stored_known[obj] && stored_hash[obj] == h)
+        return 0;                                    /* the flash already holds exactly this */
+    rc = plat_store_save(obj, io_buf, n);
+    stored_known[obj] = rc == 0;
+    stored_hash[obj] = h;
+    return rc;
+}
+
+/* ---- the packed stream ---------------------------------------------------------------------- */
+
+static uint8_t stream_obj[NSTREAM];                   /* the slot's stream objects, OBJ_PROJ(slot, 1..) */
+
+/* the writer: fills io_buf after the object's header and writes it when full (measure: counts only) */
+typedef struct {
+    int measure, k, err;
+    uint32_t fill, total;
+} st_out_t;
+
+static int st_flush(st_out_t *o)
+{
+    int rc = save_buf(stream_obj[o->k], o->fill);
+    o->k++;
+    o->fill = 4u;
+    put32(io_buf, PROJ_STREAM);
+    return rc;
+}
+
+static int st_put(void *ctx, const uint8_t *p, uint32_t n)
+{
+    st_out_t *o = ctx;
+    o->total += n;
+    if (o->measure)
+        return o->total > STREAM_CAP ? -1 : 0;
+    while (n) {
+        if (o->fill == PLAT_STORE_MAX) {
+            if (o->k + 1 >= NSTREAM || st_flush(o)) {
+                o->err = 1;
+                return -1;
+            }
+        }
+        io_buf[o->fill++] = *p++;
+        n--;
+    }
+    return 0;
+}
+
+static int save_stream(void)
+{
+    const uint8_t *raw = (const uint8_t *)&pats;
+    uint32_t crc = crc32_of(raw, RAW_LEN);
+    st_out_t o = {1, 0, 0, 0, 0};
+    lz_sink_t sink = {st_put, &o};
+    if (lz_compress(raw, RAW_LEN, &sink))
+        return -7;                                    /* would not fit: nothing written (MEMORY FULL) */
+    packed_len = o.total;
+    o.measure = 0;
+    o.total = 0;
+    o.fill = STREAM_HDR;
+    put32(io_buf, PROJ_STREAM);
+    put32(io_buf + 4, RAW_LEN);
+    put32(io_buf + 8, crc);
+    put32(io_buf + 12, packed_len);
+    if (lz_compress(raw, RAW_LEN, &sink) || o.err || st_flush(&o))
+        return -3;
+    while (o.k < NSTREAM)                             /* the objects past the stream: empty */
+        if (st_flush(&o))
+            return -3;
+    return 0;
+}
+
+/* the reader: the objects in turn, from io_buf */
+typedef struct {
+    int k, n;
+    uint32_t pos, left, prev;                         /* prev: bit k, object k from its previous copy */
+} st_in_t;
+
+static int stream_obj_load(int k, uint32_t prev)      /* object k of the stream into io_buf, its copy per prev */
+{
+    return (prev >> k) & 1u ? plat_store_load_prev(stream_obj[k], io_buf, sizeof io_buf)
+                            : plat_store_load(stream_obj[k], io_buf, sizeof io_buf);
+}
+
+static int st_get(void *ctx)
+{
+    st_in_t *s = ctx;
+    if (!s->left)
+        return -1;
+    while (s->pos >= (uint32_t)s->n) {
+        if (++s->k >= NSTREAM)
+            return -1;
+        s->n = stream_obj_load(s->k, s->prev);
+        if (s->n < 4 || get32(io_buf) != PROJ_STREAM)
+            return -1;
+        stored_known[stream_obj[s->k]] = !((s->prev >> s->k) & 1u);   /* a previous copy: written again next save */
+        stored_hash[stream_obj[s->k]] = hash_of(io_buf, (uint32_t)s->n);
+        s->pos = 4u;
+    }
+    s->left--;
+    return io_buf[s->pos++];
+}
+
+/* 0 = loaded; -1 = not there or not good (pats then holds garbage) */
+static int load_stream(int n, uint32_t prev)
+{
+    uint8_t *raw = (uint8_t *)&pats;
+    uint32_t crc = get32(io_buf + 8), plen = get32(io_buf + 12);
+    st_in_t s = {0, n, STREAM_HDR, plen, prev};
+    lz_src_t src = {st_get, &s};
+    if (n < (int)STREAM_HDR || get32(io_buf + 4) != RAW_LEN || plen > STREAM_CAP)
+        return -1;
+    stored_known[stream_obj[0]] = !(prev & 1u);
+    stored_hash[stream_obj[0]] = hash_of(io_buf, (uint32_t)n);
+    if (lz_decompress(&src, raw, RAW_LEN) || crc32_of(raw, RAW_LEN) != crc)
+        return -1;
+    packed_len = plen;
+    return 0;
+}
+
+/* ---- load, save ----------------------------------------------------------------------------- */
+
+static void slot_objects(int slot)
+{
+    int k;
+    for (k = 0; k < NSTREAM; k++)
+        stream_obj[k] = (uint8_t)OBJ_PROJ(slot, k + 1);
+}
+
+/* the defaults, then each object into its place: a load copies only what checks out */
+int project_load(int slot)
+{
+    int bad = 0, n;
+    if (slot < 0 || slot >= NPROJ)
+        slot = 0;
+    proj_slot = (uint8_t)slot;
+    slot_objects(slot);
+    project_defaults();
+    packed_len = 0;
+    n = plat_store_load(OBJ_PROJ(slot, 0), io_buf, sizeof io_buf);
+    if (n == (int)sizeof proj && settings_valid((settings_t *)(void *)io_buf)) {
+        uint32_t i;
+        for (i = 0; i < sizeof proj; i++)
+            ((uint8_t *)&proj)[i] = io_buf[i];
+        stored_known[OBJ_PROJ(slot, 0)] = 1;
+        stored_hash[OBJ_PROJ(slot, 0)] = hash_of(io_buf, (uint32_t)n);
+    } else {
+        bad = 1;
+    }
+    n = plat_store_load(stream_obj[0], io_buf, sizeof io_buf);
+    if (n >= 4 && get32(io_buf) == PROJ_STREAM) {
+        if (load_stream(n, 0)) {                      /* torn (a power cut mid-save) or broken: the previous
+                                                       * copies, fewest first (the newest save that checks out) */
+            uint32_t prev;
+            int ok = 0, b;
+            for (b = 1; b <= NSTREAM && !ok; b++)
+                for (prev = 1; prev < (1u << NSTREAM) && !ok; prev++) {
+                    if (__builtin_popcount(prev) != b)
+                        continue;
+                    n = stream_obj_load(0, prev);
+                    ok = n >= 4 && get32(io_buf) == PROJ_STREAM && load_stream(n, prev) == 0;
+                }
+            if (!ok) {                                /* nothing checks out: the defaults, not garbage */
+                patterns_init(&pats);
+                bad = 1;
+            }
+        }
+        patterns_clamp();
+    } else {
+        bad = 1;
+    }
+    return bad ? -1 : 0;
+}
+
+/* 0 = saved and verified; -1 = the settings failed; -7 = the patterns do not fit (nothing written) */
+int project_save(int slot)
+{
+    uint32_t i;
+    int rc;
+    if (slot < 0 || slot >= NPROJ)
+        return -1;
+    if (slot != proj_slot) {                          /* a new slot: nothing known about its flash */
+        for (i = 0; i < PROJ_NOBJ; i++)
+            stored_known[OBJ_PROJ(slot, i)] = 0;
+    }
+    proj_slot = (uint8_t)slot;
+    slot_objects(slot);
+    proj.tempo_x10 = (uint16_t)(seq_tempo(&seq) * 10.0f + 0.5f);
+    proj.send_clock = seq.send_clock;
+    proj.send_notes = seq.send_notes;
+    proj.metronome = seq.metronome;
+    proj.scene = seq.scene;
+    for (i = 0; i < sizeof proj; i++)
+        io_buf[i] = ((const uint8_t *)&proj)[i];
+    if ((rc = save_buf(OBJ_PROJ(slot, 0), sizeof proj)) != 0)
+        return rc < 0 ? -1 : rc;
+    return save_stream();
+}
+
+int project_exists(int slot)
+{
+    int n;
+    if (slot < 0 || slot >= NPROJ)
+        return 0;
+    n = plat_store_load(OBJ_PROJ(slot, 0), io_buf, 8);
+    return n >= 8 && get32(io_buf) == PROJ_MAGIC && get32(io_buf + 4) == PROJ_FORMAT;
+}
+
+void project_name_of(int slot, char *name)
+{
+    int n, i;
+    name[0] = 0;
+    if (slot < 0 || slot >= NPROJ)
+        return;
+    n = plat_store_load(OBJ_PROJ(slot, 0), io_buf, 8 + NAME_LEN);
+    if (n < 8 + NAME_LEN || get32(io_buf) != PROJ_MAGIC)
+        return;
+    for (i = 0; i < NAME_LEN - 1; i++)
+        name[i] = (char)io_buf[8 + i];
+    name[NAME_LEN - 1] = 0;
+}
+
+int presets_load(void)
+{
+    int n = plat_store_load(OBJ_PRESETS, io_buf, sizeof io_buf), k;
+    uint32_t i;
+    for (k = 0; k < NUSER_PRESETS; k++)
+        user_presets[k].name[0] = 0;
+    if (n != (int)(sizeof user_presets + 4u) || get32(io_buf) != PRESETS_FORMAT)
+        return -1;
+    for (i = 0; i < sizeof user_presets; i++)
+        ((uint8_t *)user_presets)[i] = io_buf[4u + i];
+    for (k = 0; k < NUSER_PRESETS; k++) {
+        user_presets[k].name[NAME_LEN - 1] = 0;
+        if (user_presets[k].engine >= NENGINE)
+            user_presets[k].name[0] = 0;
+    }
+    stored_known[OBJ_PRESETS] = 1;
+    stored_hash[OBJ_PRESETS] = hash_of(io_buf, (uint32_t)n);
+    return 0;
+}
+
+int presets_save(void)
+{
+    uint32_t i;
+    put32(io_buf, PRESETS_FORMAT);
+    for (i = 0; i < sizeof user_presets; i++)
+        io_buf[4u + i] = ((const uint8_t *)user_presets)[i];
+    return save_buf(OBJ_PRESETS, sizeof user_presets + 4u);
+}
+
+/* every value to the engine (boot, load): the tracks, the FX, the tape, the master, the transport */
 void project_apply(void)
 {
-    int i;
-    for (i = 0; i < P_NPARAMS; i++)
-        om_set(i, proj.par[i]);
+    int t, k;
+    for (t = 0; t < NALLTRK; t++)
+        engine_set_all(t);
+    for (k = 0; k < 2; k++) {
+        const uint8_t *p = proj.trk[AUX_FX1 + k].par;
+        engine_fx(k, p[TP_ENGINE], p + TP_E1, p[TP_FENV], p[TP_CUT]);
+    }
+    {
+        const uint8_t *p = proj.trk[AUX_TAPE].par;
+        engine_tape_set(p[TP_E1], p[TP_E2], p[TP_E3], p[TP_E4]);
+    }
+    for (k = 0; k < NMS; k++)
+        engine_master(k, proj.master[k]);
+    seq.bpm = (float)proj.tempo_x10 * 0.1f;
+    seq.send_clock = proj.send_clock;
+    seq.send_notes = proj.send_notes;
+    seq.metronome = proj.metronome;
+    seq_set_scene(&seq, proj.scene < NSCENE ? proj.scene : 0);
+    engine_metronome(proj.metronome);
 }
