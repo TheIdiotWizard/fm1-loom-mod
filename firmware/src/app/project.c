@@ -32,7 +32,7 @@ uint8_t proj_slot;
 #define STREAM_HDR 16u                  /* in the first object: format, raw length, raw CRC, packed length */
 #define STREAM_CAP ((uint32_t)NSTREAM * (PLAT_STORE_MAX - 4u) - (STREAM_HDR - 4u))
 #define RAW_LEN sizeof(patterns_t)
-typedef char raw_fits[(RAW_LEN < 0xFFFFu) ? 1 : -1];
+typedef char raw_fits[(RAW_LEN < 0x100000u) ? 1 : -1];   /* (lz.c packs up to 16 MB; the header's length is a u32) */
 typedef char settings_fit[(sizeof(settings_t) <= PLAT_STORE_MAX) ? 1 : -1];
 typedef char presets_fit[(sizeof user_presets + 4u <= PLAT_STORE_MAX) ? 1 : -1];
 #define PRESETS_FORMAT 1u
@@ -103,26 +103,24 @@ static void aux_defaults(void)
     set_name(&proj.trk[AUX_BRAIN], "brain");
     set_name(&proj.trk[AUX_PUNCH], "punch");
     set_name(&proj.trk[AUX_TAPE], "tape");
-    set_name(&proj.trk[AUX_FX1], "reverb");
-    set_name(&proj.trk[AUX_FX2], "delay");
-    proj.trk[AUX_TAPE].par[TP_E1] = 64;                  /* pitch: as recorded */
-    proj.trk[AUX_TAPE].par[TP_E2] = 64;                  /* speed: as recorded */
-    proj.trk[AUX_TAPE].par[TP_E3] = 64;                  /* length */
+    set_name(&proj.trk[AUX_FX1], "delay");
+    set_name(&proj.trk[AUX_FX2], "reverb");
+    proj.trk[AUX_TAPE].par[TP_E1] = 64;                  /* pitch: x1 (octaves, the middle) */
+    proj.trk[AUX_TAPE].par[TP_E2] = 64;                  /* speed: 100 % */
+    proj.trk[AUX_TAPE].par[TP_E3] = 127;                 /* length: 16 steps */
     proj.trk[AUX_TAPE].par[TP_E4] = 127;                 /* mix: the loop replaces the dry */
-    proj.trk[AUX_FX1].par[TP_ENGINE] = FXT_REVERB;       /* FX I: a room (size, modulation, rate, feedback) */
-    proj.trk[AUX_FX1].par[TP_E1] = 70;
-    proj.trk[AUX_FX1].par[TP_E2] = 30;
-    proj.trk[AUX_FX1].par[TP_E3] = 40;
-    proj.trk[AUX_FX1].par[TP_E4] = 64;
-    proj.trk[AUX_FX1].par[TP_CUT] = 127;
+    /* the notebook's default project: FX I a delay, FX II a reverb, each with its printed defaults
+     * (fx.h FXT_DEFAULT); the FX I track's second send feeds its return into FX II */
+    proj.trk[AUX_FX1].par[TP_ENGINE] = FXT_DELAY;
+    proj.trk[AUX_FX2].par[TP_ENGINE] = FXT_REVERB;
+    for (k = 0; k < 4; k++) {
+        proj.trk[AUX_FX1].par[TP_E1 + k] = FXT_DEFAULT[FXT_DELAY][k];
+        proj.trk[AUX_FX2].par[TP_E1 + k] = FXT_DEFAULT[FXT_REVERB][k];
+    }
+    proj.trk[AUX_FX1].par[TP_CUT] = 127;                 /* low-pass open */
     proj.trk[AUX_FX1].par[TP_FENV] = 20;                 /* a little high-pass: no mud */
-    proj.trk[AUX_FX2].par[TP_ENGINE] = FXT_DELAY;        /* FX II: a dotted-ish echo (size, amount, fine, dry) */
-    proj.trk[AUX_FX2].par[TP_E1] = 40;
-    proj.trk[AUX_FX2].par[TP_E2] = 55;
-    proj.trk[AUX_FX2].par[TP_E3] = 64;
-    proj.trk[AUX_FX2].par[TP_E4] = 0;
-    proj.trk[AUX_FX2].par[TP_CUT] = 110;
-    proj.trk[AUX_FX2].par[TP_FENV] = 30;
+    proj.trk[AUX_FX2].par[TP_CUT] = 127;
+    proj.trk[AUX_FX2].par[TP_FENV] = 20;
 }
 
 void project_defaults(void)
@@ -140,8 +138,8 @@ void project_defaults(void)
     proj.name[2] = 'W';
     proj.name[3] = 0;
     proj.tempo_x10 = 1200;
-    proj.swing = 50;
-    proj.groove = 0;
+    proj.swing = 0;                                       /* unused (a reserved byte) */
+    proj.groove = GR_SHUFFLE;                             /* the project's groove type; each track's amount is 0 */
     proj.metronome = 1;                                   /* while recording */
     proj.lights = 1;
     proj.send_clock = 1;
@@ -159,6 +157,10 @@ void project_defaults(void)
                 for (j = 0; j < DP_N; j++)
                     tr->par[TP_DRUM(k, j)] = DL_DEFAULT_KIT[k][j];
             }
+            tr->par[TP_A] = 0;                            /* the track-wide drum envelope, neutral (drumline.c): */
+            tr->par[TP_D] = 0;                            /* funk 0, attack 0, random 0, length 64 */
+            tr->par[TP_S] = 0;
+            tr->par[TP_R] = 64;
             set_name(tr, "drumline");
         } else if (t == 1) {
             apply_preset(tr, preset_named(EG_PRISM, "bass"));   /* a prism bass under everything */
@@ -169,6 +171,7 @@ void project_defaults(void)
             set_name(tr, EG_NAME[ORDER[t]]);
         tr->par[TP_ENGINE] = ORDER[t];                    /* (a preset carries its engine; the kit keeps its own) */
         tr->par[TP_CHAN] = 0;
+        tr->par[TP_SENDT] = 127;                          /* every instrument track feeds the tape (the notebook p. 131) */
     }
     aux_defaults();
     /* the master: blends off (neutral), the groups at unity, a touch of compression */
@@ -195,6 +198,8 @@ static int settings_valid(settings_t *s)
         return 0;
     if (s->tempo_x10 < 400u || s->tempo_x10 > 3000u || s->scene >= NSCENE || s->trk_sel >= NALLTRK)
         return 0;
+    if (s->groove >= NGROOVE)
+        s->groove = GR_SHUFFLE;
     s->name[NAME_LEN - 1] = 0;
     for (t = 0; t < NALLTRK; t++) {
         uint8_t *p = s->trk[t].par;
@@ -228,16 +233,18 @@ static void patterns_clamp(void)
                 tp->len = 16;
             if (tp->scale >= NTS)
                 tp->scale = TS_1;
-            if (tp->groove >= NGROOVE)
-                tp->groove = GR_SWING;
-            if (tp->nlen < 1 || tp->nlen > 16)
-                tp->nlen = 4;
+            if (tp->groove < -99 || tp->groove > 99)      /* the track's groove amount */
+                tp->groove = 0;
+            if (tp->nlen > 100)                           /* the note length, % of a step */
+                tp->nlen = 50;
+            if (tp->quant > 100)
+                tp->quant = 100;
             for (k = 0; k < NSTEP; k++) {
                 step_t *s = &tp->st[k];
                 if (s->comp >= NSC)
                     s->comp = SC_NONE;
-                if (s->cval > SC_RANDOM_VAL)
-                    s->cval = 0;
+                if (s->comp2 >= NSC)
+                    s->comp2 = SC_NONE;
                 if (s->cond >= COND_AB + COND_NAB)
                     s->cond = 0;
             }
@@ -577,10 +584,12 @@ void project_apply(void)
     }
     for (k = 0; k < NMS; k++)
         engine_master(k, proj.master[k]);
-    seq.bpm = (float)proj.tempo_x10 * 0.1f;
+    seq.bpm = (float)proj.tempo_x10 * 0.1f;               /* at once (a save right after reads it back) */
+    engine_tempo(proj.tempo_x10);
+    engine_groove(proj.groove);
     seq.send_clock = proj.send_clock;
     seq.send_notes = proj.send_notes;
     seq.metronome = proj.metronome;
-    seq_set_scene(&seq, proj.scene < NSCENE ? proj.scene : 0);
+    engine_scene(proj.scene < NSCENE ? proj.scene : 0, 0);
     engine_metronome(proj.metronome);
 }

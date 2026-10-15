@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* XY-1 voices: sixteen voices playing eight engines (synth.h), each with two ADSRs, a state-variable
- * filter, a steal fade and sends; per track an LFO, a mono stack, parameter locks and performance
- * offsets.
+/* XY-1 voices: sixteen voices playing eight engines (synth.h), each with two ADSRs, a filter (the
+ * OP-XY's five types), a steal fade and sends; per track an LFO, a mono stack, parameter locks and
+ * performance offsets.
  *
  * Time runs in SY_CHUNK (64-sample) chunks: at a chunk boundary a voice reads its track's parameters
  * (the knob, or its lock, plus the LFO's offset on the destination) and turns them into the units the
@@ -10,7 +10,8 @@
  * at those boundaries, and every voice carries its own position in the chunk, so a block rendered as
  * 100 + 156 frames equals one of 256, and voices 0..8 on one core and 8..16 on the other never share a
  * word that either writes: the track-level values they read (LFO, duck, tremolo) are computed into
- * per-chunk slots by synth_prepare() before the block is split.
+ * per-chunk slots by synth_prepare() before the block is split. The LFO's fade envelope is the
+ * voice's own (it counts from its note), so it scales the track's slot values per voice.
  *
  * Levels: an engine's raw cycle peaks near 1; the amp envelope, velocity (0.25 + 0.75 vel^2), the
  * preset volume ((v/127)^2) and the mix level (v/127) bring a default note to about -9 dBFS, so a
@@ -18,12 +19,23 @@
  * no malloc, no stack buffer over 128 bytes in the render path (the audio interrupt's stack). */
 #include "synth.h"
 #include "fastmath.h"
+#include "drumline.h"
 #include "wavetables.h"
 
 #define SUB 16                                /* filter coefficient refresh, steal fade steps */
 #define NCK 8                                 /* chunk slots a prepare may cover (n <= 512) */
 #define STEAL_RATE (1.0f / (0.015f * SY_SR))  /* the 15 ms steal fade, per sample */
 #define INV_SR (1.0f / SY_SR)
+#define CHUNK_S ((float)SY_CHUNK / SY_SR)     /* a chunk in seconds */
+#define LD_PITCH (-2)                         /* the LFO destination "pitch" (no TP_* holds it) */
+#define LD_NONE (-1)
+/* the sample loops must be inlined into their callers (the compiler folds their constant arguments
+ * away); left to itself it outlines the bigger ones, at a call with thirty spills a sub-block */
+#if defined(__GNUC__) || defined(__clang__)
+#define SY_INLINE static inline __attribute__((always_inline))
+#else
+#define SY_INLINE static inline
+#endif
 
 /* ------------------------------------------------------------------ names --- */
 const char *const EG_NAME[NENGINE] = {"simple", "prism", "wavetable", "axis", "epiano", "organ", "hardsync",
@@ -31,28 +43,42 @@ const char *const EG_NAME[NENGINE] = {"simple", "prism", "wavetable", "axis", "e
 const char *const EG_KNOB[NENGINE][4] = {
     {"shape", "pw", "noise", "stereo"},   {"shape", "ratio", "detune", "stereo"}, {"table", "position", "warp", "drift"},
     {"tone", "ratio", "shape", "tremolo"}, {"tone", "texture", "punch", "tine"},  {"type", "bass", "tremolo", "speed"},
-    {"freq", "sub", "noise", "lowcut"},   {"swarm", "am", "fm", "detune"},        {"type", "tune", "tone", "decay"}};
-static const uint8_t EG_DEF[NENGINE][4] = {{0, 0, 0, 40}, {0, 64, 10, 40}, {0, 0, 0, 0}, {40, 0, 20, 0},
-                                           {60, 20, 40, 30}, {40, 50, 30, 40}, {30, 40, 0, 0}, {30, 20, 30, 20},
-                                           {0, 64, 64, 64}};
+    {"freq", "sub", "noise", "lowcut"},   {"swarm", "am", "fm", "detune"},        {"-", "-", "-", "-"}};
+/* the OP-XY's printed defaults (00..99) times 1.28; the organ's four and prism's ratio are discrete 1..8 */
+static const uint8_t EG_DEF[NENGINE][4] = {{37, 42, 26, 127}, {19, 2, 6, 28}, {0, 59, 127, 0}, {51, 104, 32, 26},
+                                           {0, 0, 52, 68},    {1, 3, 1, 4},   {17, 10, 127, 23}, {0, 12, 41, 0},
+                                           {0, 0, 0, 0}};
 static const char *const VMODE_N[3] = {"poly", "mono", "legato"};
-static const char *const FTYPE_N[NFT] = {"lp 12", "lp 24", "hp", "bp"};
+static const char *const FTYPE_N[NFT] = {"svf", "ladder", "z lowpass", "z hipass", "dynamic"};
 static const char *const LTYPE_N[NLT] = {"off", "value", "tremolo", "random", "duck"};
-static const char *const LSHAPE_N[5] = {"sine", "tri", "saw", "square", "s&h"};
-static const char *const DUCK_N[9] = {"track 1", "track 2", "track 3", "track 4", "track 5", "track 6", "track 7",
-                                      "track 8", "metro"};
+static const char *const VSHAPE_N[4] = {"square", "sine", "ramp", "saw"};
+static const char *const TSHAPE_N[5] = {"sine", "saw", "expo", "square", "blip"};
+static const char *const LDEST_N[NLD] = {"synth", "envelope", "filter", "amp", "synth free", "env free", "filter free",
+                                         "amp free"};
+static const char *const DUCK_N[12] = {"track 1", "track 2", "track 3", "track 4", "track 5", "track 6", "track 7",
+                                       "track 8", "brain", "punch", "tape", "metro"};
 static const char *const PLAYER_N[NPL] = {"off", "arp", "maestro", "hold"};
-static const char *const ARPSPD_N[6] = {"1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32"};
-static const char *const ARPPAT_N[5] = {"up", "down", "updown", "random", "played"};
+static const char *const ARPSPD_N[9] = {"1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/32T", "1/64"};
+static const char *const ARPPAT_N[6] = {"up", "down", "updown 1", "updown 2", "played", "random"};
+static const char *const ARPLEN_N[3] = {"short", "medium", "long"};
+static const char *const ARPSTY_N[6] = {"off", "A", "B", "C", "D", "E"};
+static const char *const ARPGLD_N[3] = {"off", "low", "high"};
+static const char *const ARPSTE_N[3] = {"mono", "narrow", "wide"};
 static const char *const MPAT_N[4] = {"up", "down", "updown", "random"};
 static const char *const BRAIN_N[3] = {"no", "diatonic", "transp"};
-static const char *const WTNAME_N[8] = {"sine", "pulse", "vocal", "harmon", "digital", "fold", "organ", "metal"};
-static const char *const SYNC_N[LS_SPEED_SYNC_N] = {"8 bar", "4 bar", "2 bar", "1 bar", "1/2", "1/2T", "1/4", "1/4T",
-                                                    "1/8", "1/8T", "1/16", "1/16T", "1/32"};
-static const float SYNC_BEATS[LS_SPEED_SYNC_N] = {32.0f, 16.0f, 8.0f, 4.0f, 2.0f, 4.0f / 3.0f, 1.0f, 2.0f / 3.0f,
-                                                  0.5f, 1.0f / 3.0f, 0.25f, 1.0f / 6.0f, 0.125f};
-extern const char *const DM_NAME[];           /* dsp/drumline.c: the drum models */
-#define NDM_NAMES 11
+static const char *const BEND_N[9] = {"off", "1", "2", "3", "4", "5", "6", "7", "octave"};
+static const char *const WTNAME_N[WT_NTABLE] = {"basic", "buzz", "crush", "drawbars", "fibonacci", "fractal", "geometric",
+                                                "primes", "zap"};
+static const char *const SYNC_N[LS_SYNC_N] = {"2/1", "1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/64"};
+static const float SYNC_BEATS[LS_SYNC_N] = {8.0f, 4.0f, 2.0f, 1.0f, 0.5f, 0.25f, 0.125f, 0.0625f};
+static const char *const ENVP_N[4] = {"attack", "decay", "sustain", "release"};
+static const char *const FLTP_N[4] = {"cutoff", "reso", "env", "keytrack"};
+static const char *const AMPP_N[4] = {"volume", "pitch", "pan", "-"};
+/* the LFO's module / knob to a parameter index */
+static const int16_t LD_TP[4][4] = {{TP_E1, TP_E2, TP_E3, TP_E4},
+                                    {TP_A, TP_D, TP_S, TP_R},
+                                    {TP_CUT, TP_RES, TP_FENV, TP_KTRK},
+                                    {TP_VOLUME, LD_PITCH, TP_PAN, LD_NONE}};
 
 /* --------------------------------------------------------------- structs --- */
 enum { ENV_OFF, ENV_ATTACK, ENV_DECAY, ENV_SUSTAIN, ENV_RELEASE };
@@ -62,13 +88,15 @@ typedef struct { uint8_t stage; float level; } env_t;
 typedef struct {
     float freq;                       /* Hz, after glide, bend, vibrato */
     float amp_ar, amp_dc, amp_sl, amp_rc, flt_ar, flt_dc, flt_sl, flt_rc;
-    float cut_oct;                    /* log2(cutoff / 20 Hz) without the envelope */
+    float cut_oct;                    /* log2(cutoff / 50 Hz) without the envelope */
     float fenv_oct;                   /* the filter envelope's reach, octaves */
     float kq;                         /* 1 / Q */
+    float kres;                       /* the ladder's feedback 0..4 */
     float gl, gr;                     /* dry gains (pan, level, volume, velocity, tremolo, duck) */
     float g1, g2, gt;                 /* sends, relative to the dry level */
-    float pitch_off;                  /* cents added to the note (bend, perf, vibrato) */
+    float pitch_off;                  /* cents added to the note (bend, perf, vibrato, an LFO on pitch) */
     float e[4];                       /* the engine knobs 0..1 */
+    float ek[4];                      /* the same, raw (the discrete knobs: 1..8, a table index) */
     float ex[20];                     /* the engine's derived values (eng_prep) */
     uint8_t ftype, stereo, mute, eng;
 } cfg_t;
@@ -87,9 +115,10 @@ typedef struct {
     float amp_cur, amp_step;          /* the amp level, ramped inside the sub-block */
     float steal_gain, sg_step;
     float glc, grc, gl_step, gr_step; /* the dry gains, ramped */
-    float a1, a2, a3, b1, b2, b3;     /* the filter's coefficients (TPT SVF, and the LP24 stage) */
-    float f[8];                       /* filter: ic1 ic2 jc1 jc2 of L, then R */
+    float a1, a2, a3, b1, b2, b3;     /* the filter's coefficients (TPT SVF, the svf's second stage; the ladder's g and k) */
+    float f[8];                       /* filter: ic1 ic2 jc1 jc2 of L, then R (the ladder: its four poles a side) */
     float peak;
+    float tsec;                       /* seconds since the note (the LFO's fade envelope counts on it) */
     uint32_t rng;
     cfg_t c;
     float env_in[8];                  /* the envelope knobs the coefficients were made from */
@@ -106,7 +135,11 @@ typedef struct {
     uint32_t mono_tag[8];
     int8_t mono_voice;
     float last_pitch;                 /* the previous note: poly glide starts here */
-    float lfo_ph, lfo_sh, lfo_sm, duck, trem_ph;
+    float lfo_ph, lfo_sh, lfo_sm;     /* the LFO's phase, the random's target and its slewed value */
+    float duck, duck_hold;            /* the duck's level 0..1 and the hold time left, seconds */
+    float lf_in, lf_out;              /* the fade envelope: seconds to fade in (or out), 0 = none */
+    float lscale;                     /* the destination's range / 127: the offset in the knob's units */
+    int16_t ldest;                    /* the resolved destination: a TP_* index, LD_PITCH or LD_NONE */
     uint32_t rng;
     float loff[NCK], lpitch[NCK], lgain[NCK];   /* the chunk slots: offset (param units), cents, gain */
 } trk_t;
@@ -156,6 +189,11 @@ static inline float step1(float p, float d)      /* a phase accumulator: p + d w
     p += d;
     return p >= 1.0f ? p - 1.0f : p;
 }
+static inline float soft3(float x)               /* a cubic soft clip: linear near 0, flat at +-1.5 */
+{
+    x = fm_clampf(x, -1.5f, 1.5f);
+    return x - x * x * x * (4.0f / 27.0f);
+}
 static float env_seconds(float p) { return p < 0.001f ? 0.001f : 0.001f * fm_exp2f(p * 13.2877124f); }  /* 1 ms .. 10 s */
 /* the envelopes step once a sub-block of SUB samples: the attack's increment, the decay's and the
  * release's multiplier (to 0.1 % in secs) for that step */
@@ -163,9 +201,18 @@ static float env_rate(float secs) { return (float)SUB / (secs * SY_SR); }
 static float env_coef(float secs) { return fm_expf(-6.9f * (float)SUB / (secs * SY_SR)); }
 static float lfo_hz(int v, float bpm)
 {
-    if (v < LS_SPEED_SYNC_N)
+    if (v < LS_SYNC_N)
         return bpm * (1.0f / 60.0f) / SYNC_BEATS[v];
-    return 0.1f * fm_exp2f((float)(v - LS_SPEED_SYNC_N) * (8.22881869f / 114.0f));   /* 0.1 .. 30 Hz */
+    return 0.1f * fm_exp2f((float)(v - LS_SYNC_N) * (8.22881869f / 119.0f));   /* 0.1 .. 30 Hz */
+}
+/* the LFO's fade envelope knob (synth.h): seconds to fade in, or to fade out */
+static void fade_secs(int v, float *in, float *out)
+{
+    *in = *out = 0.0f;
+    if (v < 64)
+        *in = (float)(64 - v) * (3.0f / 64.0f);
+    else if (v > 64)
+        *out = fm_maxf((float)(127 - v) * (3.0f / 63.0f), 0.05f);
 }
 
 static inline void env_step(env_t *e, float ar, float dc, float sl, float rc)
@@ -203,7 +250,8 @@ static inline int P(const synth_t *s, int trk, int p)      /* the knob, or its l
     uint8_t l = s->t[trk].lock[p];
     return l != LOCK_NONE ? l : s->par[trk][p];
 }
-/* the effective value: the LFO adds to its destination */
+/* the effective value: the LFO adds to its destination (clamped to the byte; the knob's own range is
+ * applied by the engine that reads it) */
 static inline float pf(const synth_t *s, int trk, int p, int dest, float off)
 {
     float x = (float)P(s, trk, p);
@@ -213,8 +261,9 @@ static inline float pf(const synth_t *s, int trk, int p, int dest, float off)
 }
 
 /* ----------------------------------------------------------- the engines --- */
-/* each: eng_prep() turns c.e[] and c.freq into c.ex[] once a chunk (or after a steal); eng_run()
- * writes m <= SUB raw samples to xl (and xr when c.stereo); the amplitude of a cycle is about 1 */
+/* each: eng_prep() turns c.e[] / c.ek[] and c.freq into c.ex[] once a chunk (or after a steal);
+ * eng_run() writes m <= SUB raw samples to xl (and xr when c.stereo); the amplitude of a cycle is
+ * about 1; eng_chunk() moves the engine's own slow parts every chunk */
 static void eng_init(voice_t *v)
 {
     int i;
@@ -227,13 +276,10 @@ static void eng_init(voice_t *v)
     v->o[14] = 1.0f;
     if (v->engine == EG_ORGAN)
         v->o[13] = 1.0f, v->o[14] = 0.0f;        /* the tremolo gain and its ramp */
-    if (v->engine == EG_AXIS)
-        v->o[4] = 1.0f;
-    if (v->engine == EG_DISSOLVE)
-        v->o[5] = 1.0f;
 }
 
-/* simple: a PolyBLEP saw morphing to a pulse, white noise, a detuned copy spread across the field */
+/* simple: a PolyBLEP saw morphing to a square (shape), pw narrows the pulse (strongest once the shape
+ * is past the middle: the pulse's share), white noise, a detuned copy spread across the field */
 static void simple_prep(voice_t *v)
 {
     cfg_t *c = &v->c;
@@ -247,15 +293,14 @@ static void simple_prep(voice_t *v)
     c->ex[6] = fm_sinf((1.0f - w) * 0.78539816f);
     c->stereo = w > 0.001f;
 }
-static inline float saw_pulse(float p, float dt, float idt, float pw, float mix)
+SY_INLINE float saw_pulse(float p, float dt, float idt, float pw, float mix)
 {
-    float saw, pl;
+    float b0 = blep(p, dt, idt), saw = 2.0f * p - 1.0f - b0, pl;   /* the wrap's residual serves both */
     if (mix <= 0.0f)
-        return 2.0f * p - 1.0f - blep(p, dt, idt);
-    pl = (p < pw ? 1.0f : -1.0f) + blep(p, dt, idt) - blep(wrap1(p + 1.0f - pw), dt, idt);
+        return saw;
+    pl = (p < pw ? 1.0f : -1.0f) + b0 - blep(wrap1(p + 1.0f - pw), dt, idt);
     if (mix >= 1.0f)
         return pl;
-    saw = 2.0f * p - 1.0f - blep(p, dt, idt);
     return saw + (pl - saw) * mix;
 }
 static void simple_run(voice_t *v, float *xl, float *xr, int m)
@@ -288,32 +333,30 @@ static void simple_run(voice_t *v, float *xl, float *xr, int m)
     v->o[1] = p2;
 }
 
-/* prism: two oscillators, the second an interval above (ratio: semitones, quantised) and detuned,
- * one each side of the field as stereo opens; shape morphs triangle .. saw .. pulse */
+/* prism: two oscillators, the second at ratio N:1 (1..8, the knob's own range) and detuned, one each
+ * side of the field as stereo opens; shape = saw (0) through a square at the middle to narrowing pulses */
 static void prism_prep(voice_t *v)
 {
     cfg_t *c = &v->c;
-    float w = c->e[3], semi = fm_floorf(c->e[1] * 24.0f + 0.5f), cents = c->e[2] * 50.0f;
+    float w = c->e[3], ratio = fm_clampf(fm_floorf(c->ek[1] + 0.5f), 1.0f, 8.0f), cents = c->e[2] * 50.0f;
     c->ex[0] = fm_minf(c->freq * INV_SR, 0.45f);
-    c->ex[1] = fm_minf(c->freq * fm_exp2f((semi + cents * 0.01f) * (1.0f / 12.0f)) * INV_SR, 0.45f);
-    c->ex[2] = c->e[0];
+    c->ex[1] = fm_minf(c->freq * ratio * fm_exp2f(cents * (1.0f / 1200.0f)) * INV_SR, 0.45f);
+    if (c->e[0] < 0.5f) {                        /* saw .. square */
+        c->ex[2] = c->e[0] * 2.0f;
+        c->ex[3] = 0.5f;
+    } else {                                     /* square .. a 10 % pulse */
+        c->ex[2] = 1.0f;
+        c->ex[3] = 0.5f - (c->e[0] - 0.5f) * 0.8f;
+    }
     c->ex[5] = fm_cosf((1.0f - w) * 0.78539816f);
     c->ex[6] = fm_sinf((1.0f - w) * 0.78539816f);
     c->stereo = w > 0.001f;
-}
-static inline float tri_saw_pulse(float p, float dt, float idt, float sh)
-{
-    if (sh < 0.5f) {
-        float tri = 4.0f * fm_fabsf(p - 0.5f) - 1.0f, saw = 2.0f * p - 1.0f - blep(p, dt, idt);
-        return tri + (saw - tri) * (sh * 2.0f);
-    }
-    return saw_pulse(p, dt, idt, 0.5f, sh * 2.0f - 1.0f);
 }
 static void prism_run(voice_t *v, float *xl, float *xr, int m)
 {
     const cfg_t *c = &v->c;
     float p1 = v->o[0], p2 = v->o[1], d1 = c->ex[0], d2 = c->ex[1], i1 = 1.0f / d1, i2 = 1.0f / d2;
-    float sh = c->ex[2], ga = c->ex[5], gb = c->ex[6], norm = 1.0f / (ga + gb);
+    float mix = c->ex[2], pw = c->ex[3], ga = c->ex[5], gb = c->ex[6], norm = 1.0f / (ga + gb);
     int i;
     ga *= norm;
     gb *= norm;
@@ -321,8 +364,8 @@ static void prism_run(voice_t *v, float *xl, float *xr, int m)
         float a, b;
         p1 = step1(p1, d1);
         p2 = step1(p2, d2);
-        a = tri_saw_pulse(p1, d1, i1, sh);
-        b = tri_saw_pulse(p2, d2, i2, sh);
+        a = saw_pulse(p1, d1, i1, pw, mix);
+        b = saw_pulse(p2, d2, i2, pw, mix);
         if (c->stereo) {
             xl[i] = a * ga + b * gb;
             xr[i] = a * gb + b * ga;
@@ -334,14 +377,14 @@ static void prism_run(voice_t *v, float *xl, float *xr, int m)
     v->o[1] = p2;
 }
 
-/* wavetable: a frame crossfade through one of eight tables, warp bends the phase (symmetry), drift
+/* wavetable: a frame crossfade through one of nine tables, warp bends the phase (symmetry), drift
  * phase-modulates it by a second oscillator that climbs from a slow wobble to the note's own rate */
 static void wt_prep(voice_t *v)
 {
     cfg_t *c = &v->c;
     float pos = c->e[1] * (float)(WT_NFRAME - 1), fr = fm_floorf(pos), dr = c->e[3];
     c->ex[0] = fm_minf(c->freq * INV_SR, 0.45f);
-    c->ex[1] = fm_minf((float)(int)(c->e[0] * 7.99f), 7.0f);
+    c->ex[1] = fm_clampf(fm_floorf(c->ek[0] + 0.5f), 0.0f, (float)(WT_NTABLE - 1));
     c->ex[2] = fm_minf(fr, (float)(WT_NFRAME - 2));
     c->ex[3] = pos - c->ex[2];
     c->ex[4] = 0.5f + c->e[2] * 0.45f;           /* the warp point: 0.5 = straight */
@@ -378,9 +421,10 @@ static void wt_run(voice_t *v, float *xl, float *xr, int m)
     v->o[1] = mp;
 }
 
-/* axis: two-operator FM for strings: tone = index, ratio from a detuned 1:1 (0..50: slow beating)
- * to ascending ratios (51..100), shape = modulator feedback (toward a saw), tremolo = slow AM */
-static const float AXIS_RATIO[12] = {1.5f, 2.0f, 2.5f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 12.0f, 16.0f};
+/* axis: two-operator FM for strings: tone = index (brightness), ratio from a detuned 1:1 (0..50: slow
+ * beating) to harmonic divisions (51..100), shape = modulator feedback (sine toward saw), tremolo = the
+ * speed of a pitch wobble that fades in over the first second of a note (0 = none) */
+static const float AXIS_RATIO[12] = {0.5f, 0.6666667f, 0.75f, 1.25f, 1.3333334f, 1.5f, 1.75f, 2.0f, 3.0f, 4.0f, 6.0f, 8.0f};
 static void axis_prep(voice_t *v)
 {
     cfg_t *c = &v->c;
@@ -391,12 +435,13 @@ static void axis_prep(voice_t *v)
         int k = (int)((r - 51.0f) * (11.99f / 49.0f));
         ratio = AXIS_RATIO[k < 0 ? 0 : k > 11 ? 11 : k];
     }
-    c->ex[0] = fm_minf(c->freq * INV_SR, 0.45f);
-    c->ex[1] = fm_minf(c->freq * ratio * INV_SR, 0.45f);
+    c->ex[6] = fm_minf(c->freq * INV_SR, 0.45f);                 /* the base increments; axis_chunk wobbles them */
+    c->ex[7] = fm_minf(c->freq * ratio * INV_SR, 0.45f);
+    c->ex[0] = c->ex[6];
+    c->ex[1] = c->ex[7];
     c->ex[2] = c->e[0] * c->e[0] * 5.0f;                        /* index, turns */
     c->ex[3] = c->e[2] * 1.3f;                                  /* feedback */
-    c->ex[4] = 5.5f * INV_SR;                                   /* the tremolo's rate */
-    c->ex[5] = c->e[3] * 0.5f;                                  /* its depth */
+    c->ex[4] = c->e[3] > 0.004f ? (0.3f + c->e[3] * 7.7f) * INV_SR : 0.0f;   /* the wobble's rate, 0.3 .. 8 Hz */
     c->stereo = 0;
 }
 static void axis_run(voice_t *v, float *xl, float *xr, int m)
@@ -404,7 +449,6 @@ static void axis_run(voice_t *v, float *xl, float *xr, int m)
     const cfg_t *c = &v->c;
     float cp = v->o[0], mp = v->o[1], fbv = v->o[2];
     float dc = c->ex[0], dm = c->ex[1], idx = c->ex[2] * 0.25f, fb = c->ex[3] * 0.25f;
-    float am = v->o[4], dam = v->o[5];           /* the tremolo ramps across the chunk (axis_chunk) */
     int i;
     (void)xr;
     for (i = 0; i < m; i++) {
@@ -413,21 +457,23 @@ static void axis_run(voice_t *v, float *xl, float *xr, int m)
         cp = step1(cp, dc);
         mo = fm_sin_turns(mp + fbv * fb);
         fbv = mo;
-        am += dam;
-        xl[i] = fm_sin_turns(cp + mo * idx) * am;
+        xl[i] = fm_sin_turns(cp + mo * idx);
     }
     v->o[0] = cp;
     v->o[1] = mp;
     v->o[2] = fbv;
-    v->o[4] = am;
 }
-static void axis_chunk(voice_t *v)
+static void axis_chunk(voice_t *v)               /* the wobble: +-20 cents at the knob's speed, fading in */
 {
-    const cfg_t *c = &v->c;
-    float am1;
+    cfg_t *c = &v->c;
+    float w;
+    if (c->ex[4] <= 0.0f)
+        return;
     v->o[3] = wrap1(v->o[3] + c->ex[4] * (float)SY_CHUNK);
-    am1 = 1.0f - c->ex[5] * (0.5f - 0.5f * fm_sin_turns(v->o[3]));
-    v->o[5] = (am1 - v->o[4]) * (1.0f / (float)SY_CHUNK);
+    v->o[4] += (1.0f - v->o[4]) * 0.0015f;       /* the fade: most of the way in a second */
+    w = 1.0f + 0.012f * v->o[4] * fm_sin_turns(v->o[3]);
+    c->ex[0] = fm_minf(c->ex[6] * w, 0.45f);
+    c->ex[1] = fm_minf(c->ex[7] * w, 0.45f);
 }
 
 /* epiano: a tine (carrier with a 1:1 modulator whose index decays, as a struck reed's brightness),
@@ -438,7 +484,7 @@ static void ep_prep(voice_t *v)
     cfg_t *c = &v->c;
     c->ex[0] = fm_minf(c->freq * INV_SR, 0.45f);
     c->ex[1] = fm_minf(c->freq * 14.0f * INV_SR, 0.45f);
-    c->ex[2] = (0.15f + c->e[0] * c->e[0] * 2.5f) * (0.4f + 0.6f * v->vel);   /* tone: index */
+    c->ex[2] = (0.3f + c->e[0] * c->e[0] * 2.4f) * (0.4f + 0.6f * v->vel);   /* tone: index */
     c->ex[3] = c->e[1] * 1.2f;                                              /* texture: the 2:1 index */
     c->ex[4] = c->e[2] * 3.0f;                                              /* punch: the burst's index */
     c->ex[5] = c->e[3] * 0.5f;                                              /* tine level */
@@ -450,7 +496,7 @@ static void ep_chunk(voice_t *v)                 /* the brightness envelopes, on
     v->o[14] *= 0.93f;                                 /* the punch burst: ~30 ms */
     v->o[13] = v->o[13] * 0.994f;                      /* the tine partial: ~0.25 s */
 }
-static inline void ep_loop(voice_t *v, float *xl, int m, const int has_tine)
+SY_INLINE void ep_loop(voice_t *v, float *xl, int m, const int has_tine)
 {
     const cfg_t *c = &v->c;
     float cp = v->o[0], mp = v->o[1], tp = v->o[2];
@@ -482,32 +528,36 @@ static void ep_run(voice_t *v, float *xl, float *xr, int m)
 }
 
 /* organ: six drawbars (16' 8' 4' 2 2/3' 2' 1 1/3') as rotating phasors (a complex multiply a sine:
- * no polynomial), type blends five registrations from a thin transistor combo to a full church,
- * bass is the 16' bar, tremolo wobbles level and a little pitch at its own speed */
-static const float ORGAN_SET[5][5] = {{1.0f, 0.15f, 0.0f, 0.6f, 0.0f},    /* transistor: reedy, hollow */
-                                      {1.0f, 0.7f, 0.5f, 0.1f, 0.0f},     /* jazz */
-                                      {1.0f, 0.9f, 0.7f, 0.7f, 0.5f},     /* full */
-                                      {1.0f, 0.5f, 0.35f, 0.5f, 0.6f},    /* pipe */
-                                      {1.0f, 0.8f, 0.9f, 0.9f, 0.9f}};    /* church */
+ * no polynomial). type picks one of eight registrations, transistor to church; bass 1..8 is the 16'
+ * bar; the tremolo's amount and speed are 1..8 (1 = none / slowest) */
+static const float ORGAN_SET[8][5] = {{1.0f, 0.15f, 0.0f, 0.6f, 0.0f},    /* 1 transistor: reedy, hollow */
+                                      {1.0f, 0.6f, 0.0f, 0.4f, 0.2f},     /* 2 combo: bright, thin */
+                                      {1.0f, 0.7f, 0.5f, 0.1f, 0.0f},     /* 3 jazz */
+                                      {1.0f, 0.9f, 0.7f, 0.7f, 0.5f},     /* 4 gospel: all bars out */
+                                      {1.0f, 0.8f, 0.6f, 0.3f, 0.3f},     /* 5 rock */
+                                      {1.0f, 0.5f, 0.35f, 0.5f, 0.6f},    /* 6 theatre */
+                                      {1.0f, 0.4f, 0.1f, 0.2f, 0.05f},    /* 7 pipe: flutes */
+                                      {1.0f, 0.8f, 0.9f, 0.9f, 0.9f}};    /* 8 church: the full chorus */
 static const float ORGAN_RATIO[6] = {0.5f, 1.0f, 2.0f, 3.0f, 4.0f, 6.0f};
+static inline int knob8(float raw) { int k = (int)(raw + 0.5f); return k < 1 ? 1 : k > 8 ? 8 : k; }
 static void organ_prep(voice_t *v)
 {
     cfg_t *c = &v->c;
-    float u = c->e[0] * 3.999f, fr = fm_floorf(u), w = u - fr, tr = (0.3f + c->e[3] * 7.7f) * INV_SR, sum, base;
-    int k = (int)fr, j;
-    sum = c->e[1];
-    c->ex[0] = c->e[1] * 0.8f;
+    int k = knob8(c->ek[0]) - 1, j;
+    float bass = (float)(knob8(c->ek[1]) - 1) * (1.0f / 7.0f), amt = (float)(knob8(c->ek[2]) - 1) * (1.0f / 7.0f);
+    float tr = 0.5f * fm_exp2f((float)(knob8(c->ek[3]) - 1) * (4.0f / 7.0f)) * INV_SR, sum, base;   /* 0.5 .. 8 Hz */
+    sum = bass;
+    c->ex[0] = bass * 0.8f;
     for (j = 1; j < 6; j++) {
-        float a = ORGAN_SET[k][j - 1] + (ORGAN_SET[k + 1][j - 1] - ORGAN_SET[k][j - 1]) * w;
-        c->ex[j] = a;
-        sum += a;
+        c->ex[j] = ORGAN_SET[k][j - 1];
+        sum += c->ex[j];
     }
     sum = 1.0f / (sum + 0.5f);
     for (j = 0; j < 6; j++)
         c->ex[j] *= sum;
     c->ex[18] = tr;
-    c->ex[19] = c->e[2];
-    base = c->freq * INV_SR * (1.0f + c->e[2] * 0.004f * fm_sin_turns(v->o[12]));   /* the tremolo's pitch wobble */
+    c->ex[19] = amt;
+    base = c->freq * INV_SR * (1.0f + amt * 0.004f * fm_sin_turns(v->o[12]));   /* the tremolo's pitch wobble */
     for (j = 0; j < 6; j++) {
         float a = fm_minf(base * ORGAN_RATIO[j], 0.45f) * FM_TWO_PI, re = v->o[j * 2], im = v->o[j * 2 + 1], r2;
         c->ex[6 + j] = fm_cosf(a);
@@ -560,13 +610,13 @@ static void organ_chunk(voice_t *v)              /* the tremolo's phase and the 
     const cfg_t *c = &v->c;
     float g1;
     v->o[12] = wrap1(v->o[12] + c->ex[18] * (float)SY_CHUNK);
-    g1 = 1.0f - c->ex[19] * 0.4f * (0.5f - 0.5f * fm_sin_turns(v->o[12]));
+    g1 = 1.0f - c->ex[19] * 0.5f * (0.5f - 0.5f * fm_sin_turns(v->o[12]));
     v->o[14] = (g1 - v->o[13]) * (1.0f / (float)SY_CHUNK);
 }
 
-/* hardsync: a saw reset by a master at the note's pitch, freq = the slave's ratio (which harmonics
- * ring), sub = a sine an octave down, noise, lowcut = a high-pass before the filter. The slave's
- * output runs one sample late so both samples around a reset get their PolyBLEP share. */
+/* hardsync: a saw reset by a master at the note's pitch, freq = the follower's ratio (which harmonics
+ * ring), sub = a sine an octave down, noise brightens, lowcut = a high-pass before the filter. The
+ * follower's output runs one sample late so both samples around a reset get their PolyBLEP share. */
 static void hs_prep(voice_t *v)
 {
     cfg_t *c = &v->c;
@@ -574,7 +624,7 @@ static void hs_prep(voice_t *v)
     c->ex[0] = fm_minf(c->freq * INV_SR, 0.45f);
     c->ex[1] = fm_minf(c->freq * (1.0f + c->e[0] * 7.0f) * INV_SR, 0.45f);
     c->ex[2] = c->e[1] * 0.6f;
-    c->ex[3] = c->e[2] * 0.4f;
+    c->ex[3] = c->e[2] * c->e[2] * 0.25f;
     g = fm_tanf(FM_PI * fm_minf(hz, 18000.0f) * INV_SR);
     c->ex[4] = g;
     c->ex[5] = 1.0f / (1.0f + g * (g + 1.41421356f));
@@ -592,8 +642,8 @@ static void hs_run(voice_t *v, float *xl, float *xr, int m)
     for (i = 0; i < m; i++) {
         float y, x, t, h, cont;
         mp += dm;
-        cont = sp + ds;                          /* the slave as it would run on */
-        if (mp >= 1.0f) {                        /* the master wraps: reset the slave t samples ago */
+        cont = sp + ds;                          /* the follower as it would run on */
+        if (mp >= 1.0f) {                        /* the master wraps: reset the follower t samples ago */
             mp -= 1.0f;
             t = mp * idm;
             sp = t * ds;
@@ -601,7 +651,7 @@ static void hs_run(voice_t *v, float *xl, float *xr, int m)
             h = y - (2.0f * cont - 1.0f);        /* the step, to the fresh ramp from the old one */
             prev += h * 0.5f * t * t;
             y -= h * 0.5f * (1.0f - t) * (1.0f - t);
-        } else if (cont >= 1.0f) {               /* the slave's own wrap */
+        } else if (cont >= 1.0f) {               /* the follower's own wrap */
             sp = cont - 1.0f;
             t = sp * ids;
             y = 2.0f * sp - 1.0f;
@@ -635,8 +685,8 @@ static void hs_run(voice_t *v, float *xl, float *xr, int m)
     v->o[5] = fm_flush(h2);
 }
 
-/* dissolve: two sines a detune apart, their pitch pushed around by low-passed noise (swarm), their
- * level by another (am), and a 1:1 modulator for tonality (fm) */
+/* dissolve: two sines a detune apart, their pitch pushed around by low-passed noise (swarm), a 1:1
+ * modulator for tone (fm) that also rings their level (am: half-wave features, grit) */
 static void dis_prep(voice_t *v)
 {
     cfg_t *c = &v->c;
@@ -653,36 +703,26 @@ static void dis_prep(voice_t *v)
 static void dis_run(voice_t *v, float *xl, float *xr, int m)
 {
     const cfg_t *c = &v->c;
-    float p1 = v->o[0], p2 = v->o[1], mp = v->o[2], n1 = v->o[3], g = v->o[5], dg = v->o[6];
+    float p1 = v->o[0], p2 = v->o[1], mp = v->o[2], n1 = v->o[3];
     float d1 = c->ex[0], d2 = c->ex[1], k = c->ex[2], sw = c->ex[3], idx = c->ex[5] * 0.25f, dm = c->ex[6];
+    float am = c->ex[4] * 0.5f, g0 = 1.0f - am;
     int i;
     (void)xr;
     for (i = 0; i < m; i++) {
-        float w, mo;
+        float w, ms, mo;
         n1 += (frand(&v->rng) - n1) * k;
         w = 1.0f + n1 * sw;                      /* -1..1 noise: up to +-80 % of the pitch */
         mp = step1(mp, dm);
-        mo = fm_sin_turns(mp) * idx;
+        ms = fm_sin_turns(mp);
+        mo = ms * idx;
         p1 = step1(p1, d1 * w);
         p2 = step1(p2, d2 * w);
-        g += dg;
-        xl[i] = (fm_sin_turns(p1 + mo) + fm_sin_turns(p2 + mo)) * 0.5f * g;
+        xl[i] = (fm_sin_turns(p1 + mo) + fm_sin_turns(p2 + mo)) * 0.5f * (g0 + am * ms);
     }
     v->o[0] = p1;
     v->o[1] = p2;
     v->o[2] = mp;
     v->o[3] = n1;
-    v->o[5] = g;
-}
-static void dis_chunk(voice_t *v)                /* the AM: slow noise sets the chunk's gain ramp */
-{
-    const cfg_t *c = &v->c;
-    float g1;
-    v->o[4] += (frand(&v->rng) - v->o[4]) * 0.3f;
-    g1 = 1.0f - c->ex[4] * (0.5f - 0.5f * v->o[4]);
-    if (g1 < 0.0f)
-        g1 = 0.0f;
-    v->o[6] = (g1 - v->o[5]) * (1.0f / (float)SY_CHUNK);
 }
 
 static void eng_chunk(voice_t *v)                /* every chunk: the engines' own slow movements */
@@ -691,7 +731,6 @@ static void eng_chunk(voice_t *v)                /* every chunk: the engines' ow
     case EG_AXIS: axis_chunk(v); break;
     case EG_EPIANO: ep_chunk(v); break;
     case EG_ORGAN: organ_chunk(v); break;
-    case EG_DISSOLVE: dis_chunk(v); break;
     default: break;
     }
 }
@@ -725,11 +764,12 @@ static void eng_run(voice_t *v, float *xl, float *xr, int m)
 /* ------------------------------------------------------------ the voice --- */
 static inline int v_sounding(const voice_t *v) { return v->amp.stage != ENV_OFF || v->steal_phase != 0; }
 
+static float porta_ms(int glide_ms, int porta) { return glide_ms > 0 ? (float)glide_ms : (float)(porta * porta) * 0.125f; }   /* 0 .. 2 s */
+
 static void voice_start(synth_t *s, voice_t *v, int note, int vel, int glide_ms, uint32_t tag, int held, int in_render)
 {
     trk_t *t = &s->t[v->trk];
-    int porta = P(s, v->trk, TP_PORTA);
-    float ms = glide_ms > 0 ? (float)glide_ms : (float)(porta * porta) * 0.125f;   /* 0 .. 2 s */
+    float ms = porta_ms(glide_ms, P(s, v->trk, TP_PORTA));
     int eng = P(s, v->trk, TP_ENGINE);
     if (eng >= EG_DRUMLINE)
         eng = EG_SIMPLE;
@@ -748,6 +788,7 @@ static void voice_start(synth_t *s, voice_t *v, int note, int vel, int glide_ms,
         v->age = s->counter++;
     v->amp.stage = ENV_ATTACK;
     v->flt.stage = ENV_ATTACK;
+    v->tsec = 0.0f;
     if (v->engine == EG_EPIANO) {
         v->o[15] = 1.0f;
         v->o[14] = 1.0f;
@@ -843,6 +884,20 @@ static void voice_take(synth_t *s, int vi, int trk, int note, int vel, int glide
 }
 
 /* ---------------------------------------------------------------- notes --- */
+/* a regular (not free) value or random LFO restarts on every note of its track */
+static void lfo_retrigger(synth_t *s, int trk)
+{
+    trk_t *t = &s->t[trk];
+    int type = P(s, trk, TP_LTYPE);
+    if ((type != LT_VALUE && type != LT_RANDOM) || P(s, trk, TP_LDEST) >= LD_FREE)
+        return;
+    t->lfo_ph = 0.0f;
+    if (type == LT_RANDOM) {
+        t->lfo_sh = frand(&t->rng);
+        t->lfo_sm = t->lfo_sh;
+    }
+}
+
 void synth_note_on(synth_t *s, int trk, int note, int vel, int glide_ms, uint32_t tag)
 {
     trk_t *t;
@@ -857,6 +912,7 @@ void synth_note_on(synth_t *s, int trk, int note, int vel, int glide_ms, uint32_
         vel = 127;
     t = &s->t[trk];
     mode = P(s, trk, TP_VMODE);
+    lfo_retrigger(s, trk);
     if (mode == VM_POLY) {
         voice_take(s, find_voice(s, trk), trk, note, vel, glide_ms, tag);
         return;
@@ -875,20 +931,18 @@ void synth_note_on(synth_t *s, int trk, int note, int vel, int glide_ms, uint32_
         }
         if (v && v->trk == trk && v_sounding(v) && v->steal_phase == 0) {
             int was_held = v->held;
+            float ms = porta_ms(glide_ms, P(s, trk, TP_PORTA));
             v->note = (uint8_t)note;
             v->tag = tag;
             v->vel = (float)vel * (1.0f / 127.0f);
             v->held = 1;
             v->pitch = (float)note;
-            {
-                int porta = P(s, trk, TP_PORTA);
-                float ms = glide_ms > 0 ? (float)glide_ms : (float)(porta * porta) * 0.125f;
-                v->glide_k = ms > 0.5f ? 1.0f - fm_expf(-(float)SY_CHUNK * 1000.0f / (ms * SY_SR)) : 1.0f;
-            }
+            v->glide_k = ms > 0.5f ? 1.0f - fm_expf(-(float)SY_CHUNK * 1000.0f / (ms * SY_SR)) : 1.0f;
             t->last_pitch = v->pitch;
             if (mode == VM_MONO || !was_held || v->amp.stage == ENV_RELEASE) {   /* legato: only from silence */
                 v->amp.stage = ENV_ATTACK;       /* retrigger from the level now */
                 v->flt.stage = ENV_ATTACK;
+                v->tsec = 0.0f;
                 if (v->engine == EG_EPIANO)
                     v->o[15] = v->o[14] = v->o[13] = 1.0f;
             }
@@ -993,12 +1047,14 @@ void synth_limit(synth_t *s, int max_voices)
 {
     s->max_voices = (uint8_t)(max_voices < 1 ? 1 : max_voices > NVOICE ? NVOICE : max_voices);
 }
-void synth_duck_trigger(synth_t *s, int src_trk)
+void synth_duck_trigger(synth_t *s, int src)
 {
     int i;
     for (i = 0; i < NTRK; i++)
-        if (P(s, i, TP_LTYPE) == LT_DUCK && P(s, i, TP_LX) == src_trk)
+        if (P(s, i, TP_LTYPE) == LT_DUCK && P(s, i, TP_LSPEED) == src) {
             s->t[i].duck = 1.0f;
+            s->t[i].duck_hold = env_seconds((float)P(s, i, TP_LDEST) * (1.0f / 127.0f));
+        }
 }
 
 void synth_init(synth_t *s, uint8_t (*par)[NTP])
@@ -1016,6 +1072,7 @@ void synth_init(synth_t *s, uint8_t (*par)[NTP])
             t->lock[j] = LOCK_NONE;
         t->mono_voice = -1;
         t->rng = 0x9E3779B9u * (uint32_t)(i + 1);
+        t->ldest = LD_NONE;
         for (j = 0; j < NCK; j++)
             t->lgain[j] = 1.0f;
     }
@@ -1034,6 +1091,26 @@ void synth_init(synth_t *s, uint8_t (*par)[NTP])
 }
 
 /* -------------------------------------------------------------- prepare --- */
+static inline float lfo_wave_value(int shape, float ph)   /* square, sine, ramp, saw */
+{
+    switch (shape & 3) {
+    case 0: return ph < 0.5f ? 1.0f : -1.0f;
+    case 1: return fm_sin_turns(ph);
+    case 2: return 2.0f * ph - 1.0f;
+    default: return 1.0f - 2.0f * ph;
+    }
+}
+static inline float lfo_wave_trem(int shape, float ph)    /* sine, saw, exponential, square, blip */
+{
+    switch (shape) {
+    case 1: return 1.0f - 2.0f * ph;
+    case 2: return 2.0f * fm_exp2f(-8.0f * ph) - 1.0f;
+    case 3: return ph < 0.5f ? 1.0f : -1.0f;
+    case 4: return ph < 0.08f ? 1.0f : -1.0f;
+    default: return fm_sin_turns(ph);
+    }
+}
+
 /* the track-level values of every chunk boundary inside the next n frames: the LFO (value, random:
  * an offset on its destination; tremolo: a gain and a vibrato; duck: a gain), one slot each. The
  * voices read the slots in order as they cross the boundaries. Also the meters. */
@@ -1046,9 +1123,28 @@ void synth_prepare(synth_t *s, uint32_t n)
     s->nck = (uint8_t)(nck ? nck : 1);
     for (i = 0; i < NTRK; i++) {
         trk_t *t = &s->t[i];
-        int type = P(s, i, TP_LTYPE), lx = P(s, i, TP_LX);
-        float hz = lfo_hz(P(s, i, TP_LSPEED), s->bpm), dph = hz * (float)SY_CHUNK * INV_SR;
-        float amt = (float)P(s, i, TP_LAMT), pk = 0.0f;
+        int type = P(s, i, TP_LTYPE), lx = P(s, i, TP_LX), lx2 = P(s, i, TP_LX2), engine = P(s, i, TP_ENGINE);
+        float hz = type == LT_DUCK ? 0.0f : lfo_hz(P(s, i, TP_LSPEED), s->bpm), dph = hz * CHUNK_S;
+        float amt = (float)P(s, i, TP_LAMT), pk = 0.0f, vib = 0.0f, vol = 0.0f;
+        t->ldest = LD_NONE;
+        t->lscale = 0.0f;
+        t->lf_in = t->lf_out = 0.0f;
+        if (type == LT_VALUE || type == LT_RANDOM) {
+            int d = LD_TP[P(s, i, TP_LDEST) & 3][lx & 3];
+            t->ldest = (int16_t)d;
+            if (d >= 0) {
+                const tp_info_t *in = tp_info(d, engine);
+                t->lscale = (float)(in->hi - in->lo) * (1.0f / 127.0f);
+            } else if (d == LD_PITCH) {
+                t->lscale = 1.0f;
+            }
+            if (type == LT_RANDOM)
+                fade_secs(lx2, &t->lf_in, &t->lf_out);
+        } else if (type == LT_TREMOLO) {
+            fade_secs(lx, &t->lf_in, &t->lf_out);
+            vib = (amt - 64.0f) * (100.0f / 63.0f);                 /* cents */
+            vol = ((float)P(s, i, TP_LDEST) - 64.0f) * (1.0f / 63.0f);
+        }
         for (k = 0; k < nck; k++) {
             float ph, val = 0.0f, pitch = 0.0f, gain = 1.0f;
             ph = t->lfo_ph + dph;
@@ -1058,33 +1154,26 @@ void synth_prepare(synth_t *s, uint32_t n)
             }
             t->lfo_ph = ph;
             switch (type) {
-            case LT_VALUE: {
-                float w;
-                switch (lx) {
-                case 1: w = 1.0f - 4.0f * fm_fabsf(ph - 0.5f); break;
-                case 2: w = 2.0f * ph - 1.0f; break;
-                case 3: w = ph < 0.5f ? 1.0f : -1.0f; break;
-                case 4: w = t->lfo_sh; break;
-                default: w = fm_sin_turns(ph); break;
-                }
-                val = w * (amt - 64.0f) * (64.0f / 63.0f);
+            case LT_VALUE:
+                val = lfo_wave_value(lx2, ph) * (amt - 64.0f) * (127.0f / 63.0f) * t->lscale;
                 break;
-            }
-            case LT_RANDOM: {
-                float sm = 1.0f - (float)lx * (0.985f / 127.0f);
+            case LT_RANDOM: {                    /* a wander: slews to each cycle's sample within a quarter cycle */
+                float sm = fm_minf(4.0f * dph, 1.0f);
                 t->lfo_sm += (t->lfo_sh - t->lfo_sm) * sm;
-                val = t->lfo_sm * (amt - 64.0f) * (64.0f / 63.0f);
+                val = (0.5f + 0.5f * t->lfo_sm) * amt * t->lscale;
                 break;
             }
             case LT_TREMOLO: {
-                float w = fm_sin_turns(ph);
-                gain = 1.0f - amt * (1.0f / 127.0f) * (0.5f - 0.5f * w);
-                pitch = w * (float)lx * (100.0f / 127.0f);
+                float w = lfo_wave_trem(lx2, ph);
+                pitch = w * vib;
+                gain = vol >= 0.0f ? 1.0f - vol * (0.5f - 0.5f * w) : 1.0f + vol * (0.5f + 0.5f * w);
                 break;
             }
             case LT_DUCK: {
-                float rel = hz > 0.0f ? 1.0f / hz : 1.0f;    /* the recovery: one period of "speed" */
-                t->duck *= fm_expf(-6.9f * (float)SY_CHUNK * INV_SR / rel);
+                if (t->duck_hold > 0.0f)
+                    t->duck_hold -= CHUNK_S;
+                else
+                    t->duck *= fm_expf(-6.9f * CHUNK_S / env_seconds((float)lx * (1.0f / 127.0f)));
                 gain = 1.0f - amt * (1.0f / 127.0f) * t->duck;
                 break;
             }
@@ -1126,14 +1215,24 @@ static void voice_chunk(synth_t *s, voice_t *v)
 {
     trk_t *t = &s->t[v->trk];
     cfg_t *c = &v->c;
-    int trk = v->trk, k = v->ck < s->nck ? v->ck : s->nck - 1, dest = P(s, trk, TP_LDEST), i;
-    float off = t->loff[k], lg = t->lgain[k], vol, lev, pan, vg, res;
+    int trk = v->trk, k = v->ck < s->nck ? v->ck : s->nck - 1, dest = t->ldest, i;
+    float lenv = 1.0f, off, lg, vol, lev, pan, vg, res;
     v->ck = (uint8_t)(v->ck + 1);
     v->nchunk = (uint8_t)(v->nchunk + 1);
     if (!v_sounding(v))
         return;
-    for (i = 0; i < 4; i++)
-        c->e[i] = fm_minf(pf(s, trk, TP_E1 + i, dest, off), 127.0f) * (1.0f / 127.0f);   /* a foreign lock value stays in range */
+    /* the LFO's fade envelope: this voice's time since its note */
+    if (t->lf_in > 0.0f)
+        lenv = fm_minf(v->tsec / t->lf_in, 1.0f);
+    else if (t->lf_out > 0.0f)
+        lenv = fm_maxf(1.0f - v->tsec / t->lf_out, 0.0f);
+    v->tsec += CHUNK_S;
+    off = t->loff[k] * lenv;
+    lg = 1.0f - (1.0f - t->lgain[k]) * lenv;
+    for (i = 0; i < 4; i++) {
+        c->ek[i] = fm_minf(pf(s, trk, TP_E1 + i, dest, off), 127.0f);   /* a foreign lock value stays in range */
+        c->e[i] = c->ek[i] * (1.0f / 127.0f);
+    }
     {   /* the envelopes' coefficients cost an exp each: only for a knob that moved */
         static const uint8_t EP[8] = {TP_A, TP_D, TP_S, TP_R, TP_FA, TP_FD, TP_FS, TP_FR};
         float *co[8];
@@ -1147,21 +1246,22 @@ static void voice_chunk(synth_t *s, voice_t *v)
             *co[i] = (i & 3) == 0 ? env_rate(env_seconds(x)) : (i & 3) == 2 ? x : env_coef(env_seconds(x));
         }
     }
-    /* the filter: 20 Hz .. 20 kHz over the knob, the performance offset, keytrack, velocity */
-    c->cut_oct = (pf(s, trk, TP_CUT, dest, off) + (float)t->perf.cut) * (9.96578428f / 127.0f)
+    /* the filter: 50 Hz .. 20 kHz over the knob, the performance offset, keytrack, velocity */
+    c->cut_oct = (pf(s, trk, TP_CUT, dest, off) + (float)t->perf.cut) * (8.64385619f / 127.0f)
                  + pf(s, trk, TP_KTRK, dest, off) * (1.0f / 127.0f) * (v->pitch - 60.0f) * (1.0f / 12.0f);
     c->fenv_oct = (pf(s, trk, TP_FENV, dest, off) - 64.0f) * (6.0f / 64.0f) * (0.5f + 0.5f * v->vel);
     res = pf(s, trk, TP_RES, dest, off) * (1.0f / 127.0f);
     c->kq = 2.0f * fm_exp2f(-res * 4.3f);        /* Q 0.5 .. 10 */
+    c->kres = res * 4.0f;                        /* the ladder's feedback */
     c->ftype = (uint8_t)P(s, trk, TP_FTYPE);
+    if (c->ftype >= NFT)
+        c->ftype = FT_SVF;
     c->mute = t->perf.mute;
     /* gains */
     vol = pf(s, trk, TP_VOLUME, dest, off) * (1.0f / 127.0f);
     lev = (float)P(s, trk, TP_LEVEL) * (1.0f / 127.0f);
     vg = (0.25f + 0.75f * v->vel * v->vel) * vol * vol * lev * lg * (1.0f - 0.6f * res);
-    if (c->ftype == FT_BP)
-        vg *= 2.0f;
-    pan = fm_clampf(((float)P(s, trk, TP_PAN) - 64.0f + (float)t->perf.pan) * (1.0f / 64.0f), -1.0f, 1.0f);
+    pan = fm_clampf((pf(s, trk, TP_PAN, dest, off) - 64.0f + (float)t->perf.pan) * (1.0f / 64.0f), -1.0f, 1.0f);
     if (pan != v->pan_in || v->fresh) {          /* the pan's cos / sin: only when it moved */
         v->pan_in = pan;
         v->pan_l = pan == 0.0f ? 0.70710678f : fm_cosf((pan + 1.0f) * 0.78539816f);   /* centre: exactly equal */
@@ -1172,9 +1272,11 @@ static void voice_chunk(synth_t *s, voice_t *v)
     c->g1 = fm_minf((float)(P(s, trk, TP_SEND1) + t->perf.send1), 127.0f) * (1.0f / 127.0f);
     c->g2 = fm_minf((float)(P(s, trk, TP_SEND2) + t->perf.send2), 127.0f) * (1.0f / 127.0f);
     c->gt = (float)P(s, trk, TP_SENDT) * (1.0f / 127.0f);
-    /* pitch: the glide, bend, performance pitch, vibrato */
+    /* pitch: the glide, bend, performance pitch, vibrato, an LFO on the pitch (+-12 semitones at 100 %) */
     v->pitch_cur += (v->pitch - v->pitch_cur) * v->glide_k;
-    c->pitch_off = (float)t->bend_c + (float)t->perf.pitch_c + t->lpitch[k];
+    c->pitch_off = (float)t->bend_c + (float)t->perf.pitch_c + t->lpitch[k] * lenv;
+    if (dest == LD_PITCH)
+        c->pitch_off += off * (1200.0f / 127.0f);
     {   /* the frequency and the engine's increments: when the pitch or a knob moved (or every 4th
          * chunk: the organ's pitch wobble and phasor trim) */
         float pin = v->pitch_cur + c->pitch_off * 0.01f;
@@ -1226,16 +1328,21 @@ static void voice_subblock(synth_t *s, voice_t *v, int aligned)
         env_step(&v->amp, c->amp_ar, c->amp_dc, c->amp_sl, c->amp_rc);
         env_step(&v->flt, c->flt_ar, c->flt_dc, c->flt_sl, c->flt_rc);
     }
-    hz = 20.0f * fm_exp2f(c->cut_oct + v->flt.level * c->fenv_oct);
-    hz = hz > 20000.0f ? 20000.0f : hz < 20.0f ? 20.0f : hz;
-    g = fm_tanf(FM_PI * fm_minf(hz, 0.45f * SY_SR) * INV_SR);
-    v->a1 = 1.0f / (1.0f + g * (g + c->kq));
-    v->a2 = g * v->a1;
-    v->a3 = g * v->a2;
-    if (c->ftype == FT_LP24) {
-        v->b1 = 1.0f / (1.0f + g * (g + hk));
-        v->b2 = g * v->b1;
-        v->b3 = g * v->b2;
+    hz = 50.0f * fm_exp2f(c->cut_oct + v->flt.level * c->fenv_oct);
+    hz = hz > 20000.0f ? 20000.0f : hz < 50.0f ? 50.0f : hz;
+    if (c->ftype == FT_LADDER) {                 /* four one-poles: g per pole, k the feedback */
+        v->b1 = fm_minf(1.0f - fm_expf(-FM_TWO_PI * hz * INV_SR), 0.9f);
+        v->b2 = c->kres;
+    } else {
+        g = fm_tanf(FM_PI * fm_minf(hz, 0.45f * SY_SR) * INV_SR);
+        v->a1 = 1.0f / (1.0f + g * (g + c->kq));
+        v->a2 = g * v->a1;
+        v->a3 = g * v->a2;
+        if (c->ftype == FT_SVF) {
+            v->b1 = 1.0f / (1.0f + g * (g + hk));
+            v->b2 = g * v->b1;
+            v->b3 = g * v->b2;
+        }
     }
     v->amp_step = (v->amp.level - v->amp_cur) * (1.0f / (float)SUB);
     if (v->steal_phase == 1) {
@@ -1256,42 +1363,70 @@ static void voice_subblock(synth_t *s, voice_t *v, int aligned)
     v->gr_step = (gr - v->grc) * (0.35f / (float)SUB);
 }
 
-/* the sample loop for one sub-block: the filter (one of four), the ramps, the outputs. Instantiated
+/* the sample loop for one sub-block: the filter (one of five), the ramps, the outputs. Instantiated
  * for each filter type and for mono / stereo with constant arguments, so the compiler folds the
- * branches away; the generic switch is in voice_samples. */
-static inline void sample_loop(voice_t *v, const float *xl, const float *xr, float *l, float *r, float *s1, float *s2,
+ * branches away; the generic switch is in voice_samples.
+ *   svf:       a TPT state-variable low-pass (resonant) into a second, flat one: 24 dB, aggressive
+ *   ladder:    four one-poles in series with the last one's output fed back through a soft clip
+ *   z lowpass: the one resonant TPT stage, 12 dB
+ *   z hipass:  its high-pass output, 12 dB
+ *   dynamic:   the drum tracks' filter (drumline.c): on a synth voice it is a bypass */
+SY_INLINE void sample_loop(voice_t *v, const float *xl, const float *xr, float *l, float *r, float *s1, float *s2,
                                float *st, int k, const int ftype, const int stereo)
 {
     const cfg_t *c = &v->c;
     const float a1 = v->a1, a2 = v->a2, a3 = v->a3, b1 = v->b1, b2 = v->b2, b3 = v->b3, kq = c->kq;
     const float es = v->amp_step, sgs = v->sg_step, gls = v->gl_step, grs = v->gr_step;
     const float g1 = c->g1, g2 = c->g2, gt = c->gt, wide = stereo ? 1.41421356f : 1.0f;
+    const float lcomp = 1.0f + b2 * 0.25f;       /* the ladder: its passband falls as the feedback rises */
     const int sends = g1 > 0.0f || g2 > 0.0f || gt > 0.0f;
     float f0 = v->f[0], f1 = v->f[1], f2 = v->f[2], f3 = v->f[3], f4 = v->f[4], f5 = v->f[5], f6 = v->f[6], f7 = v->f[7];
     float e = v->amp_cur, sg = v->steal_gain, glc = v->glc, grc = v->grc, pk = 0.0f;
     int j;
     for (j = 0; j < k; j++) {
         float yl, yr, ol, or_, a;
-        float t3 = xl[j] - f1, t1 = a1 * f0 + a2 * t3, t2 = f1 + a2 * f0 + a3 * t3;
-        f0 = 2.0f * t1 - f0;
-        f1 = 2.0f * t2 - f1;
-        yl = ftype == FT_HP ? xl[j] - kq * t1 - t2 : ftype == FT_BP ? t1 : t2;
-        if (ftype == FT_LP24) {
-            float w3 = yl - f3, w1 = b1 * f2 + b2 * w3, w2 = f3 + b2 * f2 + b3 * w3;
-            f2 = 2.0f * w1 - f2;
-            f3 = 2.0f * w2 - f3;
-            yl = w2;
+        if (ftype == FT_LADDER) {
+            float x = xl[j] - b2 * soft3(f3);
+            f0 += b1 * (x - f0);
+            f1 += b1 * (f0 - f1);
+            f2 += b1 * (f1 - f2);
+            f3 += b1 * (f2 - f3);
+            yl = f3 * lcomp;
+        } else if (ftype == FT_DYNAMIC) {
+            yl = xl[j];
+        } else {
+            float t3 = xl[j] - f1, t1 = a1 * f0 + a2 * t3, t2 = f1 + a2 * f0 + a3 * t3;
+            f0 = 2.0f * t1 - f0;
+            f1 = 2.0f * t2 - f1;
+            yl = ftype == FT_ZHP ? xl[j] - kq * t1 - t2 : t2;
+            if (ftype == FT_SVF) {
+                float w3 = yl - f3, w1 = b1 * f2 + b2 * w3, w2 = f3 + b2 * f2 + b3 * w3;
+                f2 = 2.0f * w1 - f2;
+                f3 = 2.0f * w2 - f3;
+                yl = w2;
+            }
         }
         if (stereo) {
-            float u3 = xr[j] - f5, u1 = a1 * f4 + a2 * u3, u2 = f5 + a2 * f4 + a3 * u3;
-            f4 = 2.0f * u1 - f4;
-            f5 = 2.0f * u2 - f5;
-            yr = ftype == FT_HP ? xr[j] - kq * u1 - u2 : ftype == FT_BP ? u1 : u2;
-            if (ftype == FT_LP24) {
-                float w3 = yr - f7, w1 = b1 * f6 + b2 * w3, w2 = f7 + b2 * f6 + b3 * w3;
-                f6 = 2.0f * w1 - f6;
-                f7 = 2.0f * w2 - f7;
-                yr = w2;
+            if (ftype == FT_LADDER) {
+                float x = xr[j] - b2 * soft3(f7);
+                f4 += b1 * (x - f4);
+                f5 += b1 * (f4 - f5);
+                f6 += b1 * (f5 - f6);
+                f7 += b1 * (f6 - f7);
+                yr = f7 * lcomp;
+            } else if (ftype == FT_DYNAMIC) {
+                yr = xr[j];
+            } else {
+                float u3 = xr[j] - f5, u1 = a1 * f4 + a2 * u3, u2 = f5 + a2 * f4 + a3 * u3;
+                f4 = 2.0f * u1 - f4;
+                f5 = 2.0f * u2 - f5;
+                yr = ftype == FT_ZHP ? xr[j] - kq * u1 - u2 : u2;
+                if (ftype == FT_SVF) {
+                    float w3 = yr - f7, w1 = b1 * f6 + b2 * w3, w2 = f7 + b2 * f6 + b3 * w3;
+                    f6 = 2.0f * w1 - f6;
+                    f7 = 2.0f * w2 - f7;
+                    yr = w2;
+                }
             }
         } else {
             yr = yl;
@@ -1341,14 +1476,16 @@ static void voice_samples(synth_t *s, voice_t *v, float *l, float *r, float *s1,
             voice_subblock(s, v, (v->pos & (SUB - 1)) == 0);
         eng_run(v, xl, xr, k);
         switch (v->c.ftype * 2 + (v->c.stereo != 0)) {
-        case FT_LP12 * 2: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_LP12, 0); break;
-        case FT_LP12 * 2 + 1: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_LP12, 1); break;
-        case FT_LP24 * 2: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_LP24, 0); break;
-        case FT_LP24 * 2 + 1: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_LP24, 1); break;
-        case FT_HP * 2: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_HP, 0); break;
-        case FT_HP * 2 + 1: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_HP, 1); break;
-        case FT_BP * 2: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_BP, 0); break;
-        default: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_BP, 1); break;
+        case FT_SVF * 2: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_SVF, 0); break;
+        case FT_SVF * 2 + 1: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_SVF, 1); break;
+        case FT_LADDER * 2: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_LADDER, 0); break;
+        case FT_LADDER * 2 + 1: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_LADDER, 1); break;
+        case FT_ZLP * 2: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_ZLP, 0); break;
+        case FT_ZLP * 2 + 1: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_ZLP, 1); break;
+        case FT_ZHP * 2: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_ZHP, 0); break;
+        case FT_ZHP * 2 + 1: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_ZHP, 1); break;
+        case FT_DYNAMIC * 2: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_DYNAMIC, 0); break;
+        default: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_DYNAMIC, 1); break;
         }
         i += k;
         v->pos = (uint16_t)(v->pos + k);
@@ -1399,62 +1536,94 @@ int synth_voices_used(const synth_t *s)
 }
 
 /* ------------------------------------------------------- parameter info --- */
-static const tp_info_t FIXED[NTP_SOUND + 9] = {
-    {"engine", 0, NENGINE - 1, 0, PK_NAMES, EG_NAME}, {"", 0, 127, 0, PK_NUM, 0}, {"", 0, 127, 0, PK_NUM, 0},
-    {"", 0, 127, 0, PK_NUM, 0},                         {"", 0, 127, 0, PK_NUM, 0},
-    {"mode", 0, 2, VM_POLY, PK_NAMES, VMODE_N},         {"porta", 0, 127, 0, PK_MS, 0},
-    {"bend", 0, 24, 2, PK_SEMI, 0},                     {"volume", 0, 127, 100, PK_PCT, 0},
+static const tp_info_t FIXED[NTP_SOUND + 13] = {
+    {"engine", 0, NENGINE - 1, 0, PK_NAMES, EG_NAME}, {"", 0, 127, 0, PK_NN, 0}, {"", 0, 127, 0, PK_NN, 0},
+    {"", 0, 127, 0, PK_NN, 0},                          {"", 0, 127, 0, PK_NN, 0},
+    {"mode", 0, 2, VM_POLY, PK_NAMES, VMODE_N},         {"porta", 0, 127, 0, PK_NUM, 0},
+    {"bend", 0, 8, 2, PK_NAMES, BEND_N},                {"volume", 0, 127, 100, PK_PCT, 0},
     {"attack", 0, 127, 0, PK_MS, 0},                    {"decay", 0, 127, 60, PK_MS, 0},
     {"sustain", 0, 127, 100, PK_PCT, 0},                {"release", 0, 127, 40, PK_MS, 0},
     {"attack", 0, 127, 0, PK_MS, 0},                    {"decay", 0, 127, 60, PK_MS, 0},
     {"sustain", 0, 127, 0, PK_PCT, 0},                  {"release", 0, 127, 40, PK_MS, 0},
-    {"cutoff", 0, 127, 110, PK_PCT, 0},                 {"reso", 0, 127, 20, PK_PCT, 0},
+    {"cutoff", 0, 127, 110, PK_HZ, 0},                  {"reso", 0, 127, 20, PK_PCT, 0},
     {"env", 0, 127, 64, PK_BIP, 0},                     {"keytrack", 0, 127, 64, PK_PCT, 0},
-    {"type", 0, NFT - 1, FT_LP24, PK_NAMES, FTYPE_N},   {"fx I", 0, 127, 0, PK_PCT, 0},
+    {"type", 0, NFT - 1, FT_SVF, PK_NAMES, FTYPE_N},    {"fx I", 0, 127, 0, PK_PCT, 0},
     {"fx II", 0, 127, 0, PK_PCT, 0},                    {"tape", 0, 127, 0, PK_PCT, 0},
-    {"type", 0, NLT - 1, LT_OFF, PK_NAMES, LTYPE_N},    {"speed", 0, 127, 6, PK_HZ_SYNC, 0},
-    {"amount", 0, 127, 64, PK_BIP, 0},                  {"dest", TP_E1, TP_KTRK, TP_CUT, PK_NAMES, 0},
-    {"shape", 0, 4, 0, PK_NAMES, LSHAPE_N},
+    {"type", 0, NLT - 1, LT_OFF, PK_NAMES, LTYPE_N},    {"speed", 0, 127, 3, PK_HZ_SYNC, 0},
+    {"amount", 0, 127, 64, PK_BIP, 0},                  {"dest", 0, NLD - 1, LD_FILTER, PK_NAMES, LDEST_N},
+    {"param", 0, 3, 0, PK_NUM, 0},                      {"shape", 0, 3, 1, PK_NAMES, VSHAPE_N},
     /* TP_PLAYER .. TP_CHAN */
-    {"player", 0, NPL - 1, PL_OFF, PK_NAMES, PLAYER_N}, {"speed", 0, 5, 3, PK_NAMES, ARPSPD_N},
-    {"pattern", 0, 4, 0, PK_NAMES, ARPPAT_N},           {"range", 1, 4, 1, PK_NUM, 0},
-    {"hold", 0, 1, 0, PK_SWITCH, 0},                    {"level", 0, 127, 100, PK_PCT, 0},
+    {"player", 0, NPL - 1, PL_OFF, PK_NAMES, PLAYER_N}, {"speed", 0, 8, 4, PK_NAMES, ARPSPD_N},
+    {"pattern", 0, 5, 0, PK_NAMES, ARPPAT_N},           {"range", 1, 4, 1, PK_NUM, 0},
+    {"hold", 0, 1, 0, PK_SWITCH, 0},                    {"length", 0, 2, 1, PK_NAMES, ARPLEN_N},
+    {"style", 0, 5, 0, PK_NAMES, ARPSTY_N},             {"glide", 0, 2, 0, PK_NAMES, ARPGLD_N},
+    {"stereo", 0, 2, 0, PK_NAMES, ARPSTE_N},            {"level", 0, 127, 100, PK_PCT, 0},
     {"pan", 0, 127, 64, PK_BIP, 0},                     {"brain", 0, 2, 1, PK_NAMES, BRAIN_N},
     {"channel", 0, 16, 0, PK_NUM, 0}};
-static const tp_info_t DRUMP[DP_N] = {{"model", 0, NDM_NAMES - 1, 0, PK_NAMES, DM_NAME}, {"tune", 0, 127, 64, PK_BIP, 0},
-                                      {"tone", 0, 127, 64, PK_PCT, 0}, {"decay", 0, 127, 64, PK_PCT, 0},
-                                      {"pan", 0, 127, 64, PK_BIP, 0}, {"level", 0, 127, 100, PK_PCT, 0}};
+/* a drumline key's nine values; its model's knobs take their names and defaults from drumline.c (tp_info_par) */
+static const tp_info_t DRUMP[DP_N] = {{"model", 0, NDM - 1, 0, PK_NAMES, DM_NAME}, {"knob 1", 0, 127, 64, PK_NN, 0},
+                                      {"knob 2", 0, 127, 64, PK_NN, 0}, {"knob 3", 0, 127, 64, PK_NN, 0},
+                                      {"knob 4", 0, 127, 64, PK_NN, 0}, {"random", 0, 127, 0, PK_PCT, 0},
+                                      {"pan", 0, 127, 64, PK_BIP, 0}, {"volume", 0, 127, 76, PK_DB, 0},
+                                      {"mode", 0, NPM - 1, PM_ONESHOT, PK_NAMES, PM_NAME}};
+/* a drumline track's Envelope and Filter pages */
+static const tp_info_t DRUMENV[4] = {{"funk", 0, 127, 0, PK_PCT, 0}, {"attack", 0, 127, 0, PK_PCT, 0},
+                                     {"random", 0, 127, 0, PK_PCT, 0}, {"length", 0, 127, 64, PK_PCT, 0}};
+static const tp_info_t DRUMFLT[4] = {{"lowcut", 0, 127, 0, PK_HZ, 0}, {"comp", 0, 127, 0, PK_PCT, 0},
+                                     {"drive", 0, 127, 0, PK_PCT, 0}, {"hicut", 0, 127, 127, PK_HZ, 0}};
 static const tp_info_t NONE_P = {"-", 0, 0, 0, PK_NUM, 0};
-static const tp_info_t MAESTRO_P[4] = {{"roll", 0, 127, 30, PK_PCT, 0}, {"pattern", 0, 3, 0, PK_NAMES, MPAT_N},
+static const tp_info_t MAESTRO_P[4] = {{"roll", 0, 63, 30, PK_NUM, 0}, {"pattern", 0, 3, 0, PK_NAMES, MPAT_N},
                                        {"-", 0, 0, 0, PK_NUM, 0}, {"hold", 0, 1, 0, PK_SWITCH, 0}};
-static const tp_info_t LFO_AMT[NLT] = {{"amount", 0, 127, 64, PK_BIP, 0}, {"amount", 0, 127, 64, PK_BIP, 0},
-                                       {"amount", 0, 127, 64, PK_PCT, 0}, {"amount", 0, 127, 64, PK_BIP, 0},
+/* the LFO's knobs per type (synth.h): speed / amount / dest / x / x2 */
+static const tp_info_t LFO_SPEED_DUCK = {"source", 0, 11, 0, PK_NAMES, DUCK_N};
+static const tp_info_t LFO_AMT[NLT] = {{"-", 0, 0, 0, PK_NUM, 0}, {"amount", 0, 127, 64, PK_BIP, 0},
+                                       {"vibrato", 0, 127, 64, PK_BIP, 0}, {"amount", 0, 127, 64, PK_PCT, 0},
                                        {"amount", 0, 127, 80, PK_PCT, 0}};
-static const tp_info_t LFO_X[NLT] = {{"-", 0, 0, 0, PK_NUM, 0}, {"shape", 0, 4, 0, PK_NAMES, LSHAPE_N},
-                                     {"vibrato", 0, 127, 0, PK_PCT, 0}, {"smooth", 0, 127, 0, PK_PCT, 0},
-                                     {"source", 0, 8, 0, PK_NAMES, DUCK_N}};
+static const tp_info_t LFO_DEST_TREM = {"volume", 0, 127, 96, PK_BIP, 0};
+static const tp_info_t LFO_DEST_DUCK = {"hold", 0, 127, 54, PK_MS, 0};
+static const tp_info_t LFO_X_TREM = {"envelope", 0, 127, 64, PK_FADE, 0};
+static const tp_info_t LFO_X_DUCK = {"release", 0, 127, 76, PK_MS, 0};
+static const tp_info_t LFO_X2_TREM = {"shape", 0, 4, 0, PK_NAMES, TSHAPE_N};
+static const tp_info_t LFO_X2_RAND = {"envelope", 0, 127, 64, PK_FADE, 0};
+static const tp_info_t LFO_PARAM_ENV = {"param", 0, 3, 0, PK_NAMES, ENVP_N};
+static const tp_info_t LFO_PARAM_FLT = {"param", 0, 3, 0, PK_NAMES, FLTP_N};
+static const tp_info_t LFO_PARAM_AMP = {"param", 0, 3, 0, PK_NAMES, AMPP_N};
 static tp_info_t eknob[NENGINE][4];
+static tp_info_t lparam[NENGINE];                /* the LFO's parameter knob on the synth module: the engine's names */
+static tp_info_t dknob[NDM][4];                  /* a drum model's four knobs */
 static uint8_t eknob_ready;
 
 static void eknob_init(void)
 {
     int e, k;
-    for (e = 0; e < NENGINE; e++)
+    for (e = 0; e < NENGINE; e++) {
         for (k = 0; k < 4; k++) {
             tp_info_t *i = &eknob[e][k];
             i->name = EG_KNOB[e][k];
             i->lo = 0;
             i->hi = 127;
             i->def = EG_DEF[e][k];
-            i->kind = PK_PCT;
+            i->kind = PK_NN;
             i->names = 0;
             if (e == EG_WAVETABLE && k == 0) {
-                i->hi = 7;
+                i->hi = WT_NTABLE - 1;
                 i->kind = PK_NAMES;
                 i->names = WTNAME_N;
             }
-            if (e == EG_PRISM && k == 1)
-                i->kind = PK_NUM;              /* shown as semitones by tp_text */
+            if ((e == EG_PRISM && k == 1) || e == EG_ORGAN) {   /* the discrete 1..8 knobs */
+                i->lo = 1;
+                i->hi = 8;
+                i->kind = PK_NUM;              /* prism's ratio prints "N:1" (tp_text) */
+            }
+        }
+        lparam[e] = LFO_PARAM_ENV;
+        lparam[e].names = EG_KNOB[e];
+    }
+    for (e = 0; e < NDM; e++)
+        for (k = 0; k < 4; k++) {
+            dknob[e][k] = DRUMP[DP_K1 + k];
+            dknob[e][k].name = DM_KNOB[e][k];
+            dknob[e][k].def = DM_DEFAULT[e][k];
         }
     eknob_ready = 1;
 }
@@ -1468,6 +1637,12 @@ const tp_info_t *tp_info(int p, int engine)
             engine = EG_SIMPLE;
         return &eknob[engine][p - TP_E1];
     }
+    if (engine == EG_DRUMLINE) {
+        if (p >= TP_A && p <= TP_R)
+            return &DRUMENV[p - TP_A];
+        if (p >= TP_CUT && p <= TP_KTRK)
+            return &DRUMFLT[p - TP_CUT];
+    }
     if (p >= TP_DRUM0 && p < NTP)
         return &DRUMP[(p - TP_DRUM0) % DP_N];
     if (p >= 0 && p < (int)(sizeof FIXED / sizeof FIXED[0]))
@@ -1478,23 +1653,43 @@ const tp_info_t *tp_info(int p, int engine)
 const tp_info_t *tp_info_par(int p, const uint8_t *par)
 {
     int engine = par[TP_ENGINE], player = par[TP_PLAYER], lt = par[TP_LTYPE];
-    if (p >= TP_P1 && p <= TP_P4) {
+    if (!eknob_ready)
+        eknob_init();
+    if (p >= TP_P1 && p <= TP_AP4) {
         if (player == PL_ARP)
             return &FIXED[p];
-        if (player == PL_MAESTRO)
+        if (player == PL_MAESTRO && p <= TP_P4)
             return &MAESTRO_P[p - TP_P1];
         return &NONE_P;
     }
+    if (p >= TP_DRUM0 && p < NTP) {
+        int s = (p - TP_DRUM0) / DP_N, k = (p - TP_DRUM0) % DP_N;
+        if (k >= DP_K1 && k <= DP_K4)
+            return &dknob[par[TP_DRUM(s, DP_MODEL)] % NDM][k - DP_K1];
+        return &DRUMP[k];
+    }
     if (lt >= NLT)
         lt = LT_OFF;
-    if (p == TP_LAMT)
-        return &LFO_AMT[lt];
-    if (p == TP_LX)
-        return &LFO_X[lt];
-    if (p == TP_LDEST)
-        return lt == LT_VALUE || lt == LT_RANDOM ? &FIXED[p] : &NONE_P;
-    if (p == TP_LSPEED)
-        return lt == LT_OFF ? &NONE_P : &FIXED[p];
+    switch (p) {
+    case TP_LSPEED: return lt == LT_OFF ? &NONE_P : lt == LT_DUCK ? &LFO_SPEED_DUCK : &FIXED[p];
+    case TP_LAMT: return &LFO_AMT[lt];
+    case TP_LDEST:
+        return lt == LT_VALUE || lt == LT_RANDOM ? &FIXED[p] : lt == LT_TREMOLO ? &LFO_DEST_TREM
+               : lt == LT_DUCK ? &LFO_DEST_DUCK : &NONE_P;
+    case TP_LX:
+        if (lt == LT_VALUE || lt == LT_RANDOM) {
+            switch (par[TP_LDEST] & 3) {
+            case LD_SYNTH: return &lparam[engine < NENGINE ? engine : EG_SIMPLE];
+            case LD_ENV: return &LFO_PARAM_ENV;
+            case LD_FILTER: return &LFO_PARAM_FLT;
+            default: return &LFO_PARAM_AMP;
+            }
+        }
+        return lt == LT_TREMOLO ? &LFO_X_TREM : lt == LT_DUCK ? &LFO_X_DUCK : &NONE_P;
+    case TP_LX2:
+        return lt == LT_VALUE ? &FIXED[p] : lt == LT_TREMOLO ? &LFO_X2_TREM : lt == LT_RANDOM ? &LFO_X2_RAND : &NONE_P;
+    default: break;
+    }
     return tp_info(p, engine);
 }
 
@@ -1540,29 +1735,31 @@ static void ms_text(float secs, char *num, char *unit)
         put_s(unit, "s");
     }
 }
+static void hz_text(float hz, char *num, char *unit)
+{
+    if (hz < 1000.0f) {
+        put_i(num, (int)(hz + 0.5f));
+        put_s(unit, "Hz");
+    } else {
+        put_f1(num, hz * 0.001f);
+        put_s(unit, "kHz");
+    }
+}
 
 static void tp_text_i(const tp_info_t *i, int p, int v, int engine, char *num, char *unit)
 {
     unit[0] = 0;
-    if (p == TP_LDEST) {
-        const tp_info_t *d = tp_info(v, engine);
-        put_s(num, v >= TP_E1 && v <= TP_KTRK && v != TP_VMODE && v != TP_BEND && v != TP_FTYPE ? d->name : "-");
-        return;
-    }
     if (p == TP_CHAN && v == 0) {
         put_s(num, "off");
         return;
     }
-    if (p == TP_PORTA) {
-        if (v == 0)
-            put_s(num, "off");
-        else
-            ms_text((float)(v * v) * 0.000125f, num, unit);
+    if (p == TP_PORTA && v == 0) {
+        put_s(num, "off");
         return;
     }
     if (p == TP_E2 && engine == EG_PRISM) {
-        put_i(num, (int)((float)v * 24.0f / 127.0f + 0.5f));
-        put_s(unit, "st");
+        put_i(num, v < 1 ? 1 : v > 8 ? 8 : v);
+        put_s(num + 1, ":1");
         return;
     }
     switch (i->kind) {
@@ -1588,13 +1785,40 @@ static void tp_text_i(const tp_info_t *i, int p, int v, int engine, char *num, c
     case PK_SWITCH: put_s(num, v ? "on" : "off"); break;
     case PK_MS: ms_text(env_seconds((float)v * (1.0f / 127.0f)), num, unit); break;
     case PK_HZ_SYNC:
-        if (v < LS_SPEED_SYNC_N) {
+        if (v < LS_SYNC_N) {
             put_s(num, SYNC_N[v]);
         } else {
             put_f1(num, lfo_hz(v, 120.0f));
             put_s(unit, "Hz");
         }
         break;
+    case PK_NN: {                                /* two digits, as the OP-XY prints its engine knobs */
+        int d = (v * 100 + 64) / 128;
+        num[0] = (char)('0' + d / 10);
+        num[1] = (char)('0' + d % 10);
+        num[2] = 0;
+        break;
+    }
+    case PK_HZ: hz_text(50.0f * fm_exp2f((float)v * (8.64385619f / 127.0f)), num, unit); break;
+    case PK_FADE:
+        if (v == 64) {
+            put_s(num, "off");
+        } else if (v < 64) {
+            put_i(put_s(num, "in "), (64 - v) * 100 / 64);
+            put_s(unit, "%");
+        } else {
+            put_i(put_s(num, "out "), (v - 64) * 100 / 63);
+            put_s(unit, "%");
+        }
+        break;
+    case PK_DB: {                                /* -30 .. +20 dB, 76 = 0 */
+        int d = ((v - 76) * 50 + (v >= 76 ? 63 : -63)) / 127;
+        if (d > 0)
+            *num++ = '+';
+        put_i(num, d);
+        put_s(unit, "dB");
+        break;
+    }
     default: put_i(num, v); break;
     }
 }
@@ -1609,93 +1833,97 @@ void sound_default(uint8_t *par, int engine)
     int p, k;
     if (engine < 0 || engine >= NENGINE)
         engine = EG_SIMPLE;
-    for (p = 0; p < NTP; p++)
+    for (p = 0; p < TP_DRUM0; p++)
         par[p] = tp_info(p, engine)->def;
     par[TP_ENGINE] = (uint8_t)engine;
-    for (k = 0; k < (NTP - TP_DRUM0) / DP_N; k++)
-        par[TP_DRUM(k, DP_MODEL)] = (uint8_t)(k < NDM_NAMES ? k : 0);
+    for (k = 0; k < DL_NSOUND; k++)
+        for (p = 0; p < DP_N; p++)
+            par[TP_DRUM(k, p)] = DL_DEFAULT_KIT[k][p];
     if (engine == EG_DRUMLINE)
-        par[TP_FTYPE] = FT_LP12;
+        par[TP_FTYPE] = FT_DYNAMIC;
 }
 
 /* -------------------------------------------------------------- presets --- */
 /* ENGINE E1 E2 E3 E4 | MODE PORTA BEND VOL | A D S R | FA FD FS FR | CUT RES FENV KTRK TYPE | S1 S2 ST |
- * LTYPE LSPEED LAMT LDEST LX */
-#define PR(nm, eng, e1, e2, e3, e4, vm, po, vol, a, d, su, r, fa, fd, fs, fr, cut, res, fenv, kt, ft, s1, s2, lt, ls, la, ld, lx) \
-    {nm, {eng, e1, e2, e3, e4, vm, po, 2, vol, a, d, su, r, fa, fd, fs, fr, cut, res, fenv, kt, ft, s1, s2, 0, lt, ls, la, ld, lx}}
+ * LTYPE LSPEED LAMT LDEST LX LX2. The LFO fields follow synth.h: value / random: amount, module, knob, shape
+ * (or envelope); tremolo: vibrato, volume, envelope, shape. A rate of 90 is about 5 Hz. */
+#define LFO_(lt, ls, la, ld, lx, lx2) lt, ls, la, ld, lx, lx2
+#define PR(nm, eng, e1, e2, e3, e4, vm, po, vol, a, d, su, r, fa, fd, fs, fr, cut, res, fenv, kt, ft, s1, s2, lfo) \
+    {nm, {eng, e1, e2, e3, e4, vm, po, 2, vol, a, d, su, r, fa, fd, fs, fr, cut, res, fenv, kt, ft, s1, s2, 0, LFO_ lfo}}
+#define NOLFO (LT_OFF, 3, 64, LD_FILTER, 0, 1)
 const preset_t PRESETS[] = {
     /* simple */
-    PR("soft keys", EG_SIMPLE, 20, 0, 0, 30, VM_POLY, 0, 100, 5, 70, 70, 50, 0, 60, 0, 40, 70, 15, 90, 64, FT_LP24, 0, 30, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("saw lead", EG_SIMPLE, 0, 0, 0, 20, VM_LEGATO, 40, 100, 2, 60, 100, 30, 0, 60, 0, 40, 100, 25, 64, 64, FT_LP24, 20, 10, LT_TREMOLO, 20, 0, TP_CUT, 25),
-    PR("square pluck", EG_SIMPLE, 127, 20, 0, 0, VM_POLY, 0, 100, 0, 45, 0, 30, 0, 40, 0, 30, 60, 30, 100, 80, FT_LP24, 10, 20, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("wide pad", EG_SIMPLE, 30, 0, 5, 110, VM_POLY, 0, 95, 80, 80, 90, 90, 70, 80, 40, 80, 60, 20, 80, 50, FT_LP24, 0, 60, LT_VALUE, 2, 80, TP_CUT, 1),
-    PR("bass one", EG_SIMPLE, 0, 0, 0, 0, VM_MONO, 0, 110, 0, 65, 40, 30, 0, 55, 0, 30, 55, 35, 110, 40, FT_LP24, 0, 0, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("pwm strings", EG_SIMPLE, 127, 60, 0, 90, VM_POLY, 0, 95, 60, 70, 100, 70, 40, 60, 60, 60, 80, 10, 64, 64, FT_LP12, 0, 50, LT_VALUE, 4, 110, TP_E2, 1),
-    PR("noise sweep", EG_SIMPLE, 0, 0, 127, 60, VM_POLY, 0, 100, 10, 100, 0, 60, 0, 100, 0, 60, 30, 70, 127, 0, FT_BP, 0, 40, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("acid line", EG_SIMPLE, 0, 0, 0, 0, VM_LEGATO, 30, 105, 0, 50, 0, 30, 0, 45, 0, 30, 40, 90, 110, 64, FT_LP24, 30, 0, LT_OFF, 6, 64, TP_CUT, 0),
+    PR("soft keys", EG_SIMPLE, 20, 0, 0, 30, VM_POLY, 0, 100, 5, 70, 70, 50, 0, 60, 0, 40, 68, 15, 90, 64, FT_SVF, 0, 30, NOLFO),
+    PR("saw lead", EG_SIMPLE, 0, 0, 0, 20, VM_LEGATO, 40, 100, 2, 60, 100, 30, 0, 60, 0, 40, 100, 25, 64, 64, FT_SVF, 20, 10, (LT_TREMOLO, 92, 76, 64, 40, 0)),
+    PR("square pluck", EG_SIMPLE, 127, 20, 0, 0, VM_POLY, 0, 100, 0, 45, 0, 30, 0, 40, 0, 30, 58, 30, 100, 80, FT_SVF, 10, 20, NOLFO),
+    PR("wide pad", EG_SIMPLE, 30, 0, 5, 110, VM_POLY, 0, 95, 80, 80, 90, 90, 70, 80, 40, 80, 58, 20, 80, 50, FT_SVF, 0, 60, (LT_VALUE, 0, 80, LD_FILTER + LD_FREE, 0, 1)),
+    PR("bass one", EG_SIMPLE, 0, 0, 0, 0, VM_MONO, 0, 110, 0, 65, 40, 30, 0, 55, 0, 30, 52, 35, 110, 40, FT_LADDER, 0, 0, NOLFO),
+    PR("pwm strings", EG_SIMPLE, 127, 60, 0, 90, VM_POLY, 0, 95, 60, 70, 100, 70, 40, 60, 60, 60, 80, 10, 64, 64, FT_ZLP, 0, 50, (LT_VALUE, 2, 110, LD_SYNTH + LD_FREE, 1, 1)),
+    PR("noise sweep", EG_SIMPLE, 0, 0, 127, 60, VM_POLY, 0, 100, 10, 100, 0, 60, 0, 100, 0, 60, 30, 70, 127, 0, FT_ZHP, 0, 40, NOLFO),
+    PR("acid line", EG_SIMPLE, 0, 0, 0, 0, VM_LEGATO, 30, 105, 0, 50, 0, 30, 0, 45, 0, 30, 36, 90, 110, 64, FT_LADDER, 30, 0, NOLFO),
     /* prism */
-    PR("prism bass", EG_PRISM, 64, 0, 15, 0, VM_MONO, 0, 110, 0, 70, 50, 30, 0, 60, 0, 30, 60, 30, 100, 40, FT_LP24, 0, 0, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("fifth lead", EG_PRISM, 80, 37, 10, 50, VM_LEGATO, 35, 100, 2, 60, 100, 40, 0, 60, 0, 40, 95, 20, 64, 64, FT_LP24, 20, 20, LT_TREMOLO, 20, 0, TP_CUT, 20),
-    PR("octave stab", EG_PRISM, 110, 64, 8, 60, VM_POLY, 0, 100, 0, 50, 0, 30, 0, 45, 0, 30, 70, 30, 110, 64, FT_LP24, 10, 20, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("detuned pad", EG_PRISM, 50, 0, 40, 127, VM_POLY, 0, 95, 85, 80, 90, 95, 70, 80, 40, 80, 60, 15, 80, 50, FT_LP24, 0, 70, LT_VALUE, 1, 85, TP_CUT, 0),
-    PR("glass keys", EG_PRISM, 0, 64, 5, 70, VM_POLY, 0, 100, 0, 75, 50, 60, 0, 65, 0, 50, 85, 10, 90, 80, FT_LP12, 0, 35, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("sub pulse", EG_PRISM, 127, 0, 0, 0, VM_MONO, 0, 115, 0, 60, 80, 30, 0, 50, 0, 30, 45, 20, 90, 30, FT_LP24, 0, 0, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("major third", EG_PRISM, 64, 21, 12, 90, VM_POLY, 0, 95, 20, 70, 80, 60, 10, 60, 20, 60, 75, 20, 80, 64, FT_LP24, 0, 40, LT_VALUE, 7, 90, TP_E3, 0),
-    PR("rubber lead", EG_PRISM, 30, 64, 25, 20, VM_LEGATO, 60, 100, 0, 60, 90, 30, 0, 40, 0, 30, 50, 60, 120, 64, FT_LP24, 20, 10, LT_OFF, 6, 64, TP_CUT, 0),
+    PR("prism bass", EG_PRISM, 64, 1, 15, 0, VM_MONO, 0, 110, 0, 70, 50, 30, 0, 60, 0, 30, 56, 30, 100, 40, FT_LADDER, 0, 0, NOLFO),
+    PR("fifth lead", EG_PRISM, 80, 3, 10, 50, VM_LEGATO, 35, 100, 2, 60, 100, 40, 0, 60, 0, 40, 95, 20, 64, 64, FT_SVF, 20, 20, (LT_TREMOLO, 92, 74, 64, 40, 0)),
+    PR("octave stab", EG_PRISM, 110, 2, 8, 60, VM_POLY, 0, 100, 0, 50, 0, 30, 0, 45, 0, 30, 68, 30, 110, 64, FT_SVF, 10, 20, NOLFO),
+    PR("detuned pad", EG_PRISM, 50, 1, 40, 127, VM_POLY, 0, 95, 85, 80, 90, 95, 70, 80, 40, 80, 58, 15, 80, 50, FT_SVF, 0, 70, (LT_VALUE, 1, 85, LD_FILTER + LD_FREE, 0, 1)),
+    PR("glass keys", EG_PRISM, 0, 4, 5, 70, VM_POLY, 0, 100, 0, 75, 50, 60, 0, 65, 0, 50, 85, 10, 90, 80, FT_ZLP, 0, 35, NOLFO),
+    PR("sub pulse", EG_PRISM, 127, 1, 0, 0, VM_MONO, 0, 115, 0, 60, 80, 30, 0, 50, 0, 30, 42, 20, 90, 30, FT_SVF, 0, 0, NOLFO),
+    PR("major third", EG_PRISM, 64, 5, 12, 90, VM_POLY, 0, 95, 20, 70, 80, 60, 10, 60, 20, 60, 75, 20, 80, 64, FT_SVF, 0, 40, (LT_VALUE, 3, 90, LD_SYNTH + LD_FREE, 2, 1)),
+    PR("rubber lead", EG_PRISM, 30, 2, 25, 20, VM_LEGATO, 60, 100, 0, 60, 90, 30, 0, 40, 0, 30, 50, 60, 120, 64, FT_SVF, 20, 10, NOLFO),
     /* wavetable */
-    PR("morph pad", EG_WAVETABLE, 0, 40, 0, 0, VM_POLY, 0, 100, 70, 80, 90, 90, 60, 80, 50, 80, 85, 10, 64, 64, FT_LP12, 0, 60, LT_VALUE, 1, 110, TP_E2, 0),
-    PR("vocal", EG_WAVETABLE, 2, 30, 10, 0, VM_POLY, 0, 100, 10, 70, 80, 50, 0, 60, 0, 40, 100, 10, 64, 64, FT_LP12, 10, 40, LT_VALUE, 3, 100, TP_E2, 1),
-    PR("digital bell", EG_WAVETABLE, 7, 90, 0, 0, VM_POLY, 0, 95, 0, 90, 0, 80, 0, 80, 0, 60, 90, 10, 80, 64, FT_LP12, 0, 50, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("drift lead", EG_WAVETABLE, 0, 110, 20, 70, VM_LEGATO, 30, 100, 2, 60, 100, 40, 0, 60, 0, 40, 100, 20, 64, 64, FT_LP24, 20, 20, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("fold bass", EG_WAVETABLE, 5, 50, 30, 0, VM_MONO, 0, 110, 0, 65, 40, 30, 0, 55, 0, 30, 60, 30, 100, 40, FT_LP24, 0, 0, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("crushed keys", EG_WAVETABLE, 4, 60, 0, 0, VM_POLY, 0, 100, 0, 70, 30, 50, 0, 60, 0, 40, 90, 20, 80, 64, FT_LP12, 20, 30, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("harmonic swell", EG_WAVETABLE, 3, 0, 0, 0, VM_POLY, 0, 100, 90, 80, 100, 90, 60, 60, 0, 60, 100, 0, 64, 64, FT_LP12, 0, 70, LT_VALUE, 0, 127, TP_E2, 2),
-    PR("pulse width", EG_WAVETABLE, 1, 20, 0, 0, VM_POLY, 0, 100, 5, 70, 70, 50, 0, 60, 0, 40, 80, 15, 80, 64, FT_LP24, 0, 30, LT_VALUE, 5, 100, TP_E2, 1),
+    PR("morph pad", EG_WAVETABLE, 0, 40, 0, 0, VM_POLY, 0, 100, 70, 80, 90, 90, 60, 80, 50, 80, 85, 10, 64, 64, FT_ZLP, 0, 60, (LT_VALUE, 1, 110, LD_SYNTH + LD_FREE, 1, 1)),
+    PR("buzz lead", EG_WAVETABLE, 1, 30, 10, 0, VM_LEGATO, 20, 100, 2, 70, 100, 40, 0, 60, 0, 40, 100, 10, 64, 64, FT_ZLP, 10, 40, (LT_VALUE, 2, 100, LD_SYNTH + LD_FREE, 1, 1)),
+    PR("zap bell", EG_WAVETABLE, 8, 90, 0, 0, VM_POLY, 0, 95, 0, 90, 0, 80, 0, 80, 0, 60, 90, 10, 80, 64, FT_ZLP, 0, 50, NOLFO),
+    PR("drift lead", EG_WAVETABLE, 0, 110, 20, 70, VM_LEGATO, 30, 100, 2, 60, 100, 40, 0, 60, 0, 40, 100, 20, 64, 64, FT_SVF, 20, 20, NOLFO),
+    PR("fractal bass", EG_WAVETABLE, 5, 50, 30, 0, VM_MONO, 0, 110, 0, 65, 40, 30, 0, 55, 0, 30, 56, 30, 100, 40, FT_LADDER, 0, 0, NOLFO),
+    PR("crushed keys", EG_WAVETABLE, 2, 60, 0, 0, VM_POLY, 0, 100, 0, 70, 30, 50, 0, 60, 0, 40, 90, 20, 80, 64, FT_ZLP, 20, 30, NOLFO),
+    PR("prime swell", EG_WAVETABLE, 7, 0, 0, 0, VM_POLY, 0, 100, 90, 80, 100, 90, 60, 60, 0, 60, 100, 0, 64, 64, FT_ZLP, 0, 70, (LT_VALUE, 0, 127, LD_SYNTH + LD_FREE, 1, 2)),
+    PR("octave stack", EG_WAVETABLE, 6, 20, 0, 0, VM_POLY, 0, 100, 5, 70, 70, 50, 0, 60, 0, 40, 80, 15, 80, 64, FT_SVF, 0, 30, (LT_VALUE, 2, 100, LD_SYNTH + LD_FREE, 1, 1)),
     /* axis */
-    PR("lush strings", EG_AXIS, 45, 30, 20, 20, VM_POLY, 0, 100, 70, 80, 100, 80, 50, 70, 50, 70, 100, 5, 64, 64, FT_LP12, 0, 60, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("fm bell", EG_AXIS, 60, 70, 0, 0, VM_POLY, 0, 95, 0, 95, 0, 90, 0, 90, 0, 80, 115, 0, 64, 64, FT_LP12, 0, 50, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("axis bass", EG_AXIS, 50, 0, 60, 0, VM_MONO, 0, 110, 0, 70, 60, 30, 0, 60, 0, 30, 80, 20, 90, 40, FT_LP24, 0, 0, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("fifth pad", EG_AXIS, 35, 55, 10, 50, VM_POLY, 0, 95, 90, 80, 100, 100, 70, 80, 40, 80, 100, 10, 64, 64, FT_LP12, 0, 70, LT_VALUE, 2, 90, TP_E1, 0),
-    PR("fm pluck", EG_AXIS, 80, 80, 20, 0, VM_POLY, 0, 100, 0, 55, 0, 40, 0, 50, 0, 40, 100, 10, 90, 64, FT_LP12, 10, 30, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("hollow lead", EG_AXIS, 70, 90, 60, 40, VM_LEGATO, 30, 100, 2, 60, 100, 40, 0, 60, 0, 40, 110, 10, 64, 64, FT_LP12, 20, 20, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("slow beat", EG_AXIS, 40, 50, 0, 90, VM_POLY, 0, 100, 40, 80, 100, 70, 0, 60, 0, 40, 100, 0, 64, 64, FT_LP12, 0, 50, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("tines", EG_AXIS, 55, 67, 0, 10, VM_POLY, 0, 100, 0, 80, 30, 60, 0, 70, 0, 50, 110, 0, 64, 64, FT_LP12, 0, 40, LT_OFF, 6, 64, TP_CUT, 0),
+    PR("lush strings", EG_AXIS, 45, 30, 20, 20, VM_POLY, 0, 100, 70, 80, 100, 80, 50, 70, 50, 70, 100, 5, 64, 64, FT_ZLP, 0, 60, NOLFO),
+    PR("fm bell", EG_AXIS, 60, 100, 0, 0, VM_POLY, 0, 95, 0, 95, 0, 90, 0, 90, 0, 80, 115, 0, 64, 64, FT_ZLP, 0, 50, NOLFO),
+    PR("axis bass", EG_AXIS, 50, 0, 60, 0, VM_MONO, 0, 110, 0, 70, 60, 30, 0, 60, 0, 30, 76, 20, 90, 40, FT_SVF, 0, 0, NOLFO),
+    PR("fifth pad", EG_AXIS, 35, 72, 10, 50, VM_POLY, 0, 95, 90, 80, 100, 100, 70, 80, 40, 80, 100, 10, 64, 64, FT_ZLP, 0, 70, (LT_VALUE, 0, 90, LD_SYNTH + LD_FREE, 0, 1)),
+    PR("fm pluck", EG_AXIS, 80, 104, 20, 0, VM_POLY, 0, 100, 0, 55, 0, 40, 0, 50, 0, 40, 100, 10, 90, 64, FT_ZLP, 10, 30, NOLFO),
+    PR("hollow lead", EG_AXIS, 70, 110, 60, 40, VM_LEGATO, 30, 100, 2, 60, 100, 40, 0, 60, 0, 40, 110, 10, 64, 64, FT_ZLP, 20, 20, NOLFO),
+    PR("slow beat", EG_AXIS, 40, 50, 0, 90, VM_POLY, 0, 100, 40, 80, 100, 70, 0, 60, 0, 40, 100, 0, 64, 64, FT_ZLP, 0, 50, NOLFO),
+    PR("tines", EG_AXIS, 55, 104, 0, 10, VM_POLY, 0, 100, 0, 80, 30, 60, 0, 70, 0, 50, 110, 0, 64, 64, FT_ZLP, 0, 40, NOLFO),
     /* epiano */
-    PR("epiano", EG_EPIANO, 60, 20, 40, 30, VM_POLY, 0, 100, 0, 90, 60, 50, 0, 70, 0, 40, 105, 5, 64, 64, FT_LP12, 10, 30, LT_TREMOLO, 24, 30, TP_CUT, 0),
-    PR("soft tines", EG_EPIANO, 35, 5, 20, 60, VM_POLY, 0, 100, 0, 95, 50, 60, 0, 70, 0, 40, 100, 0, 64, 64, FT_LP12, 0, 40, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("gritty keys", EG_EPIANO, 80, 80, 60, 20, VM_POLY, 0, 100, 0, 85, 50, 40, 0, 60, 0, 40, 100, 10, 64, 64, FT_LP12, 20, 20, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("ep bass", EG_EPIANO, 70, 40, 70, 0, VM_MONO, 0, 110, 0, 80, 50, 30, 0, 60, 0, 30, 90, 10, 64, 40, FT_LP12, 0, 0, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("ep lead", EG_EPIANO, 90, 50, 50, 40, VM_LEGATO, 20, 100, 0, 80, 90, 40, 0, 60, 0, 40, 110, 10, 64, 64, FT_LP12, 20, 20, LT_TREMOLO, 26, 20, TP_CUT, 10),
-    PR("music box", EG_EPIANO, 40, 0, 0, 110, VM_POLY, 0, 95, 0, 80, 0, 60, 0, 60, 0, 40, 120, 0, 64, 64, FT_LP12, 0, 50, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("ep pad", EG_EPIANO, 50, 10, 0, 20, VM_POLY, 0, 95, 60, 90, 90, 90, 40, 70, 40, 70, 95, 5, 64, 64, FT_LP12, 0, 60, LT_TREMOLO, 2, 40, TP_CUT, 15),
-    PR("punchy ep", EG_EPIANO, 65, 30, 110, 50, VM_POLY, 0, 100, 0, 85, 40, 40, 0, 60, 0, 40, 105, 5, 64, 64, FT_LP12, 10, 20, LT_OFF, 6, 64, TP_CUT, 0),
-    /* organ */
-    PR("transistor", EG_ORGAN, 0, 20, 30, 50, VM_POLY, 0, 100, 0, 60, 100, 15, 0, 60, 0, 40, 110, 0, 64, 64, FT_LP12, 0, 20, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("jazz organ", EG_ORGAN, 40, 60, 50, 90, VM_POLY, 0, 100, 0, 60, 100, 15, 0, 60, 0, 40, 105, 0, 64, 64, FT_LP12, 0, 20, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("full organ", EG_ORGAN, 70, 80, 20, 60, VM_POLY, 0, 95, 0, 60, 100, 20, 0, 60, 0, 40, 110, 0, 64, 64, FT_LP12, 0, 30, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("church", EG_ORGAN, 127, 100, 0, 0, VM_POLY, 0, 95, 30, 60, 100, 60, 0, 60, 0, 40, 100, 0, 64, 64, FT_LP12, 0, 90, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("organ bass", EG_ORGAN, 30, 127, 0, 0, VM_MONO, 0, 110, 0, 60, 100, 15, 0, 60, 0, 40, 80, 0, 64, 40, FT_LP12, 0, 0, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("swell", EG_ORGAN, 90, 50, 90, 10, VM_POLY, 0, 95, 90, 60, 100, 90, 60, 60, 0, 40, 90, 0, 64, 64, FT_LP12, 0, 60, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("dizzy", EG_ORGAN, 60, 40, 127, 127, VM_POLY, 0, 95, 20, 60, 100, 40, 0, 60, 0, 40, 100, 0, 64, 64, FT_LP12, 20, 40, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("pipe", EG_ORGAN, 100, 70, 10, 30, VM_POLY, 0, 95, 40, 60, 100, 50, 0, 60, 0, 40, 95, 0, 64, 64, FT_LP12, 0, 70, LT_OFF, 6, 64, TP_CUT, 0),
+    PR("epiano", EG_EPIANO, 40, 10, 52, 68, VM_POLY, 0, 100, 0, 90, 60, 50, 0, 70, 0, 40, 105, 5, 64, 64, FT_ZLP, 10, 30, (LT_TREMOLO, 88, 64, 84, 64, 0)),
+    PR("soft tines", EG_EPIANO, 10, 0, 30, 90, VM_POLY, 0, 100, 0, 95, 50, 60, 0, 70, 0, 40, 100, 0, 64, 64, FT_ZLP, 0, 40, NOLFO),
+    PR("gritty keys", EG_EPIANO, 80, 80, 60, 20, VM_POLY, 0, 100, 0, 85, 50, 40, 0, 60, 0, 40, 100, 10, 64, 64, FT_ZLP, 20, 20, NOLFO),
+    PR("ep bass", EG_EPIANO, 70, 40, 70, 0, VM_MONO, 0, 110, 0, 80, 50, 30, 0, 60, 0, 30, 86, 10, 64, 40, FT_ZLP, 0, 0, NOLFO),
+    PR("ep lead", EG_EPIANO, 90, 50, 50, 40, VM_LEGATO, 20, 100, 0, 80, 90, 40, 0, 60, 0, 40, 110, 10, 64, 64, FT_ZLP, 20, 20, (LT_TREMOLO, 92, 74, 64, 30, 0)),
+    PR("music box", EG_EPIANO, 40, 0, 0, 110, VM_POLY, 0, 95, 0, 80, 0, 60, 0, 60, 0, 40, 120, 0, 64, 64, FT_ZLP, 0, 50, NOLFO),
+    PR("ep pad", EG_EPIANO, 50, 10, 0, 20, VM_POLY, 0, 95, 60, 90, 90, 90, 40, 70, 40, 70, 95, 5, 64, 64, FT_ZLP, 0, 60, (LT_TREMOLO, 1, 64, 90, 20, 0)),
+    PR("punchy ep", EG_EPIANO, 65, 30, 110, 50, VM_POLY, 0, 100, 0, 85, 40, 40, 0, 60, 0, 40, 105, 5, 64, 64, FT_ZLP, 10, 20, NOLFO),
+    /* organ (type, bass, tremolo amount, tremolo speed: 1..8) */
+    PR("transistor", EG_ORGAN, 1, 2, 3, 5, VM_POLY, 0, 100, 0, 60, 100, 15, 0, 60, 0, 40, 110, 0, 64, 64, FT_ZLP, 0, 20, NOLFO),
+    PR("jazz organ", EG_ORGAN, 3, 5, 5, 7, VM_POLY, 0, 100, 0, 60, 100, 15, 0, 60, 0, 40, 105, 0, 64, 64, FT_ZLP, 0, 20, NOLFO),
+    PR("gospel", EG_ORGAN, 4, 6, 2, 6, VM_POLY, 0, 95, 0, 60, 100, 20, 0, 60, 0, 40, 110, 0, 64, 64, FT_ZLP, 0, 30, NOLFO),
+    PR("church", EG_ORGAN, 8, 7, 1, 1, VM_POLY, 0, 95, 30, 60, 100, 60, 0, 60, 0, 40, 100, 0, 64, 64, FT_ZLP, 0, 90, NOLFO),
+    PR("organ bass", EG_ORGAN, 2, 8, 1, 1, VM_MONO, 0, 110, 0, 60, 100, 15, 0, 60, 0, 40, 76, 0, 64, 40, FT_ZLP, 0, 0, NOLFO),
+    PR("swell", EG_ORGAN, 6, 4, 7, 2, VM_POLY, 0, 95, 90, 60, 100, 90, 60, 60, 0, 40, 90, 0, 64, 64, FT_ZLP, 0, 60, NOLFO),
+    PR("dizzy", EG_ORGAN, 5, 4, 8, 8, VM_POLY, 0, 95, 20, 60, 100, 40, 0, 60, 0, 40, 100, 0, 64, 64, FT_ZLP, 20, 40, NOLFO),
+    PR("pipe", EG_ORGAN, 7, 5, 2, 3, VM_POLY, 0, 95, 40, 60, 100, 50, 0, 60, 0, 40, 95, 0, 64, 64, FT_ZLP, 0, 70, NOLFO),
     /* hardsync */
-    PR("sync stab", EG_HARDSYNC, 50, 30, 0, 0, VM_POLY, 0, 100, 0, 55, 0, 30, 0, 50, 0, 30, 100, 20, 80, 64, FT_LP24, 10, 20, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("sync bass", EG_HARDSYNC, 25, 70, 0, 0, VM_MONO, 0, 110, 0, 70, 50, 30, 0, 60, 0, 30, 70, 20, 90, 40, FT_LP24, 0, 0, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("sweep lead", EG_HARDSYNC, 70, 20, 0, 20, VM_LEGATO, 30, 100, 2, 60, 100, 40, 0, 60, 0, 40, 100, 15, 64, 64, FT_LP24, 20, 20, LT_VALUE, 6, 100, TP_E1, 0),
-    PR("jab", EG_HARDSYNC, 90, 0, 20, 40, VM_POLY, 0, 100, 0, 40, 0, 20, 0, 40, 0, 20, 110, 20, 64, 64, FT_LP12, 10, 10, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("sync pad", EG_HARDSYNC, 40, 40, 0, 10, VM_POLY, 0, 95, 80, 80, 90, 90, 60, 80, 40, 80, 70, 15, 80, 50, FT_LP24, 0, 60, LT_VALUE, 1, 90, TP_E1, 0),
-    PR("noisy pluck", EG_HARDSYNC, 60, 20, 70, 60, VM_POLY, 0, 100, 0, 50, 0, 30, 0, 45, 0, 30, 90, 30, 100, 64, FT_LP24, 10, 30, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("thin lead", EG_HARDSYNC, 100, 0, 0, 90, VM_LEGATO, 20, 100, 0, 60, 100, 30, 0, 60, 0, 40, 110, 10, 64, 64, FT_LP12, 20, 20, LT_TREMOLO, 22, 0, TP_CUT, 15),
-    PR("sync keys", EG_HARDSYNC, 35, 50, 0, 0, VM_POLY, 0, 100, 0, 75, 40, 50, 0, 65, 0, 40, 85, 15, 90, 64, FT_LP24, 0, 30, LT_OFF, 6, 64, TP_CUT, 0),
+    PR("sync stab", EG_HARDSYNC, 50, 30, 0, 0, VM_POLY, 0, 100, 0, 55, 0, 30, 0, 50, 0, 30, 100, 20, 80, 64, FT_SVF, 10, 20, NOLFO),
+    PR("sync bass", EG_HARDSYNC, 25, 70, 0, 0, VM_MONO, 0, 110, 0, 70, 50, 30, 0, 60, 0, 30, 66, 20, 90, 40, FT_LADDER, 0, 0, NOLFO),
+    PR("sweep lead", EG_HARDSYNC, 70, 20, 0, 20, VM_LEGATO, 30, 100, 2, 60, 100, 40, 0, 60, 0, 40, 100, 15, 64, 64, FT_SVF, 20, 20, (LT_VALUE, 3, 100, LD_SYNTH, 0, 1)),
+    PR("jab", EG_HARDSYNC, 90, 0, 60, 40, VM_POLY, 0, 100, 0, 40, 0, 20, 0, 40, 0, 20, 110, 20, 64, 64, FT_ZLP, 10, 10, NOLFO),
+    PR("sync pad", EG_HARDSYNC, 40, 40, 0, 10, VM_POLY, 0, 95, 80, 80, 90, 90, 60, 80, 40, 80, 68, 15, 80, 50, FT_SVF, 0, 60, (LT_VALUE, 1, 90, LD_SYNTH + LD_FREE, 0, 1)),
+    PR("noisy pluck", EG_HARDSYNC, 60, 20, 110, 60, VM_POLY, 0, 100, 0, 50, 0, 30, 0, 45, 0, 30, 90, 30, 100, 64, FT_SVF, 10, 30, NOLFO),
+    PR("thin lead", EG_HARDSYNC, 100, 0, 0, 90, VM_LEGATO, 20, 100, 0, 60, 100, 30, 0, 60, 0, 40, 110, 10, 64, 64, FT_ZLP, 20, 20, (LT_TREMOLO, 92, 76, 64, 30, 0)),
+    PR("sync keys", EG_HARDSYNC, 35, 50, 0, 0, VM_POLY, 0, 100, 0, 75, 40, 50, 0, 65, 0, 40, 85, 15, 90, 64, FT_SVF, 0, 30, NOLFO),
     /* dissolve */
-    PR("hairdryer", EG_DISSOLVE, 90, 60, 20, 30, VM_POLY, 0, 100, 40, 80, 100, 70, 0, 60, 0, 40, 110, 0, 64, 64, FT_LP12, 0, 60, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("noise pad", EG_DISSOLVE, 50, 30, 10, 60, VM_POLY, 0, 95, 90, 80, 100, 100, 70, 80, 40, 80, 100, 10, 64, 64, FT_LP12, 0, 80, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("bright lead", EG_DISSOLVE, 20, 10, 80, 10, VM_LEGATO, 30, 100, 2, 60, 100, 40, 0, 60, 0, 40, 110, 10, 64, 64, FT_LP12, 20, 20, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("shimmer", EG_DISSOLVE, 30, 0, 40, 90, VM_POLY, 0, 95, 70, 80, 100, 90, 0, 60, 0, 40, 115, 0, 64, 64, FT_LP12, 0, 90, LT_VALUE, 2, 90, TP_E1, 0),
-    PR("dissolve bass", EG_DISSOLVE, 10, 20, 60, 0, VM_MONO, 0, 110, 0, 70, 60, 30, 0, 60, 0, 30, 80, 20, 90, 40, FT_LP24, 0, 0, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("wind", EG_DISSOLVE, 127, 100, 0, 50, VM_POLY, 0, 100, 60, 80, 100, 80, 0, 60, 0, 40, 90, 20, 64, 64, FT_BP, 0, 70, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("sine keys", EG_DISSOLVE, 0, 0, 20, 5, VM_POLY, 0, 100, 0, 80, 40, 60, 0, 60, 0, 40, 120, 0, 64, 64, FT_LP12, 0, 40, LT_OFF, 6, 64, TP_CUT, 0),
-    PR("grit swarm", EG_DISSOLVE, 70, 110, 50, 70, VM_POLY, 0, 100, 10, 70, 80, 50, 0, 60, 0, 40, 100, 10, 64, 64, FT_LP12, 20, 40, LT_OFF, 6, 64, TP_CUT, 0),
+    PR("hairdryer", EG_DISSOLVE, 90, 60, 20, 30, VM_POLY, 0, 100, 40, 80, 100, 70, 0, 60, 0, 40, 110, 0, 64, 64, FT_ZLP, 0, 60, NOLFO),
+    PR("noise pad", EG_DISSOLVE, 50, 30, 10, 60, VM_POLY, 0, 95, 90, 80, 100, 100, 70, 80, 40, 80, 100, 10, 64, 64, FT_ZLP, 0, 80, NOLFO),
+    PR("bright lead", EG_DISSOLVE, 20, 10, 80, 10, VM_LEGATO, 30, 100, 2, 60, 100, 40, 0, 60, 0, 40, 110, 10, 64, 64, FT_ZLP, 20, 20, NOLFO),
+    PR("shimmer", EG_DISSOLVE, 30, 0, 40, 90, VM_POLY, 0, 95, 70, 80, 100, 90, 0, 60, 0, 40, 115, 0, 64, 64, FT_ZLP, 0, 90, (LT_VALUE, 0, 90, LD_SYNTH + LD_FREE, 0, 1)),
+    PR("dissolve bass", EG_DISSOLVE, 10, 20, 60, 0, VM_MONO, 0, 110, 0, 70, 60, 30, 0, 60, 0, 30, 76, 20, 90, 40, FT_LADDER, 0, 0, NOLFO),
+    PR("wind", EG_DISSOLVE, 127, 100, 0, 50, VM_POLY, 0, 120, 60, 80, 100, 80, 0, 60, 0, 40, 40, 20, 64, 64, FT_ZHP, 0, 70, NOLFO),
+    PR("sine keys", EG_DISSOLVE, 0, 0, 20, 5, VM_POLY, 0, 100, 0, 80, 40, 60, 0, 60, 0, 40, 120, 0, 64, 64, FT_ZLP, 0, 40, NOLFO),
+    PR("grit swarm", EG_DISSOLVE, 70, 110, 50, 70, VM_POLY, 0, 100, 10, 70, 80, 50, 0, 60, 0, 40, 100, 10, 64, 64, FT_ZLP, 20, 40, NOLFO),
 };
 const int NPRESETS = (int)(sizeof PRESETS / sizeof PRESETS[0]);
 

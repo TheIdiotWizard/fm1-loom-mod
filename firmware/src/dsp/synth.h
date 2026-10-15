@@ -25,35 +25,68 @@ extern const char *const EG_KNOB[NENGINE][4];      /* each engine's four knob na
 
 enum {
     TP_ENGINE, TP_E1, TP_E2, TP_E3, TP_E4,         /* Engine page: the engine and its four knobs */
-    TP_VMODE, TP_PORTA, TP_BEND, TP_VOLUME,        /* Play page: poly / mono / legato, glide, bend range, volume */
+    TP_VMODE, TP_PORTA, TP_BEND, TP_VOLUME,        /* Play page: poly / mono / legato, glide (0 = off), bend range
+                                                     * (0 off, 1..7 semitones, 8 = an octave: tp_bend_semi), volume */
     TP_A, TP_D, TP_S, TP_R,                         /* amp ADSR */
     TP_FA, TP_FD, TP_FS, TP_FR,                     /* filter ADSR */
-    TP_CUT, TP_RES, TP_FENV, TP_KTRK, TP_FTYPE,     /* Filter page (+ type: LP12, LP24, HP, BP) */
+    TP_CUT, TP_RES, TP_FENV, TP_KTRK, TP_FTYPE,     /* Filter page (cutoff 50 Hz .. 20 kHz) and the type (FT_*); on a
+                                                     * drumline track low cut / compression / drive / hi cut */
     TP_SEND1, TP_SEND2, TP_SENDT,                   /* sends: fx I, fx II, tape */
-    TP_LTYPE, TP_LSPEED, TP_LAMT, TP_LDEST, TP_LX,  /* LFO: type (off, value, tremolo, random, duck), speed, amount,
-                                                     * destination (a TP_* index), extra (value: shape; tremolo:
-                                                     * vibrato; duck: the source track; random: smooth) */
+    TP_LTYPE, TP_LSPEED, TP_LAMT, TP_LDEST, TP_LX,  /* LFO: type (off, value, tremolo, random, duck), then its four
+                                                     * knobs as the comment below the enum says */
+    TP_LX2,                                         /* a fifth LFO value: shape (value, tremolo) or envelope (random) */
     TP_PLAYER, TP_P1, TP_P2, TP_P3, TP_P4,          /* Players: off / arp / maestro / hold and its four knobs */
+    TP_AP1, TP_AP2, TP_AP3, TP_AP4,                 /* the arp's second page: length, style, glide, stereo */
     TP_LEVEL, TP_PAN,                               /* Mix */
     TP_BRAIN,                                       /* follows the brain: 0 no, 1 diatonic, 2 transpose only */
     TP_CHAN,                                        /* MIDI channel 0 = off, 1..16 */
-    TP_DRUM0,                                       /* the drum kit: NDRUM sounds * DP_N */
-    NTP = TP_DRUM0 + 11 * 6
+    TP_DRUM0,                                       /* the drum kit: NDRUM keys * DP_N */
+    NTP = TP_DRUM0 + 11 * 9
 };
-enum { DP_MODEL, DP_TUNE, DP_TONE, DP_DECAY, DP_PAN, DP_LEVEL, DP_N };   /* a drum sound's knobs */
+/* a drumline key: its model (drumline.h DM_*), the model's four knobs (names per model: DM_KNOB), then the
+ * OP-XY's shift page random / pan / volume (-30..+20 dB, 0..127, 76 = 0 dB) and the play mode (drumline.h PM_*).
+ * On a drumline track TP_A..TP_R are the track-wide drum envelope: funk (pre-attack delay), attack, random
+ * (randomise every model's knobs per hit, the kick's pitch excepted), length (sustain / release scale). */
+enum { DP_MODEL, DP_K1, DP_K2, DP_K3, DP_K4, DP_RANDOM, DP_PAN, DP_VOLUME, DP_MODE, DP_N };
 #define TP_DRUM(s, k) (TP_DRUM0 + (s) * DP_N + (k))
 #define NTP_SOUND TP_PLAYER                          /* a preset keeps par[0..TP_PLAYER) */
 
 enum { VM_POLY, VM_MONO, VM_LEGATO };
-enum { FT_LP12, FT_LP24, FT_HP, FT_BP, NFT };
+/* filter types, the OP-XY's names: svf (24 dB, aggressive), ladder (Moog-like, saturating feedback), z lowpass
+ * (gentle 12 dB), z hipass (12 dB), dynamic (drum tracks: low cut, compression, drive, hi cut on the
+ * Filter page's four knobs instead of cutoff / res / env / keytrack) */
+enum { FT_SVF, FT_LADDER, FT_ZLP, FT_ZHP, FT_DYNAMIC, NFT };
+/* the LFO (the notebook 9.2-9.7): TP_LSPEED is one knob: 0..7 synced 2/1, 1, 1/2, 1/4, 1/8, 1/16, 1/32, 1/64
+ * (counter-clockwise), 8..127 free (clockwise, 0.1..30 Hz). Per type the five values TP_LSPEED / TP_LAMT /
+ * TP_LDEST / TP_LX / TP_LX2 mean:
+ *   value:   speed, amount -100..100 % (64 = 0), destination (LD_*: the module synth / envelope / filter / amp,
+ *            + LD_FREE for the free-running version, as the OP-XY's list), parameter (TP_LX: the module's knob
+ *            0..3: the engine's four, attack / decay / sustain / release, cutoff / reso / env / keytrack, volume /
+ *            pitch / pan / -), shape (TP_LX2: square, sine, ramp, saw).
+ *            100 % = the destination knob's whole range; pitch = +-12 semitones.
+ *   random:  speed, amount 0..100 % (unipolar: the offset only adds), destination (LD_*), parameter (TP_LX),
+ *            envelope (TP_LX2: fade in / fade out, below)
+ *   tremolo: rate, vibrato amount -100..100 % (64 = 0, 100 % = +-1 semitone), volume amount -100..100 % (TP_LDEST,
+ *            64 = 0), envelope (TP_LX), shape (TP_LX2: sine, saw, exponential, square, blip)
+ *   duck:    source (TP_LSPEED: 0..7 tracks 1-8, 8..10 brain / punch / tape, 11 metronome), amount 0..100 %,
+ *            hold (TP_LDEST, ms), release (TP_LX, ms)
+ * Regular (not free): the LFO's phase restarts on every note of the track (random draws a fresh value too).
+ * The envelope knob: 64 = none; below, the LFO fades in from the note over up to 3 s (0 = 3 s, 63 = at once);
+ * above, it fades out over up to 3 s (65 = 3 s, 127 = 50 ms). */
 enum { LT_OFF, LT_VALUE, LT_TREMOLO, LT_RANDOM, LT_DUCK, NLT };
-enum { LS_SPEED_SYNC_N = 13 };                     /* LFO speed 0..12 synced (8 bars .. 1/32), 13..127 free Hz */
+enum { LD_SYNTH, LD_ENV, LD_FILTER, LD_AMP, LD_FREE = 4, NLD = 8 };   /* TP_LDEST: module, + LD_FREE = free-running */
+#define LS_SYNC_N 8                                /* TP_LSPEED values below this are synced divisions */
 enum { PL_OFF, PL_ARP, PL_MAESTRO, PL_HOLD, NPL };
-/* arp: P1 speed (1/4 1/8 1/8T 1/16 1/16T 1/32), P2 pattern (up down updown random played), P3 range 1..4,
- * P4 hold; maestro: P1 roll 0..127 (strum), P2 pattern (up down updown random), P3 -, P4 hold */
+/* arp: P1 speed (1/4 1/4T 1/8 1/8T 1/16 1/16T 1/32 1/32T 1/64), P2 pattern (up, down, up-down 1, up-down 2 (the
+ * ends repeated), as played, random), P3 range 1..4 octaves, P4 hold; its page 2 (the OP-XY's shift page) is
+ * TP_AP1..AP4 = note length (short medium long), style (off A B C D E), glide (off low high), stereo (mono
+ * narrow wide). maestro: P1 roll 0..63 (63 = a note per sequencer step of the
+ * track), P2 pattern (up down up-down random), P3 -, P4 hold */
 
-/* how a value is shown */
-enum { PK_NUM, PK_PCT, PK_BIP, PK_NAMES, PK_SEMI, PK_SWITCH, PK_MS, PK_HZ_SYNC };
+/* how a value is shown: a number, a percentage, bipolar (64 = 0), a name from the list, semitones, on / off,
+ * milliseconds / seconds, the LFO speed (a division or Hz), 00..99 (the engine knobs, as the OP-XY prints them),
+ * Hz / kHz (cutoff), an LFO fade ("in 50 %" / "off" / "out 50 %"), dB */
+enum { PK_NUM, PK_PCT, PK_BIP, PK_NAMES, PK_SEMI, PK_SWITCH, PK_MS, PK_HZ_SYNC, PK_NN, PK_HZ, PK_FADE, PK_DB };
 typedef struct {
     const char *name;                 /* short, as on the knob row (<= 8 chars) */
     uint8_t lo, hi, def;
@@ -67,6 +100,7 @@ void tp_text(int p, int v, int engine, char *num, char *unit);   /* the value as
 const tp_info_t *tp_info_par(int p, const uint8_t *par);
 void tp_text_par(int p, int v, const uint8_t *par, char *num, char *unit);
 void sound_default(uint8_t *par, int engine);       /* par[NTP] for a fresh track of this engine */
+static inline int tp_bend_semi(int v) { return v >= 8 ? 12 : v; }   /* TP_BEND as semitones */
 
 /* factory presets: the sound part of par[] */
 typedef struct {
@@ -86,6 +120,8 @@ typedef struct {
     uint8_t mute;                     /* 1 = silent (punch mute: voices keep running) */
     uint8_t send1, send2;             /* send offsets 0..127 (punch delay / reverb up) */
     uint8_t long_tail;                /* drums: decay x4 */
+    uint8_t hp;                       /* high-pass 0..127 (the punch filter on drums; the engine also tells the
+                                       * drumline's dynamic filter); the synth may ignore it */
 } perf_t;
 
 typedef struct synth synth_t;         /* opaque: dsp/synth.c */
@@ -103,7 +139,8 @@ perf_t *synth_perf(synth_t *s, int trk);            /* the track's performance s
 #define LOCK_NONE 0xFFu               /* seq/pattern.h's: no lock */
 #endif
 void synth_lock(synth_t *s, int trk, int param, int val);   /* a parameter lock in effect (LOCK_NONE: the knob's) */
-void synth_duck_trigger(synth_t *s, int src_trk);  /* a hit on src_trk (0..7, 8 = metronome): duck LFOs listening drop */
+void synth_duck_trigger(synth_t *s, int src);      /* a hit on a duck source (0..7 tracks, 8..10 brain / punch / tape,
+                                                    * 11 metronome): duck LFOs listening to it drop */
 /* a block: synth_prepare(n) once (the tracks' LFO, tremolo and duck values for every chunk boundary inside
  * the next n frames, n <= 512, and the meters), then synth_render(n) for each voice range, on any core: a
  * render touches only its voices' state, so 0..8 on one core and 8..16 on the other may run at once.

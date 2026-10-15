@@ -4,28 +4,32 @@
  * Send slots: each takes a mono send and adds a stereo return. The reverb is 9W9's (X0X's fxbus.c):
  * four int16 combs with damping in the loop and two allpasses a side, the right side reading the
  * combs with alternate signs; here the combs are circular buffers read at a modulated, interpolated
- * tap so "size" scales their lengths and "modulation" wanders them. The delay is a ping-pong over
- * the two int16 lines, timed in sixteenths of the tempo and slewed so a change of time warps instead
- * of clicking (9W9 again); the chorus is the JP-8000's stepped, slewed triangle on a short float line
- * (NuSaw's); the distortion a tanh between a low cut and a high cut; the lofi a sample-and-hold with
- * a wandering rate and a quantiser; the phaser four first-order allpasses a side, the right side's
- * sweep a quarter turn behind.
+ * tap so "size" scales their lengths and "mod" wanders them (at a fixed 0.5 Hz), and "tone" filters
+ * the wet: a low-pass below the centre, a high-pass above it, flat in the middle. The delay is a
+ * ping-pong over the two int16 lines, timed in the notebook's divisions of the tempo (1/32 to 1/2,
+ * dotted ones between) and slewed so a change of time warps instead of clicking (9W9 again); the
+ * chorus is the JP-8000's stepped, slewed triangle on a short int16 line (NuSaw's); the distortion a
+ * tanh-to-hard-clip ("clip" blends them) between a low cut and a high cut; the lofi a sample-and-hold
+ * with a quantiser, its "drift" a stereo spread: the right side reads the lofi output back from the
+ * chorus's idle line a few milliseconds late, the lateness wandering slowly; the phaser four first-
+ * order allpasses a side, the right side's sweep a quarter turn behind. The delay's and the reverb's
+ * "dry" is the share of the send passed through alongside the effect, which is always there.
  *
  * Knob values are turned into the effect's numbers in fx_set (main loop) and glide toward them in
  * the interrupt a block at a time (~10 ms): no zipper noise on a turn. A change of effect clears
  * the states at the next block; fx_set zeroes the new effect's lines itself, which is safe because
- * the running effect never uses another's line. The slot's filter page (high-pass, low-pass) runs
- * on the mono send before the effect: one filter instead of two, and the same result for the linear
- * effects.
+ * the running effect never uses another's line (the lofi borrows the chorus's, which the chorus
+ * cannot be using at the same time). The slot's filter page (high-pass, low-pass) runs on the mono
+ * send before the effect: one filter instead of two, and the same result for the linear effects.
  *
  * Tape: the routed tracks' send is low-passed, taken every fourth sample and written to the int16
  * ring (AMB-1's quarter-rate tape). A held segment loops a sixteenth of the last 16 steps, counted
- * back from the last step boundary tape_bar() reported, read at the pitch and speed knobs' rate with
- * linear interpolation; the write head stands still meanwhile.
+ * back from the last step boundary tape_bar() reported, read at the rate the pitch (whole octaves)
+ * and speed (50..200 %) knobs give, with linear interpolation; the write head stands still meanwhile.
  *
  * Master: the two groups' levels, a 3-band EQ (RBJ shelves and a peak, their gains scaled by blend
- * so blend 0 is a true bypass), the saturator (a tanh / hard clip mix with a tilt), X0X's bus
- * compressor behind its one-knob macro, the master level and X0X's lookahead limiter.
+ * so blend 0 is a true bypass), the saturator (a tanh / hard clip mix with a tilt, "mix" into the
+ * bus), X0X's bus compressor behind its one-knob macro, the master level and X0X's lookahead limiter.
  *
  * Everything here runs in the audio interrupt; fx_set / tape_set / master_set write plain words from
  * the main loop. Float, fastmath.h; stack locals stay small (a 32-sample block). */
@@ -35,13 +39,25 @@
 #define SR 44100.0f
 #define SUB 32                                /* the block: parameter glides step here */
 #define GLIDE 0.07f                           /* a block's share of the distance: ~10 ms to settle */
-#define CHO_N 2048                            /* the chorus line: 46 ms */
+#define CHO_N 2048                            /* the chorus line: 46 ms (int16; the lofi's spread reads it too) */
+#define RV_MOD_HZ 0.5f                        /* the reverb's wander */
+#define RV_WET 0.8f                           /* the reverb's return level: the effect is always present */
+#define LOFI_SPREAD 480.0f                    /* drift 99: the right side ~11 ms behind the left */
 
 const char *const FXT_NAME[NFXT] = {"chorus", "delay", "distortion", "lofi", "phaser", "reverb"};
 const char *const FXT_KNOB[NFXT][4] = {
-    {"rate", "depth", "feedback", "stereo"}, {"size", "amount", "fine", "dry"},
-    {"drive", "amount", "low cut", "high cut"}, {"rate", "bits", "quality", "drift"},
-    {"frequency", "depth", "rate", "feedback"}, {"size", "modulation", "rate", "feedback"},
+    {"rate", "depth", "feedback", "stereo"}, {"size", "fine", "feedback", "dry"},
+    {"drive", "clip", "lo cut", "hi cut"},   {"rate", "bits", "quality", "drift"},
+    {"frequency", "depth", "rate", "feedback"}, {"size", "mod", "tone", "dry"},
+};
+/* the notebook's printed defaults (00..99), stored as 0..127: the value * 1.28, rounded */
+const uint8_t FXT_DEFAULT[NFXT][4] = {
+    {76, 64, 64, 64},                         /* chorus      59 50 50 50 */
+    {83, 64, 64, 127},                        /* delay       65 50 50 99: size 1/8D */
+    {8, 127, 64, 127},                        /* distortion  06 99 50 99 */
+    {64, 93, 78, 127},                        /* lofi        50 73 61 99 */
+    {38, 78, 38, 64},                         /* phaser      30 61 30 50 */
+    {88, 0, 37, 127},                         /* reverb      69 00 29 99 */
 };
 
 /* the reverb's lines inside the int16 buffer: 9W9's comb lengths, each with room to grow 1.9x,
@@ -51,11 +67,11 @@ static const int32_t RV_CAP[4] = {2125, 2262, 2431, 2581};
 static const int32_t RV_AP[4] = {556, 441, 579, 457};
 #define RV_AP0 (2125 + 2262 + 2431 + 2581)
 _Static_assert(RV_AP0 + 556 + 441 + 579 + 457 <= FX_RV_LEN, "the reverb's lines do not fit FX_RV_LEN");
-/* the delay's divisions, in sixteenths */
-static const float DL_DIV[8] = {1.0f, 2.0f, 3.0f, 4.0f, 6.0f, 8.0f, 12.0f, 16.0f};
+/* the delay's sizes in sixteenths: 1/32, 1/32D, 1/16, 1/16D, 1/8, 1/8D, 1/4, 1/2 (dotted = 1.5x) */
+static const float DL_DIV[8] = {0.5f, 0.75f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 8.0f};
 
 struct fxslot {
-    float cho[CHO_N];
+    int16_t cho[CHO_N];
     int16_t *dl, *dr, *rv;
     uint8_t type, type_t, hpv, lpv;
     uint8_t knob[4];
@@ -76,11 +92,11 @@ struct fxslot {
     float pxl[4], pyl[4], pxr[4], pyr[4], pph, pzl, pzr, pal, par_;
     /* reverb */
     int32_t cpos[4], apos[4], rquiet;
-    float cdmp[4], cd[4], rph, rhp;
+    float cdmp[4], cd[4], rph, rhp, rtl[2], rtr[2];   /* rtl / rtr: the tone's low-pass and high-pass a side */
 };
 _Static_assert(sizeof(struct fxslot) <= FXSLOT_BYTES, "fxslot_t does not fit FXSLOT_BYTES");
 
-static inline float onepole_k(float hz) { return 1.0f - fm_expf(-FM_TWO_PI * hz / SR); }
+static inline float onepole_k(float hz) { return hz >= 20000.0f ? 1.0f : 1.0f - fm_expf(-FM_TWO_PI * hz / SR); }
 static inline float k127(int v) { return (float)(v < 0 ? 0 : v > 127 ? 127 : v) * (1.0f / 127.0f); }
 static inline int16_t f16(float x)
 {
@@ -99,8 +115,7 @@ static void zero16(int16_t *b, int32_t n)
 static void fx_states(fxslot_t *f)              /* a fresh effect: its states at rest */
 {
     int i;
-    for (i = 0; i < CHO_N; i++)
-        f->cho[i] = 0.0f;
+    zero16(f->cho, CHO_N);
     f->cw = 0; f->cph = 0.0f; f->cs1 = f->cs2 = f->chl = f->chr = f->cfbz = 0.0f;
     f->dw = 0; f->dquiet = FX_DLY_LEN; f->dlpl = f->dlpr = 0.0f;
     f->dcur = f->pt[0];                       /* a new delay starts on time (the slew is for changes) */
@@ -114,6 +129,7 @@ static void fx_states(fxslot_t *f)              /* a fresh effect: its states at
     }
     f->pph = 0.0f; f->pzl = f->pzr = 0.0f; f->pal = f->par_ = 0.0f;
     f->rquiet = FX_RV_LEN; f->rph = f->rhp = 0.0f;
+    f->rtl[0] = f->rtl[1] = f->rtr[0] = f->rtr[1] = 0.0f;
     for (i = 0; i < 6; i++)
         f->pc[i] = f->pt[i];
 }
@@ -123,7 +139,7 @@ static void delay_time(fxslot_t *f)
     float bpm = f->bpm > 20.0f ? f->bpm : 120.0f;
     float t = DL_DIV[(f->knob[0] * 8) >> 7] * 15.0f / bpm;           /* sixteenths: 60 / (bpm * 4) */
     float max_s = (float)(FX_DLY_LEN - 256) / SR;
-    t *= 1.0f + ((float)f->knob[2] - 64.0f) * (0.25f / 64.0f);        /* fine: +-25 % */
+    t *= 1.0f + ((float)f->knob[1] - 64.0f) * (0.25f / 64.0f);        /* fine: +-25 % */
     while (t > max_s)                                                 /* too long for the line: half, */
         t *= 0.5f;                                                    /* still on the beat */
     f->pt[0] = t * SR;
@@ -142,13 +158,13 @@ static void fx_derive(fxslot_t *f)
         f->pt[3] = d;                                                 /* stereo: 0 mono .. 1 opposite */
         break;
     case FXT_DELAY:
-        delay_time(f);
-        f->pt[1] = 0.95f * b;                                         /* amount: feedback */
+        delay_time(f);                                                /* size and fine */
+        f->pt[2] = 0.95f * c;                                         /* feedback */
         f->pt[3] = d;                                                 /* dry through */
         break;
     case FXT_DIST:
         f->pt[0] = fm_exp2f(a * 6.0f);                                /* drive 1 .. 64 */
-        f->pt[1] = b;                                                 /* mix */
+        f->pt[1] = b;                                                 /* clip: tanh .. hard clip */
         f->pt[2] = onepole_k(20.0f * fm_exp2f(c * 6.64f));            /* low cut 20 Hz .. 2 kHz */
         f->pt[3] = onepole_k(20000.0f * fm_exp2f(-(1.0f - d) * 5.0f)); /* high cut 625 Hz .. 20 kHz */
         f->pt[4] = fm_powf(f->pt[0], -0.3f);                          /* the louder drive, trimmed */
@@ -159,7 +175,7 @@ static void fx_derive(fxslot_t *f)
         f->pt[0] = fm_minf(fs / SR, 1.0f);
         f->pt[1] = fm_exp2f(bits - 1.0f);                             /* quantiser levels */
         f->pt[2] = c;                                                 /* quality: anti-alias filter */
-        f->pt[3] = d * 0.4f;                                          /* drift: the rate's wow */
+        f->pt[3] = d * LOFI_SPREAD;                                   /* drift: the right's lateness, samples */
         f->pt[4] = onepole_k(fm_minf(0.45f * fs, 19000.0f));
         f->pt[5] = 1.0f / f->pt[1];
         break;
@@ -172,9 +188,11 @@ static void fx_derive(fxslot_t *f)
         break;
     case FXT_REVERB:
         f->pt[0] = 0.5f * fm_exp2f(a * 1.926f);                       /* size: the combs x 0.5 .. 1.9 */
-        f->pt[1] = 24.0f * b * b;                                     /* modulation, samples */
-        f->pt[2] = 0.05f * fm_exp2f(c * 6.32f);                       /* rate 0.05 .. 4 Hz */
-        f->pt[3] = d;                                                 /* feedback: the wet level */
+        f->pt[1] = 24.0f * b * b;                                     /* mod, samples of wander */
+        /* tone: below the centre a low-pass closes to 800 Hz, above it a high-pass opens to 2 kHz */
+        f->pt[2] = c < 0.5f ? onepole_k(20000.0f * fm_exp2f(-(0.5f - c) * 9.29f)) : 1.0f;
+        f->pt[5] = c > 0.5f ? onepole_k(20.0f * fm_exp2f((c - 0.5f) * 13.29f)) : 0.0f;
+        f->pt[3] = d;                                                 /* dry through */
         f->pt[4] = 0.55f + 0.42f * a;                                 /* the loop's feedback: decay with size */
         break;
     default:
@@ -198,7 +216,8 @@ void fx_init(fxslot_t *f, int16_t *dly_l, int16_t *dly_r, int16_t *rv)
     if (dly_l) zero16(dly_l, FX_DLY_LEN);
     if (dly_r) zero16(dly_r, FX_DLY_LEN);
     if (rv) zero16(rv, FX_RV_LEN);
-    f->knob[0] = 40; f->knob[1] = 50; f->knob[2] = 64; f->knob[3] = 64;
+    for (i = 0; i < 4; i++)
+        f->knob[i] = FXT_DEFAULT[FXT_CHORUS][i];
     f->type = f->type_t = FXT_CHORUS;
     fx_derive(f);
     fx_states(f);
@@ -250,6 +269,13 @@ void fx_filter(fxslot_t *f, int hp, int lp)
 }
 
 /* ---- the effects: a block of m samples of x[] (the filtered send) into out (added) ---- */
+static inline float cho_tap(const fxslot_t *f, float p)      /* the short line, read between samples */
+{
+    int32_t i0 = (int32_t)p;
+    float a = s16f(f->cho[i0 & (CHO_N - 1)]);
+    return a + (p - (float)i0) * (s16f(f->cho[(i0 + 1) & (CHO_N - 1)]) - a);
+}
+
 static void do_chorus(fxslot_t *f, const float *x, float *ol, float *orr, int m)
 {
     const float inc = f->pc[0] / SR, range = f->pc[1], fb = f->pc[2], side = 1.0f - 2.0f * f->pc[3];
@@ -259,9 +285,8 @@ static void do_chorus(fxslot_t *f, const float *x, float *ol, float *orr, int m)
     int32_t w = f->cw;
     int i;
     for (i = 0; i < m; i++) {
-        float tri, st, dl, dr, pl, pr, fl, fr, wl, wr;
-        int32_t il, ir;
-        f->cho[w] = x[i] + fz * fb;
+        float tri, st, pl, pr, wl, wr;
+        f->cho[w] = f16(x[i] + fz * fb);
         w = (w + 1) & (CHO_N - 1);
         tri = 2.0f * fm_fabsf(2.0f * ph - 1.0f) - 1.0f;     /* the JP's stepped triangle */
         ph += inc;
@@ -270,18 +295,12 @@ static void do_chorus(fxslot_t *f, const float *x, float *ol, float *orr, int m)
         st = fm_floorf(tri * 4.0f + 0.5f) * 0.25f;
         s1 += (st - s1) * slew;
         s2 += (s1 - s2) * slew;
-        dl = centre + s2 * range;
-        dr = centre + s2 * range * side;
-        pl = (float)w - dl;
-        pr = (float)w - dr;
+        pl = (float)w - (centre + s2 * range);
+        pr = (float)w - (centre + s2 * range * side);
         if (pl < 0.0f) pl += CHO_N;
         if (pr < 0.0f) pr += CHO_N;
-        il = (int32_t)pl;
-        ir = (int32_t)pr;
-        fl = pl - (float)il;
-        fr = pr - (float)ir;
-        wl = f->cho[il & (CHO_N - 1)] + fl * (f->cho[(il + 1) & (CHO_N - 1)] - f->cho[il & (CHO_N - 1)]);
-        wr = f->cho[ir & (CHO_N - 1)] + fr * (f->cho[(ir + 1) & (CHO_N - 1)] - f->cho[ir & (CHO_N - 1)]);
+        wl = cho_tap(f, pl);
+        wr = cho_tap(f, pr);
         fz = wl;
         hl += (wl - hl) * hpk;
         hr += (wr - hr) * hpk;
@@ -305,7 +324,7 @@ static inline float tap16(const int16_t *b, float rp)
 
 static void do_delay(fxslot_t *f, const float *x, float *ol, float *orr, int m, int any)
 {
-    const float target = f->pt[0], fb = f->pc[1], dry = f->pc[3] * 0.7071f, tc = 0.35f;
+    const float target = f->pt[0], fb = f->pc[2], dry = f->pc[3] * 0.7071f, tc = 0.35f;
     float dcur = f->dcur, lpl = f->dlpl, lpr = f->dlpr;
     int32_t w = f->dw, quiet = f->dquiet;
     int i;
@@ -348,17 +367,19 @@ static void do_delay(fxslot_t *f, const float *x, float *ol, float *orr, int m, 
 
 static void do_dist(fxslot_t *f, const float *x, float *ol, float *orr, int m)
 {
-    const float pre = f->pc[0], mix = f->pc[1], hpk = f->pt[2], lpk = f->pt[3], trim = f->pc[4];
+    const float pre = f->pc[0], clip = f->pc[1], hpk = f->pt[2], lpk = f->pt[3], trim = f->pc[4];
     float hp = f->xhp, lp = f->xlp;
     int i;
     for (i = 0; i < m; i++) {
-        float y, o;
+        float y, soft, hard;
         hp += hpk * (x[i] - hp);
-        y = fm_tanhf((x[i] - hp) * pre);
+        y = (x[i] - hp) * pre;
+        soft = fm_tanhf(y);                   /* clip 0: the tanh's bend; clip 99: a hard edge */
+        hard = fm_clampf(y, -1.0f, 1.0f);
+        y = soft + clip * (hard - soft);
         lp += lpk * (y - lp);
-        o = x[i] + mix * (lp * trim - x[i]);
-        ol[i] += o;
-        orr[i] += o;
+        ol[i] += lp * trim;
+        orr[i] += lp * trim;
     }
     f->xhp = fm_flush(hp);
     f->xlp = fm_flush(lp);
@@ -366,15 +387,16 @@ static void do_dist(fxslot_t *f, const float *x, float *ol, float *orr, int m)
 
 static void do_lofi(fxslot_t *f, const float *x, float *ol, float *orr, int m)
 {
-    const float q = f->pc[1], iq = f->pc[5], qual = f->pc[2], aak = f->pt[4];
-    float step, ph = f->lph, hold = f->lhold, in1 = f->lin1, out1 = f->lout1;
+    const float q = f->pc[1], iq = f->pc[5], qual = f->pc[2], aak = f->pt[4], step = f->pc[0];
+    float ph = f->lph, hold = f->lhold, in1 = f->lin1, out1 = f->lout1, late;
+    int32_t w = f->cw;
     int i;
-    f->lwph += 0.7f * (float)m / SR;          /* the drift: a 0.7 Hz wow of the rate */
+    f->lwph += 0.3f * (float)m / SR;          /* the spread wanders: a 0.3 Hz wow of the right's lateness */
     if (f->lwph >= 1.0f)
         f->lwph -= 1.0f;
-    step = f->pc[0] * (1.0f + f->pc[3] * fm_sin_turns(f->lwph));
+    late = f->pc[3] * (1.0f + 0.04f * fm_sin_turns(f->lwph));
     for (i = 0; i < m; i++) {
-        float xf, y;
+        float xf, y, r;
         in1 += aak * (x[i] - in1);
         xf = x[i] + qual * (in1 - x[i]);      /* quality: how much is band-limited before the hold */
         ph += step;
@@ -384,10 +406,21 @@ static void do_lofi(fxslot_t *f, const float *x, float *ol, float *orr, int m)
         }
         out1 += aak * (hold - out1);
         y = hold + qual * (out1 - hold);
+        f->cho[w] = f16(y);                   /* the right side reads the left back, late */
+        if (late < 1.0f) {
+            r = y;
+        } else {
+            float rp = (float)w - late;
+            if (rp < 0.0f)
+                rp += CHO_N;
+            r = cho_tap(f, rp);
+        }
+        w = (w + 1) & (CHO_N - 1);
         ol[i] += y;
-        orr[i] += y;
+        orr[i] += r;
     }
     f->lph = ph; f->lhold = hold; f->lin1 = fm_flush(in1); f->lout1 = fm_flush(out1);
+    f->cw = w;
 }
 
 static inline float ap_coef(float hz)
@@ -427,14 +460,15 @@ static void do_phaser(fxslot_t *f, const float *x, float *ol, float *orr, int m)
 
 static void do_reverb(fxslot_t *f, const float *x, float *ol, float *orr, int m, int any)
 {
-    const float damp = 0.45f, fb = f->pc[4], wet = f->pc[3], hpk = 0.017f;   /* ~120 Hz on the send */
-    float cdd[4], cd[4], cdmp[4], hp = f->rhp;
+    const float damp = 0.45f, fb = f->pc[4], dry = f->pc[3] * 0.7071f, hpk = 0.017f;   /* ~120 Hz on the send */
+    const float tlk = f->pc[2], thk = f->pc[5];                                        /* the tone's filters */
+    float cdd[4], cd[4], cdmp[4], hp = f->rhp, tl0 = f->rtl[0], tl1 = f->rtl[1], th0 = f->rtr[0], th1 = f->rtr[1];
     int16_t *cb[4], *ab[4];
     int32_t cp[4], ap[4], quiet = f->rquiet;
     int c, i;
     if (!any && quiet >= FX_RV_LEN)
         return;
-    f->rph += f->pc[2] * (float)m / SR;
+    f->rph += RV_MOD_HZ * (float)m / SR;
     if (f->rph >= 1.0f)
         f->rph -= 1.0f;
     cb[0] = f->rv;
@@ -492,8 +526,12 @@ static void do_reverb(fxslot_t *f, const float *x, float *ol, float *orr, int m,
             *s = bo - *s * 0.5f;
             ap[c] = p + 1 >= RV_AP[c] ? 0 : p + 1;
         }
-        ol[i] += y * wet;
-        orr[i] += yr * wet;
+        tl0 += tlk * (y - tl0);               /* the tone: a low-pass (k = 1 passes), then a high-pass (k = 0 passes) */
+        tl1 += tlk * (yr - tl1);
+        th0 += thk * (tl0 - th0);
+        th1 += thk * (tl1 - th1);
+        ol[i] += (tl0 - th0) * RV_WET + x[i] * dry;
+        orr[i] += (tl1 - th1) * RV_WET + x[i] * dry;
         quiet = (wr == 0 && x[i] == 0.0f) ? quiet + 1 : 0;
     }
     for (c = 0; c < 4; c++) {
@@ -503,6 +541,8 @@ static void do_reverb(fxslot_t *f, const float *x, float *ol, float *orr, int m,
         f->apos[c] = ap[c];
     }
     f->rhp = fm_flush(hp);
+    f->rtl[0] = fm_flush(tl0); f->rtl[1] = fm_flush(tl1);
+    f->rtr[0] = fm_flush(th0); f->rtr[1] = fm_flush(th1);
     f->rquiet = quiet;
 }
 
@@ -584,13 +624,13 @@ void tape_init(tape_t *t, int16_t *buf)
 
 void tape_set(tape_t *t, int pitch, int speed, int length, int mix)
 {
-    float semi;
+    float oct;
     t->pitch = (uint8_t)(pitch < 0 ? 0 : pitch > 127 ? 127 : pitch);
     t->speed = (uint8_t)(speed < 0 ? 0 : speed > 127 ? 127 : speed);
     t->length = (uint8_t)(length < 0 ? 0 : length > 127 ? 127 : length);
     t->mix = (uint8_t)(mix < 0 ? 0 : mix > 127 ? 127 : mix);
-    semi = fm_floorf(((float)t->pitch - 64.0f) * (24.0f / 64.0f) + 0.5f);          /* +-24 semitones */
-    t->rate = fm_exp2f(semi * (1.0f / 12.0f) + ((float)t->speed - 64.0f) * (1.0f / 64.0f));   /* x 0.5 .. 2 */
+    oct = (float)(((int)t->pitch * 5) >> 7) - 2.0f;                   /* five zones: -2 .. +2 octaves, 64 = x1 */
+    t->rate = fm_exp2f(oct + ((float)t->speed - 64.0f) * (1.0f / 64.0f));   /* speed 50 .. 200 %, 64 = 100 % */
     t->wet = (float)t->mix * (1.0f / 127.0f);
 }
 
@@ -617,7 +657,7 @@ void tape_segment(tape_t *t, int seg, int on)
     avail = (float)(TAPE_LEN - 8);
     if (back > avail)
         back = avail;
-    segs = 1 + (t->length * 15) / 127;
+    segs = 1 + (t->length * 15) / 127;        /* length: 1 .. 16 steps */
     len = (float)segs * step_q;
     if (len > back - 4.0f)
         len = back - 4.0f;
@@ -689,7 +729,9 @@ float tape_process(tape_t *t, const float *in, float *out_l, float *out_r, uint3
 }
 
 /* ================================================================ master === */
-const char *const MS_NAME[NMS] = {"low", "mid", "high", "blend", "gain", "clip", "tone", "blend",
+/* the notebook's names (pp. 171-173), short enough for the knob strip: percussion, melodic, compressor
+ * and master level are perc, mel, comp, level */
+const char *const MS_NAME[NMS] = {"low", "mid", "high", "blend", "gain", "clip", "tone", "mix",
                                   "perc", "mel", "comp", "level"};
 
 typedef struct { float b0, b1, b2, a1, a2; } biq_t;
@@ -768,7 +810,7 @@ static void sat_coefs(master_t *m)
     m->clip = (float)m->pot[MS_SAT_CLIP] * (1.0f / 127.0f);
     m->tlo = fm_exp2f(-t);                     /* the tilt: +-6 dB, lows against highs around 800 Hz */
     m->thi = fm_exp2f(t);
-    m->sblend = (float)m->pot[MS_SAT_BLEND] * (1.0f / 127.0f);
+    m->sblend = (float)m->pot[MS_SAT_BLEND] * (1.0f / 127.0f);          /* mix: the saturator into the bus */
     m->strim = fm_powf(m->pre, -0.4f);
     m->sat_on = m->pot[MS_SAT_BLEND] != 0;
 }

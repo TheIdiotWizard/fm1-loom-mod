@@ -18,21 +18,33 @@ enum { AUX_BRAIN = NTRK, AUX_PUNCH, AUX_TAPE, AUX_FX1, AUX_FX2, NALLTRK };
 #define NSCENE 16
 #define NSONG 64                      /* scene slots in the song */
 #define NLANE 96                      /* parameter lock lanes (the whole project) */
-#define NDRUM 11                      /* drumline sounds: the black keys */
-#define NPUNCH_D 12                   /* drum punch-in FX: the low 12 keys F3..E4 */
-#define NPUNCH_M 15                   /* melodic punch-in FX: the upper 15 keys F4..G5 */
+#define NDRUM 11                      /* drumline keys: the black keys (a model instance each) */
 #define PPS 24                        /* ticks a step (a sixteenth at scale 1): nudge and lengths count in these */
 
-/* step components, on the black keys 1..11 (0 = none); values 0..8 = the OP-XY's 1-9, 9 = random */
+/* step components: the OP-XY's 14, in the cheat sheet's order (the white keys 1..14 with HOME and a step held);
+ * 0 = none. Values 0..8 = the black keys 1-9, 9 = black key 10 (random, where the OP-XY prints rnd). A step
+ * carries up to two (comp / comp2). Defaults when a component is added (the notebook p. 139): SC_DEFAULT[]. */
 enum { SC_NONE, SC_PULSE, SC_HOLD, SC_MULTIPLY, SC_VELOCITY, SC_RAMP_UP, SC_RAMP_DOWN, SC_RANDOM,
-       SC_PORTAMENTO, SC_BEND, SC_JUMP, SC_SKIP, NSC };
+       SC_PORTAMENTO, SC_BEND, SC_TONALITY, SC_JUMP, SC_SKIP_LOCK, SC_SKIP_COMP, SC_SKIP, NSC };
 #define SC_RANDOM_VAL 9
-/* SC_VELOCITY values: 4 8 16 32 64 100 112 127 0, random
- * SC_RAMP_*: 2..6 degrees an octave (0..4), 2..6 degrees over three octaves (5..8), random
- * SC_PORTAMENTO: 10..90 % (0..8), random
+extern const uint8_t SC_DEFAULT[NSC];      /* pulse 3 (= 4), hold 3, multiply 1, velocity 4, ramps 3, random 3,
+                                            * portamento 3, bend 0, tonality 3, jump 3, skips 1 (0-based values) */
+/* SC_PULSE / SC_HOLD: 1..9 repeats (the total count includes the original trigger), random
+ * SC_MULTIPLY: 1..9 ratchets within the step, random
+ * SC_VELOCITY: 4 8 16 32 64 100 112 127 0, random
+ * SC_RAMP_* / SC_RANDOM: 2..6 pitch iterations across one octave (0..4), across three octaves (5..8), random:
+ *   the notes are spread evenly over the span in the brain's scale and the ramp resets after each cycle
+ * SC_PORTAMENTO: 10..80 % (0..7), off (8), random
  * SC_BEND: down-up, up-down, bump-down, bump-up, spring-out, spring-in, fade-down, fade-up, random 1, random 2
- * SC_JUMP: to 1, 5, 9, 13, forward, back, forward-or-back, stay, align, random
- * SC_SKIP: play every 1st..9th pass, random */
+ * SC_TONALITY: ignore progression, transpose only, octave up, fifth up, third up (by the scale), chromatic up,
+ *   chromatic down, quantize 33 %, 66 %, 100 %
+ * SC_JUMP: to 1, 5, 9, 13, forward (skips the next step), back, forward-or-back, stay, align, random
+ * SC_SKIP_LOCK / SC_SKIP_COMP / SC_SKIP: a cycle of 1..9 passes (random); which passes play is the cycle's
+ *   mode in the value's upper bits: SK_MODE(v) 0 = play on the last pass of the cycle, 1 = skip the last pass,
+ *   2 = play only on the first; SK_N(v) = the cycle length value 0..9 */
+#define SK_N(v) ((v) & 15u)
+#define SK_MODE(v) (((v) >> 4) & 3u)
+#define SK_VAL(n, mode) ((uint8_t)(((mode) << 4) | (n)))
 
 /* a step's condition: 0 always; 1..99 that chance in %; COND_AB + k = the A:B cycle k (X0X's order
  * 1:2 2:2 1:3 2:3 3:3 1:4 ... 8:8: on the A-th of every B passes of the pattern) */
@@ -45,24 +57,29 @@ typedef struct {
     uint8_t len;                      /* quarter steps, 0 = the pattern's note length */
     int8_t nudge;                     /* ticks, -12..12 */
     uint8_t comp;                     /* SC_* */
-    uint8_t cval;                     /* the component's value 0..9 */
+    uint8_t cval;                     /* the component's value 0..9 (skips: SK_VAL) */
     uint8_t cond;                     /* see COND_* */
-} step_t;                             /* 10 bytes */
+    uint8_t comp2, cval2;             /* a second component on the same step (SC_NONE = none) */
+} step_t;                             /* 12 bytes */
 
-enum { TS_HALF, TS_1, TS_2, TS_3, TS_4, TS_6, TS_8, TS_16, NTS };   /* track scale: sixteenths a step */
-enum { GR_SWING, GR_HALF, GR_BOMBORA, GR_WOBBLY, GR_GAUSS, GR_ACCENTS, GR_ISLAND, NGROOVE };
+enum { TS_HALF, TS_1, TS_2, TS_3, TS_4, TS_5, TS_6, TS_8, TS_16, NTS };   /* track scale: sixteenths a step */
+/* groove types (the project's, the notebook p. 26): shuffle, half shuffle, danish, bombora, wobbly, gaussian,
+ * accents, island nod, disfunk, rollover, prophetic; a track's amount -99..99 scales its timing and velocity
+ * tables (negative = early / narrow), the random ones roll per hit */
+enum { GR_SHUFFLE, GR_HALF, GR_DANISH, GR_BOMBORA, GR_WOBBLY, GR_GAUSS, GR_ACCENTS, GR_ISLAND, GR_DISFUNK,
+       GR_ROLLOVER, GR_PROPHETIC, NGROOVE };
+extern const char *const GR_NAME[NGROOVE], *const GR_SHORT[NGROOVE];   /* "shuffle".., "SH".. */
 
 typedef struct {
     step_t st[NSTEP];
     uint8_t len;                      /* steps 1..64 */
     uint8_t scale;                    /* TS_* */
-    uint8_t groove;                   /* GR_* */
-    uint8_t swing;                    /* 0..100 (50 = straight) */
+    int8_t groove;                    /* this track's groove amount -99..99 (the type is the project's) */
     uint8_t quant;                    /* live record quantise 0..100 */
-    uint8_t nlen;                     /* note length, quarter steps 1..16 */
+    uint8_t nlen;                     /* note length 0..100 % of a step (50 = half a step, the default) */
     uint8_t shape;                    /* lock smoothing 0..100 */
-    uint8_t rsv;
-} tpat_t;                             /* 648 bytes */
+    uint8_t rsv[2];
+} tpat_t;                             /* 776 bytes */
 
 /* a parameter lock lane: a value for each step of one track pattern, LOCK_NONE = the knob's own */
 #define LOCK_NONE 0xFFu
@@ -101,7 +118,7 @@ typedef struct {
     song_t song;
 } patterns_t;
 
-void pattern_init(tpat_t *p);         /* empty, 16 steps, scale 1, straight, note length a step */
+void pattern_init(tpat_t *p);         /* empty, 16 steps, scale 1, no groove, note length half a step */
 void patterns_init(patterns_t *P);    /* everything empty, scene 1 used with pattern 1 on every track */
 /* lanes */
 int lane_find(const lane_t *L, int trk, int pat, int param);     /* lane index, -1 */

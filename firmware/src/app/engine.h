@@ -39,6 +39,16 @@ void engine_panic(void);
 void engine_midi_in(uint32_t pkt);                       /* a USB-MIDI packet (the main loop passes them) */
 void engine_transport(int what);                         /* 0 stop, 1 start, 2 continue, 3 start from the top */
 void engine_metronome(int mode);
+void engine_tempo(int bpm_x10);                          /* the tempo in tenths of a BPM (400..3000) */
+void engine_groove(int type);                            /* the project's groove type (pattern.h GR_*) */
+void engine_scene(int scene, int cued);                  /* a scene: now (seq_set_scene) or at the bar (seq_cue_scene) */
+
+/* drum tracks (engine drumline): the Filter page's five values reach drumline_filter(). With TP_FTYPE
+ * FT_DYNAMIC the knobs mean low cut = TP_CUT, compression = TP_RES, drive = TP_FENV, hi cut = TP_KTRK; any
+ * other type turns the dynamic filter off. The punch filter (PX_FILTER) on a drum track forces the dynamic
+ * filter on with its low cut raised (PUNCH_HP), the other three as the knobs (or neutral when the track's
+ * type is not dynamic), and sets perf_t.hp for the synth's sake. */
+#define PUNCH_HP 90
 
 /* state for the screen (written by the interrupt) */
 extern volatile uint8_t eng_step[NSEQT];                 /* playheads */
@@ -52,3 +62,10 @@ extern volatile uint8_t eng_scene_now, eng_scene_cue;
 extern int16_t eng_scope[SCOPE_N];                       /* the last output samples, for the screen */
 extern volatile uint32_t eng_scope_w;
 int engine_core2_state(void);                            /* 0 one core (never had), 1 two, 2 lost, 3 barred */
+
+/* ---- shims for app/ui.c and app/pages.c until their rewrite (the next wave): remove with it ---- */
+#define NPUNCH_D NPUNCH                        /* the drum octave's keys: 0..11 (ui.c punch_fx_of_key) */
+#define FT_LP24 FT_LADDER                      /* the filter types' old names (pages.c) */
+#define FT_HP FT_ZHP
+#define FT_BP FT_ZLP
+#define swing rsv[0]                           /* tpat_t's swing knob writes a reserved byte (ui.c, pages.c) */

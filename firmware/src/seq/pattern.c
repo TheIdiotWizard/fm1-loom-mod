@@ -2,6 +2,14 @@
 /* XY-1 pattern store: the plain-data helpers of pattern.h (main loop side; the sequencer only reads). */
 #include "pattern.h"
 
+/* the value a component starts with (the notebook p. 139, 0-based): pulse 4, hold 4, multiply 2, velocity 64,
+ * ramps 4 iterations, random 4, portamento 40 %, bend down-up, tonality 4 (fifth up), jump to 13, skips: a
+ * cycle of 2 (mode 0: the step plays on the cycle's last pass) */
+const uint8_t SC_DEFAULT[NSC] = {0, 3, 3, 1, 4, 3, 3, 3, 3, 0, 3, 3, SK_VAL(1, 0), SK_VAL(1, 0), SK_VAL(1, 0)};
+const char *const GR_NAME[NGROOVE] = {"shuffle", "half shuf", "danish", "bombora", "wobbly", "gaussian", "accents",
+                                      "island", "disfunk", "rollover", "prophetic"};
+const char *const GR_SHORT[NGROOVE] = {"SH", "HS", "DA", "BO", "WO", "GA", "AC", "IN", "DF", "RO", "PR"};
+
 static void zero(void *p, uint32_t n)
 {
     uint8_t *b = (uint8_t *)p;
@@ -14,10 +22,9 @@ void pattern_init(tpat_t *p)
     zero(p, sizeof *p);
     p->len = 16;
     p->scale = TS_1;
-    p->groove = GR_SWING;
-    p->swing = 50;
+    p->groove = 0;                    /* no groove amount */
     p->quant = 100;
-    p->nlen = 4;                      /* a step */
+    p->nlen = 50;                     /* half a step */
     p->shape = 0;
 }
 

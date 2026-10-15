@@ -11,14 +11,20 @@
 enum { FXT_CHORUS, FXT_DELAY, FXT_DIST, FXT_LOFI, FXT_PHASER, FXT_REVERB, NFXT };
 extern const char *const FXT_NAME[NFXT];
 extern const char *const FXT_KNOB[NFXT][4];
-/* chorus: rate, depth, feedback, stereo; delay: size (1..8 steps), amount (feedback), fine, dry;
- * distortion: drive, amount, low cut, high cut; lofi: rate, bits, quality, drift;
- * phaser: frequency, depth, rate, feedback; reverb: size, modulation, rate, feedback (wet) */
+/* the knobs and the printed defaults (the notebook pp. 162-167, values 00..99, stored * 1.28):
+ *   chorus      rate depth feedback stereo   59 50 50 50
+ *   delay       size fine feedback dry       65 50 50 99   size: 1/32 1/32D 1/16 1/16D 1/8 1/8D 1/4 1/2 (of the tempo)
+ *   distortion  drive clip lo cut hi cut     06 99 50 99
+ *   lofi        rate bits quality drift      50 73 61 99   drift = the stereo spread of the audio
+ *   phaser      frequency depth rate feedback 30 61 30 50
+ *   reverb      size mod tone dry            69 00 29 99   tone: filtering low or high; dry: the dry feed (the wet is always there)
+ * "dry" (delay, reverb) controls how much of the send passes through dry: the effect sound is always present. */
+extern const uint8_t FXT_DEFAULT[NFXT][4];
 
 #define FX_DLY_LEN 22400              /* int16 samples a side: 0.5 s plus the line's 256-sample margin (the pool's budget) */
 #define FX_RV_LEN 12000               /* int16 samples: the reverb's combs and allpasses */
 typedef struct fxslot fxslot_t;
-#define FXSLOT_BYTES 9216             /* the chorus line (float) and the states */
+#define FXSLOT_BYTES 5120             /* the chorus line (2048 int16: 4 KB, the lofi's spread reads it too) and the states */
 
 void fx_init(fxslot_t *f, int16_t *dly_l, int16_t *dly_r, int16_t *rv);   /* a slot gets the lines it may use;
                                                                             * fx II gets no reverb line (0) if the
@@ -38,7 +44,9 @@ int fx_has(const fxslot_t *f, int type);                    /* the slot can do t
 typedef struct tape tape_t;
 #define TAPE_BYTES 512
 void tape_init(tape_t *t, int16_t *buf);
-void tape_set(tape_t *t, int pitch, int speed, int length, int mix);   /* the TAPE track's four knobs, 0..127 */
+/* the TAPE track's four knobs: pitch in octaves (0..127 -> -2, -1, 0 (x1), +1, +2 octaves, in five steps), speed
+ * 50..200 % (64 = 100 %), length 1..16 steps, mix wet / dry */
+void tape_set(tape_t *t, int pitch, int speed, int length, int mix);
 void tape_bar(tape_t *t, uint32_t samples_per_step);        /* the sequencer tells it a step's length (16 = a loop) */
 void tape_segment(tape_t *t, int seg, int on);              /* a key / a step: segment 0..15 looping while on */
 /* in: the routed tracks' send (mono), recorded unless a segment loops; out L/R: the loop, added;

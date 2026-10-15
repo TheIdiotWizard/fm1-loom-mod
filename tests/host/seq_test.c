@@ -7,7 +7,7 @@
 #include <string.h>
 #include "seq.h"
 
-enum { E_ON, E_OFF, E_DRUM, E_LOCK, E_BEND, E_PUNCH, E_SEG, E_TSTEP, E_MIDI, E_STEP, E_SCENE, E_METRO };
+enum { E_ON, E_OFF, E_DRUM, E_LOCK, E_BEND, E_PUNCH, E_SEG, E_TSTEP, E_MIDI, E_STEP, E_SCENE, E_METRO, E_PAN, E_DOFF };
 typedef struct {
     int kind;
     uint32_t t;
@@ -52,8 +52,10 @@ static void s_midi(void *x, uint8_t st, uint8_t d1, uint8_t d2) { (void)x; log_e
 static void s_step(void *x, int trk, int step) { (void)x; log_ev(E_STEP, trk, step, 0, 0, 0); }
 static void s_scene(void *x, int sc) { (void)x; log_ev(E_SCENE, -1, sc, 0, 0, 0); }
 static void s_metro(void *x, int acc) { (void)x; log_ev(E_METRO, -1, acc, 0, 0, 0); }
+static void s_pan(void *x, int trk, int pan) { (void)x; log_ev(E_PAN, trk, pan, 0, 0, 0); }
+static void s_drum_off(void *x, int trk, int sound) { (void)x; log_ev(E_DOFF, trk, sound, 0, 0, 0); }
 static const seq_sink_t sink = {s_on, s_off, s_drum, s_lock, s_bend, s_punch, s_seg, s_tstep, s_midi, s_step,
-                                s_scene, s_metro, 0};
+                                s_scene, s_metro, s_pan, s_drum_off, 0};
 
 static void fail(const char *what)
 {
@@ -125,6 +127,14 @@ static ev_t *nth(int kind, int trk, int k)
     return 0;
 }
 static ev_t *on_n(int k) { return nth(E_ON, 0, k); }
+static ev_t *off_of(const ev_t *on)   /* the off of this note on (the first off with its tag after it) */
+{
+    int i;
+    for (i = (int)(on - ev) + 1; i < nev; i++)
+        if (ev[i].kind == E_OFF && ev[i].trk == on->trk && ev[i].tag == on->tag)
+            return &ev[i];
+    return 0;
+}
 static int in_major(int n) { return (0x0AB5 >> (n % 12)) & 1; }
 
 /* ------------------------------------------------------------- the tests --- */
@@ -165,11 +175,14 @@ static void t_scale(void)
     printf("ok %s\n", cur);
 }
 
-static void t_swing(void)
+/* grooves: the project's type, the pattern's signed amount */
+static void t_groove(void)
 {
-    cur = "swing";
+    int i, ons;
+    cur = "groove";
     reset();
-    P.pat[0][0].swing = 100;
+    S.groove_type = GR_SHUFFLE;
+    P.pat[0][0].groove = 99;          /* the upbeats half a sixteenth late */
     note(0, 0, 60, 100);
     note(0, 1, 62, 100);
     note(0, 2, 64, 100);
@@ -177,13 +190,71 @@ static void t_swing(void)
     run(3 * L16);
     CHECK(near(on_n(1)->t, L16 + L16 / 2, 2));
     CHECK(near(on_n(2)->t, 2 * L16 + 1, 1));
-    /* a groove table: bombora pushes the fifth sixteenth 2 ticks early and accents it */
+    /* +50: a quarter sixteenth, the old swing 75 % */
     reset();
-    P.pat[0][0].groove = GR_BOMBORA;
+    S.groove_type = GR_SHUFFLE;
+    P.pat[0][0].groove = 50;
+    note(0, 0, 60, 100);
+    note(0, 1, 62, 100);
+    start();
+    run(3 * L16);
+    CHECK(near(on_n(1)->t, L16 + L16 / 4, 24) && on_n(1)->b == 100);   /* shuffle leaves the velocity */
+    /* -50: the same, early */
+    reset();
+    S.groove_type = GR_SHUFFLE;
+    P.pat[0][0].groove = -50;
+    note(0, 0, 60, 100);
+    note(0, 1, 62, 100);
+    start();
+    run(3 * L16);
+    CHECK(near(on_n(1)->t, L16 - L16 / 4, 24));
+    /* bombora at the full amount pushes beat 2 three ticks early and accents it; -99 mirrors the timing */
+    reset();
+    S.groove_type = GR_BOMBORA;
+    P.pat[0][0].groove = 99;
     note(0, 4, 60, 100);
     start();
     run(5 * L16);
-    CHECK(near(on_n(0)->t, 4 * L16 + 2 - 2 * (L16 / 24), 2) && on_n(0)->b == 108);
+    CHECK(near(on_n(0)->t, 4 * L16 + 2 - 3 * (L16 / 24), 3) && on_n(0)->b == 108);
+    reset();
+    S.groove_type = GR_BOMBORA;
+    P.pat[0][0].groove = -99;
+    note(0, 4, 60, 100);
+    start();
+    run(5 * L16);
+    CHECK(near(on_n(0)->t, 4 * L16 + 2 + 3 * (L16 / 24), 3) && on_n(0)->b == 108);
+    /* accents: the velocity table scaled by the amount */
+    reset();
+    S.groove_type = GR_ACCENTS;
+    P.pat[0][0].groove = 50;
+    note(0, 0, 60, 100);
+    note(0, 1, 60, 100);
+    start();
+    run(2 * L16);
+    CHECK(on_n(0)->b == 110 && on_n(1)->b == 97);
+    /* a random type rolls per hit within its range: wobbly at 99 lands within +-6 ticks and +-20 velocity */
+    reset();
+    S.groove_type = GR_WOBBLY;
+    P.pat[0][0].groove = 99;
+    P.pat[0][0].len = 1;
+    note(0, 0, 60, 100);
+    start();
+    run(40 * L16);
+    ons = count(E_ON, 0);
+    CHECK(ons >= 39 && ons <= 41);
+    for (i = 1; i < ons; i++) {
+        uint32_t want = (uint32_t)i * L16 + (uint32_t)i / 2u;
+        CHECK(near(on_n(i)->t, want, 6 * (L16 / 24) + 3));
+        CHECK(on_n(i)->b >= 80 && on_n(i)->b <= 120);
+    }
+    /* no amount: straight, whatever the type */
+    reset();
+    S.groove_type = GR_WOBBLY;
+    note(0, 0, 60, 100);
+    note(0, 1, 62, 100);
+    start();
+    run(2 * L16);
+    CHECK(near(on_n(1)->t, L16, 1) && on_n(1)->b == 100);
     /* a nudge: +12 ticks = half a step late */
     reset();
     note(0, 1, 60, 100);
@@ -205,9 +276,22 @@ static void t_length(void)
     st(0, 8)->len = 8;
     start();
     run(12 * L16);
-    CHECK(nth(E_OFF, 0, 0) && near(nth(E_OFF, 0, 0)->t, L16, 1));                  /* the pattern's: a step */
+    CHECK(nth(E_OFF, 0, 0) && near(nth(E_OFF, 0, 0)->t, L16 / 2, 1));              /* the pattern's: 50 % of a step */
     CHECK(near(nth(E_OFF, 0, 1)->t, 4 * L16 + L16 / 2, 2));                        /* half a step */
     CHECK(near(nth(E_OFF, 0, 2)->t, 10 * L16 + 5, 2) && nth(E_OFF, 0, 2)->tag == on_n(2)->tag);   /* two steps */
+    /* the pattern's note length as a percentage: 100 = a whole step, 25 = a quarter */
+    P.pat[0][0].nlen = 100;
+    stop();
+    nev = 0;
+    start();
+    run(2 * L16);
+    CHECK(near(nth(E_OFF, 0, 0)->t, L16, 1));
+    P.pat[0][0].nlen = 25;
+    stop();
+    nev = 0;
+    start();
+    run(2 * L16);
+    CHECK(near(nth(E_OFF, 0, 0)->t, L16 / 4, 1));
     printf("ok %s\n", cur);
 }
 
@@ -302,18 +386,27 @@ static void t_ramp(void)
     P.pat[0][0].len = 1;
     note(0, 0, 60, 100);
     st(0, 0)->comp = SC_RAMP_UP;
-    st(0, 0)->cval = 0;               /* two degrees a pass, over an octave */
+    st(0, 0)->cval = 3;               /* five iterations over an octave: degrees 0 1 2 4 5, then back */
     start();
-    run(5 * L16);
-    CHECK(on_n(0)->a == 60 && on_n(1)->a == 64 && on_n(2)->a == 67 && on_n(3)->a == 71 && on_n(4)->a == 62);
+    run(7 * L16);
+    CHECK(on_n(0)->a == 60 && on_n(1)->a == 62 && on_n(2)->a == 64 && on_n(3)->a == 67 && on_n(4)->a == 69 &&
+          on_n(5)->a == 60 && on_n(6)->a == 62);
+    reset();
+    P.pat[0][0].len = 1;
+    note(0, 0, 60, 100);
+    st(0, 0)->comp = SC_RAMP_UP;
+    st(0, 0)->cval = 0;               /* two iterations: the tonic and the middle of the octave */
+    start();
+    run(3 * L16);
+    CHECK(on_n(0)->a == 60 && on_n(1)->a == 65 && on_n(2)->a == 60);
     reset();
     P.pat[0][0].len = 1;
     note(0, 0, 60, 100);
     st(0, 0)->comp = SC_RAMP_DOWN;
-    st(0, 0)->cval = 0;
+    st(0, 0)->cval = 5;               /* two iterations over three octaves: 0 and -10 degrees */
     start();
     run(3 * L16);
-    CHECK(on_n(0)->a == 60 && on_n(1)->a == 57 && on_n(2)->a == 53);
+    CHECK(on_n(0)->a == 60 && on_n(1)->a == 43 && on_n(2)->a == 60);
     printf("ok %s\n", cur);
 }
 
@@ -325,7 +418,7 @@ static void t_random(void)
     P.pat[0][0].len = 1;
     note(0, 0, 60, 100);
     st(0, 0)->comp = SC_RANDOM;
-    st(0, 0)->cval = 0;               /* within an octave, in steps of two degrees */
+    st(0, 0)->cval = 2;               /* one of four positions within the octave */
     start();
     run(60 * L16);
     CHECK(count(E_ON, 0) == 60);
@@ -347,6 +440,13 @@ static void t_portamento(void)
     start();
     run(L16);
     CHECK(on_n(0)->c >= 61 && on_n(0)->c <= 63);
+    reset();
+    note(0, 0, 60, 100);
+    st(0, 0)->comp = SC_PORTAMENTO;
+    st(0, 0)->cval = 8;               /* off */
+    start();
+    run(L16);
+    CHECK(on_n(0)->c == 0);
     printf("ok %s\n", cur);
 }
 
@@ -421,21 +521,156 @@ static void t_jump(void)
 
 static void t_skip(void)
 {
+    int k;
     cur = "skip";
     reset();
     P.pat[0][0].len = 1;
     note(0, 0, 60, 100);
     st(0, 0)->comp = SC_SKIP;
-    st(0, 0)->cval = 1;               /* every second pass */
+    st(0, 0)->cval = SK_VAL(1, 0);    /* a cycle of two, playing on its last pass: every second pass */
     start();
     run(6 * L16);
-    CHECK(count(E_ON, 0) == 3 && near(on_n(1)->t, 2 * L16 + 1, 1));
-    st(0, 0)->cval = 2;               /* every third */
+    CHECK(count(E_ON, 0) == 3 && near(on_n(0)->t, L16, 1) && near(on_n(1)->t, 3 * L16 + 1, 2));
+    st(0, 0)->cval = SK_VAL(2, 0);    /* every third */
     stop();
     nev = 0;
     start();
     run(9 * L16);
-    CHECK(count(E_ON, 0) == 3);
+    CHECK(count(E_ON, 0) == 3 && near(on_n(0)->t, 2 * L16 + 1, 2));
+    st(0, 0)->cval = SK_VAL(3, 1);    /* a cycle of four, skipping its last pass */
+    stop();
+    nev = 0;
+    start();
+    run(8 * L16);
+    CHECK(count(E_ON, 0) == 6 && on_n(0)->t == 0 && near(on_n(3)->t, 4 * L16 + 2, 2));
+    st(0, 0)->cval = SK_VAL(3, 2);    /* only the first of four */
+    stop();
+    nev = 0;
+    start();
+    run(8 * L16);
+    CHECK(count(E_ON, 0) == 2 && on_n(0)->t == 0 && near(on_n(1)->t, 4 * L16 + 2, 2));
+    st(0, 0)->cval = SK_VAL(9, 0);    /* a random cycle length: some passes play */
+    stop();
+    nev = 0;
+    start();
+    run(60 * L16);
+    CHECK(count(E_ON, 0) > 5 && count(E_ON, 0) < 55);
+    /* skip the parameter lock: the lock is applied on the cycle's last pass only; the note plays every pass */
+    reset();
+    P.pat[0][0].len = 1;
+    note(0, 0, 60, 100);
+    st(0, 0)->comp = SC_SKIP_LOCK;
+    st(0, 0)->cval = SK_VAL(1, 0);
+    k = lane_alloc(P.lane, 0, 0, TP_CUT);
+    P.lane[k].val[0] = 40;
+    start();
+    run(4 * L16);
+    CHECK(count(E_ON, 0) == 4 && count(E_LOCK, 0) == 1 && near(nth(E_LOCK, 0, 0)->t, L16, 1));
+    /* skip the step component: the velocity component in comp2 runs on the cycle's last pass only */
+    reset();
+    P.pat[0][0].len = 1;
+    note(0, 0, 60, 100);
+    st(0, 0)->comp = SC_SKIP_COMP;
+    st(0, 0)->cval = SK_VAL(1, 0);
+    st(0, 0)->comp2 = SC_VELOCITY;
+    st(0, 0)->cval2 = 0;              /* 4 */
+    start();
+    run(4 * L16);
+    CHECK(count(E_ON, 0) == 4 && on_n(0)->b == 100 && on_n(1)->b == 4 && on_n(2)->b == 100 && on_n(3)->b == 4);
+    /* the skip in comp2 gates the component in comp the same way */
+    st(0, 0)->comp = SC_MULTIPLY;
+    st(0, 0)->cval = 1;               /* two hits */
+    st(0, 0)->comp2 = SC_SKIP_COMP;
+    st(0, 0)->cval2 = SK_VAL(1, 0);
+    stop();
+    nev = 0;
+    start();
+    run(4 * L16);
+    CHECK(count(E_ON, 0) == 6);
+    printf("ok %s\n", cur);
+}
+
+/* two components on one step, and the tonality component's ten options */
+static void t_components(void)
+{
+    int i, lo = 0, hi = 0;
+    cur = "components";
+    reset();
+    note(0, 0, 60, 100);
+    st(0, 0)->comp = SC_MULTIPLY;
+    st(0, 0)->cval = 1;               /* two hits */
+    st(0, 0)->comp2 = SC_VELOCITY;
+    st(0, 0)->cval2 = 7;              /* 127 */
+    start();
+    run(L16);
+    CHECK(count(E_ON, 0) == 2 && on_n(0)->b == 127 && on_n(1)->b == 127 && near(on_n(1)->t, L16 / 2, 2));
+    CHECK(SC_DEFAULT[SC_PULSE] == 3 && SC_DEFAULT[SC_PORTAMENTO] == 3 && SK_N(SC_DEFAULT[SC_SKIP]) == 1 &&
+          SK_MODE(SC_DEFAULT[SC_SKIP]) == 0);
+    /* tonality: the fixed intervals in C major */
+    reset();
+    for (i = 0; i < 7; i++) {
+        note(0, i, 60, 100);
+        st(0, i)->comp = SC_TONALITY;
+        st(0, i)->cval = (uint8_t)i;
+    }
+    start();
+    run(7 * L16);
+    CHECK(on_n(0)->a == 60 && on_n(1)->a == 60);                       /* ignore / transpose only: no brain shift */
+    CHECK(on_n(2)->a == 72 && on_n(3)->a == 67 && on_n(4)->a == 64);   /* octave, fifth, third (major) */
+    CHECK(on_n(5)->a == 61 && on_n(6)->a == 59);                       /* chromatic up, down */
+    /* the third by the scale: minor from D, a minor key's third from its tonic */
+    reset();
+    note(0, 0, 62, 100);
+    st(0, 0)->comp = SC_TONALITY;
+    st(0, 0)->cval = 4;
+    start();
+    run(L16);
+    CHECK(on_n(0)->a == 65);
+    reset();
+    S.brain_key = 9;
+    S.brain_scale = BS_MINOR;
+    par[AUX_BRAIN][TP_E2] = 9;
+    par[AUX_BRAIN][TP_E3] = BS_MINOR;
+    note(0, 0, 57, 100);
+    st(0, 0)->comp = SC_TONALITY;
+    st(0, 0)->cval = 4;
+    start();
+    run(L16);
+    CHECK(on_n(0)->a == 60);
+    /* quantize: 100 % snaps C# to C (ties go down), 33 % some of the time */
+    reset();
+    P.pat[0][0].len = 1;
+    note(0, 0, 61, 100);
+    st(0, 0)->comp = SC_TONALITY;
+    st(0, 0)->cval = 9;
+    start();
+    run(10 * L16);
+    for (i = 0; i < 10; i++)
+        CHECK(on_n(i)->a == 60);
+    st(0, 0)->cval = 7;
+    stop();
+    nev = 0;
+    start();
+    run(100 * L16);
+    for (i = 0; i < 100; i++) {
+        lo += on_n(i)->a == 60;
+        hi += on_n(i)->a == 61;
+    }
+    CHECK(lo > 10 && lo < 60 && lo + hi == 100);
+    /* with the brain: ignore sits the step out, transpose only moves it chromatically */
+    reset();
+    par[0][TP_BRAIN] = 1;
+    note(0, 0, 60, 100);
+    st(0, 0)->comp = SC_TONALITY;
+    st(0, 0)->cval = 0;
+    note(0, 1, 62, 100);
+    st(0, 1)->comp = SC_TONALITY;
+    st(0, 1)->cval = 1;
+    note(0, 2, 62, 100);
+    start();
+    seq_brain_key(&S, 64, 1);         /* +2 degrees */
+    run(3 * L16);
+    CHECK(on_n(0)->a == 60 && on_n(1)->a == 66 && on_n(2)->a == 65);
     printf("ok %s\n", cur);
 }
 
@@ -590,14 +825,43 @@ static void t_brain(void)
     run(17 * L16);
     CHECK(on_n(0)->a == 60 && on_n(1)->a == 64);
     CHECK(nth(E_ON, 1, 1)->a == 60);  /* not routed */
-    /* a brain step: degree -3 (note 57) at the bar */
-    P.pat[AUX_BRAIN][0].st[0].note[0] = 57;
+    /* a brain step: a chord whose lowest note is A3 (57), two degrees under C: the C goes to A */
+    P.pat[AUX_BRAIN][0].st[0].note[0] = 60;
+    P.pat[AUX_BRAIN][0].st[0].note[1] = 57;
+    P.pat[AUX_BRAIN][0].st[0].note[2] = 64;
     P.pat[AUX_BRAIN][0].st[0].vel = 100;
     stop();
     nev = 0;
     start();
     run(L16);
-    CHECK(on_n(0)->a == 55);
+    CHECK(on_n(0)->a == 57);
+    /* a chord on the brain's keys: the lowest key held is the root */
+    P.pat[AUX_BRAIN][0].st[0].note[0] = P.pat[AUX_BRAIN][0].st[0].note[1] = P.pat[AUX_BRAIN][0].st[0].note[2] = 0;
+    stop();
+    nev = 0;
+    seq_brain_key(&S, 64, 0);         /* the E from above goes */
+    seq_brain_key(&S, 71, 1);         /* B, then G under it: a G chord, +4 degrees */
+    seq_brain_key(&S, 67, 1);
+    start();
+    run(L16);
+    CHECK(on_n(0)->a == 67);
+    seq_brain_key(&S, 71, 0);
+    seq_brain_key(&S, 67, 0);
+    run(10);
+    /* the link track plays the brain's keys as pressed, in parallel */
+    par[AUX_BRAIN][TP_E4] = 2;        /* track 2 */
+    par[1][TP_BRAIN] = 0;
+    nev = 0;
+    seq_brain_key(&S, 62, 1);
+    run(10);
+    CHECK(count(E_ON, 1) == 1 && nth(E_ON, 1, 0)->a == 62 && S.brain_link == 2);
+    seq_brain_key(&S, 62, 0);
+    run(10);
+    CHECK(count(E_OFF, 1) == 1);
+    par[AUX_BRAIN][TP_E4] = 0;
+    stop();
+    nev = 0;
+    start();
     /* a scene carries the brain's state */
     P.scene[1].used = 1;
     P.scene[1].brain_deg = (uint8_t)(int8_t)4;
@@ -605,7 +869,7 @@ static void t_brain(void)
     P.scene[1].brain_scale = BS_MAJOR;
     P.pat[AUX_BRAIN][0].st[0].note[0] = 0;
     seq_set_scene(&S, 1);
-    run(16 * L16);
+    run(17 * L16);
     CHECK(on_n(1)->a == 67);
     printf("ok %s\n", cur);
 }
@@ -615,7 +879,7 @@ static void t_arp(void)
     cur = "arp";
     reset();
     par[0][TP_PLAYER] = PL_ARP;
-    par[0][TP_P1] = 3;                /* 1/16 */
+    par[0][TP_P1] = 4;                /* 1/16 */
     par[0][TP_P2] = 0;                /* up */
     par[0][TP_P3] = 1;
     seq_key(&S, 0, 60, 1, 100);
@@ -624,7 +888,7 @@ static void t_arp(void)
     run(4 * L16);
     CHECK(count(E_ON, 0) == 4 && on_n(0)->a == 60 && on_n(1)->a == 64 && on_n(2)->a == 67 && on_n(3)->a == 60);
     CHECK(near(on_n(1)->t, L16 + 1, 2) && near(on_n(2)->t, 2 * L16 + 1, 2));
-    CHECK(nth(E_OFF, 0, 0) && near(nth(E_OFF, 0, 0)->t, L16 / 2 + 1, 2));
+    CHECK(nth(E_OFF, 0, 0) && near(nth(E_OFF, 0, 0)->t, L16 / 4 + 1, 2));   /* length short: a quarter period */
     seq_key(&S, 0, 60, 0, 0);
     seq_key(&S, 0, 64, 0, 0);
     seq_key(&S, 0, 67, 0, 0);
@@ -632,7 +896,7 @@ static void t_arp(void)
     CHECK(count(E_ON, 0) == 4 && count(E_OFF, 0) == 4);
     /* down, two octaves, 1/8 */
     nev = 0;
-    par[0][TP_P1] = 1;
+    par[0][TP_P1] = 2;
     par[0][TP_P2] = 1;
     par[0][TP_P3] = 2;
     seq_key(&S, 0, 60, 1, 100);
@@ -646,12 +910,12 @@ static void t_arp(void)
     seq_key(&S, 0, 64, 0, 0);
     run(4 * L16);
     CHECK(count(E_ON, 0) == 6);
-    /* up-down */
+    /* up-down 1: the ends once */
     nev = 0;
     par[0][TP_P4] = 0;
     par[0][TP_P2] = 2;
     par[0][TP_P3] = 1;
-    par[0][TP_P1] = 3;
+    par[0][TP_P1] = 4;
     seq_key_all_off(&S, 0);
     seq_key(&S, 0, 60, 1, 100);
     seq_key(&S, 0, 64, 1, 100);
@@ -659,10 +923,99 @@ static void t_arp(void)
     run(6 * L16);
     CHECK(on_n(0)->a == 60 && on_n(1)->a == 64 && on_n(2)->a == 67 && on_n(3)->a == 64 && on_n(4)->a == 60 &&
           on_n(5)->a == 64);
+    /* up-down 2: the ends repeated */
+    nev = 0;
+    par[0][TP_P2] = 3;
+    seq_key_all_off(&S, 0);
+    seq_key(&S, 0, 60, 1, 100);
+    seq_key(&S, 0, 64, 1, 100);
+    seq_key(&S, 0, 67, 1, 100);
+    run(8 * L16);
+    CHECK(on_n(0)->a == 60 && on_n(1)->a == 64 && on_n(2)->a == 67 && on_n(3)->a == 67 && on_n(4)->a == 64 &&
+          on_n(5)->a == 60 && on_n(6)->a == 60 && on_n(7)->a == 64);
+    /* 1/64: four notes a sixteenth, the key's velocity */
+    nev = 0;
+    par[0][TP_P1] = 8;
+    par[0][TP_P2] = 0;
+    seq_key_all_off(&S, 0);
+    seq_key(&S, 0, 60, 1, 77);
+    run(L16 + 10);
+    CHECK(count(E_ON, 0) == 5 && near(on_n(1)->t - on_n(0)->t, L16 / 4, 2) && on_n(0)->b == 77);
+    /* 1/4T: three notes a quarter */
+    nev = 0;
+    par[0][TP_P1] = 1;
+    seq_key_all_off(&S, 0);
+    seq_key(&S, 0, 60, 1, 100);
+    run(8 * L16 + 10);
+    CHECK(count(E_ON, 0) == 4 && near(on_n(1)->t - on_n(0)->t, 8 * L16 / 3, 3));
+    /* the styles over an up arp of 60 64 67 71: A 1 2 1 3 1 4, B 1 3 2 4 3 1, C 1 1 2 2, D 1 3 2 4, E 2 1 4 3 */
+    nev = 0;
+    par[0][TP_P1] = 4;
+    par[0][TP_AP2] = 1;
+    seq_key_all_off(&S, 0);
+    seq_key(&S, 0, 60, 1, 100);
+    seq_key(&S, 0, 64, 1, 100);
+    seq_key(&S, 0, 67, 1, 100);
+    seq_key(&S, 0, 71, 1, 100);
+    run(6 * L16 + 10);
+    CHECK(on_n(0)->a == 60 && on_n(1)->a == 64 && on_n(2)->a == 60 && on_n(3)->a == 67 && on_n(4)->a == 60 &&
+          on_n(5)->a == 71);
+    nev = 0;
+    par[0][TP_AP2] = 2;
+    seq_key_all_off(&S, 0);
+    seq_key(&S, 0, 60, 1, 100);
+    seq_key(&S, 0, 64, 1, 100);
+    seq_key(&S, 0, 67, 1, 100);
+    seq_key(&S, 0, 71, 1, 100);
+    run(6 * L16 + 10);
+    CHECK(on_n(0)->a == 60 && on_n(1)->a == 67 && on_n(2)->a == 64 && on_n(3)->a == 71 && on_n(4)->a == 67 &&
+          on_n(5)->a == 60);
+    nev = 0;
+    par[0][TP_AP2] = 3;
+    seq_key_all_off(&S, 0);
+    seq_key(&S, 0, 60, 1, 100);
+    seq_key(&S, 0, 64, 1, 100);
+    run(4 * L16 + 10);
+    CHECK(on_n(0)->a == 60 && on_n(1)->a == 60 && on_n(2)->a == 64 && on_n(3)->a == 64);
+    nev = 0;
+    par[0][TP_AP2] = 4;
+    seq_key_all_off(&S, 0);
+    seq_key(&S, 0, 60, 1, 100);
+    seq_key(&S, 0, 64, 1, 100);
+    seq_key(&S, 0, 67, 1, 100);
+    seq_key(&S, 0, 71, 1, 100);
+    run(4 * L16 + 10);
+    CHECK(on_n(0)->a == 60 && on_n(1)->a == 67 && on_n(2)->a == 64 && on_n(3)->a == 71);
+    nev = 0;
+    par[0][TP_AP2] = 5;
+    seq_key_all_off(&S, 0);
+    seq_key(&S, 0, 60, 1, 100);
+    seq_key(&S, 0, 64, 1, 100);
+    seq_key(&S, 0, 67, 1, 100);
+    seq_key(&S, 0, 71, 1, 100);
+    run(4 * L16 + 10);
+    CHECK(on_n(0)->a == 64 && on_n(1)->a == 60 && on_n(2)->a == 71 && on_n(3)->a == 67);
+    /* page 2: length long = 90 % of the period, glide high = 120 ms, stereo wide = +-60 alternating */
+    nev = 0;
+    par[0][TP_AP2] = 0;
+    par[0][TP_AP1] = 2;
+    par[0][TP_AP3] = 2;
+    par[0][TP_AP4] = 2;
+    seq_key_all_off(&S, 0);
+    seq_key(&S, 0, 60, 1, 100);
+    seq_key(&S, 0, 64, 1, 100);
+    run(2 * L16 + 10);
+    CHECK(count(E_ON, 0) == 3 && on_n(0)->c == 120 && off_of(on_n(0)) && near(off_of(on_n(0))->t - on_n(0)->t, L16 / 10 * 9, 3));
+    CHECK(count(E_PAN, 0) >= 2 && nth(E_PAN, 0, 0)->a == 60 && nth(E_PAN, 0, 1)->a == -60);
+    par[0][TP_AP1] = 0;
+    nev = 0;
+    run(2 * L16);
+    CHECK(off_of(on_n(0)) && near(off_of(on_n(0))->t - on_n(0)->t, L16 / 4, 3));
+    par[0][TP_AP1] = par[0][TP_AP3] = par[0][TP_AP4] = 0;
     /* while playing, the first note waits for the grid */
     reset();
     par[0][TP_PLAYER] = PL_ARP;
-    par[0][TP_P1] = 3;
+    par[0][TP_P1] = 4;
     par[0][TP_P3] = 1;
     start();
     run(L16 / 2);
@@ -685,12 +1038,55 @@ static void t_maestro(void)
     seq_key(&S, 0, 62, 0, 0);
     run(10);
     CHECK(count(E_OFF, 0) == 3);
-    /* roll: 120 ms between the notes */
+    /* roll 63: a note per sequencer step of the track (a sixteenth at scale 1), 21 = a third of that */
     nev = 0;
-    par[0][TP_P1] = 127;
+    par[0][TP_P1] = 63;
     seq_key(&S, 0, 60, 1, 90);
-    run(12000);
-    CHECK(count(E_ON, 0) == 3 && near(on_n(1)->t - on_n(0)->t, 5292, 30) && near(on_n(2)->t - on_n(1)->t, 5292, 30));
+    run(3 * L16);
+    CHECK(count(E_ON, 0) == 3 && near(on_n(1)->t - on_n(0)->t, L16, 2) && near(on_n(2)->t - on_n(1)->t, L16, 2));
+    seq_key(&S, 0, 60, 0, 0);
+    nev = 0;
+    par[0][TP_P1] = 21;
+    P.pat[0][0].scale = TS_2;
+    seq_key(&S, 0, 60, 1, 90);
+    run(3 * L16);
+    CHECK(count(E_ON, 0) == 3 && near(on_n(1)->t - on_n(0)->t, 2 * L16 / 3, 3));
+    P.pat[0][0].scale = TS_1;
+    seq_key(&S, 0, 60, 0, 0);
+    /* down, and up-down alternating per strum */
+    nev = 0;
+    par[0][TP_P2] = 1;
+    seq_key(&S, 0, 60, 1, 90);
+    run(3 * L16);
+    CHECK(on_n(0)->a == 67 && on_n(1)->a == 64 && on_n(2)->a == 60);
+    seq_key(&S, 0, 60, 0, 0);
+    nev = 0;
+    par[0][TP_P2] = 2;
+    seq_key(&S, 0, 60, 1, 90);
+    run(3 * L16);
+    seq_key(&S, 0, 60, 0, 0);
+    seq_key(&S, 0, 60, 1, 90);
+    run(3 * L16);
+    CHECK(on_n(0)->a == 60 && on_n(2)->a == 67 && on_n(3)->a == 67 && on_n(5)->a == 60);
+    seq_key(&S, 0, 60, 0, 0);
+    /* eight notes in the buffer */
+    nev = 0;
+    par[0][TP_P1] = 0;
+    par[0][TP_P2] = 0;
+    {
+        static const uint8_t eight[8] = {48, 52, 55, 59, 60, 64, 67, 71};
+        seq_maestro_record(&S, 0, eight, 8);
+    }
+    seq_key(&S, 0, 48, 1, 90);
+    run(10);
+    CHECK(count(E_ON, 0) == 8 && on_n(7)->a == 71);
+    seq_key(&S, 0, 48, 0, 0);
+    run(10);
+    seq_maestro_record(&S, 0, chord, 3);
+    nev = 0;
+    par[0][TP_P1] = 63;
+    seq_key(&S, 0, 60, 1, 90);
+    run(3 * L16);
     /* hold: the chord stays after the key */
     par[0][TP_P4] = 1;
     seq_key(&S, 0, 60, 0, 0);
@@ -719,111 +1115,339 @@ static void t_hold_player(void)
     printf("ok %s\n", cur);
 }
 
-static void t_stutter(void)
+/* ------------------------------------------------------------ punch-in --- */
+static void t_punch_keys(void)
 {
-    cur = "stutter";
+    int k;
+    cur = "punch-keys";
+    CHECK(punch_of_key(0) == PX_DUCK && punch_of_key(1) == PX_FILTER && punch_of_key(2) == PX_LOOP1 &&
+          punch_of_key(4) == PX_LOOP2 && punch_of_key(6) == PX_ECHO && punch_of_key(7) == PX_FILL1 &&
+          punch_of_key(9) == PX_FILL2 && punch_of_key(11) == PX_RNDFILL);
+    CHECK(punch_of_key(3) == PX_STEREO && punch_of_key(5) == PX_PITCH && punch_of_key(8) == PX_SHORT &&
+          punch_of_key(10) == PX_LONG);
+    CHECK(punch_of_key(12) == PX_MEL + PX_DUCK && punch_of_key(23) == PX_MEL + PX_RNDFILL);
+    CHECK(punch_of_key(24) == -1 && punch_of_key(26) == -1 && punch_of_key(-1) == -1);
+    for (k = 0; k < 24; k++)
+        CHECK(punch_key_of(punch_of_key(k)) == k);
+    CHECK(punch_key_of(12) == -1 && punch_key_of(15) == -1 && PX_VALID(27) && !PX_VALID(28) && !PX_VALID(12));
+    CHECK(strcmp(PUNCH_NAME[PX_DUCK], "duck") == 0 && strcmp(PUNCH_NAME[PX_LONG], "long") == 0);
     reset();
-    par[0][TP_ENGINE] = EG_DRUMLINE;
-    note(0, 0, 1, 100);               /* the kick */
-    start();
-    run(L16);
-    CHECK(count(E_DRUM, 0) == 1 && nth(E_DRUM, 0, 0)->a == 0);
-    seq_punch_key(&S, PD_STUTTER, 1, -1);
-    run(4 * L16);
-    CHECK(count(E_DRUM, 0) >= 8);
-    CHECK(count(E_PUNCH, -1) >= 1 && nth(E_PUNCH, -1, 0)->a == (1 << PD_STUTTER));
-    seq_punch_key(&S, PD_STUTTER, 0, -1);
-    nev = 0;
-    run(8 * L16);
-    CHECK(count(E_DRUM, 0) == 0);
-    /* a synth track: the step's notes again every 1/32 */
-    reset();
-    note(0, 0, 60, 100);
-    start();
-    seq_punch_key(&S, PM_STUTTER, 1, -1);
-    run(4 * L16);
-    CHECK(count(E_ON, 0) >= 8 && on_n(3)->a == 60);
+    par[1][TP_ENGINE] = EG_DRUMLINE;
+    CHECK(punch_group_of(&S, 0) == 1 && punch_group_of(&S, 1) == 0);
     printf("ok %s\n", cur);
 }
 
-static void t_ks_fill(void)
+static void t_duck(void)
 {
-    int i, kicks = 0, snares = 0;
-    cur = "ks-fill";
+    int i;
+    cur = "duck";
+    reset();
+    par[1][TP_ENGINE] = EG_DRUMLINE;
+    for (i = 0; i < 16; i++) {
+        note(0, i, 60, 100);
+        note(1, i, 1, 100);
+        note(2, i, 60, 100);
+    }
+    start();
+    run(10);
+    seq_punch_key(&S, PX_MEL + PX_DUCK, 1, -1);     /* the melodic group: the drums go on */
+    run(2 * L16);
+    CHECK(count(E_ON, 0) == 1 && count(E_DRUM, 1) == 3);
+    CHECK(count(E_PUNCH, -1) == 1 && nth(E_PUNCH, -1, 0)->a == 0 && nth(E_PUNCH, -1, 0)->b == (1 << PX_DUCK));
+    CHECK(seq_punch_mask(&S, 0) == (1u << PX_DUCK) && seq_punch_mask(&S, 1) == 0);
+    seq_punch_key(&S, PX_MEL + PX_DUCK, 0, -1);
+    seq_punch_key(&S, PX_DUCK, 1, -1);              /* the percussive group */
+    nev = 0;
+    run(2 * L16);
+    CHECK(count(E_ON, 0) == 2 && count(E_DRUM, 1) == 0 && nth(E_PUNCH, -1, 0)->a == 1 && nth(E_PUNCH, -1, 0)->b == 0);
+    seq_punch_key(&S, PX_DUCK, 0, -1);
+    /* aimed at one track: the lower octave's bit on a synth track reaches that track only */
+    seq_punch_key(&S, PX_DUCK, 1, 0);
+    nev = 0;
+    run(2 * L16);
+    CHECK(count(E_ON, 0) == 0 && count(E_ON, 2) == 2 && count(E_DRUM, 1) == 2);
+    CHECK(seq_punch_mask(&S, 0) == (1u << PX_DUCK) && seq_punch_mask(&S, 2) == 0);
+    seq_punch_key(&S, PX_DUCK, 0, 0);
+    nev = 0;
+    run(2 * L16);
+    CHECK(count(E_ON, 0) == 2);
+    /* the keys play through it: a held key on a ducked track is silent, the hold player too */
+    seq_punch_key(&S, PX_MEL + PX_DUCK, 1, -1);
+    run(10);
+    stop();
+    printf("ok %s\n", cur);
+}
+
+static void t_loops(void)
+{
+    int i;
+    cur = "loops";
+    reset();
+    for (i = 0; i < 16; i++)
+        note(0, i, 60 + i, 100);
+    start();
+    run(5 * L16 + 10);                /* on step 6 (index 5): loop 1 repeats steps 6 and 7 */
+    seq_punch_key(&S, PX_MEL + PX_LOOP1, 1, -1);
+    run(6 * L16);
+    CHECK(on_n(6)->a == 66 && on_n(7)->a == 65 && on_n(8)->a == 66 && on_n(9)->a == 65 && on_n(10)->a == 66);
+    CHECK(near(on_n(7)->t, 7 * L16 + 3, 2));
+    seq_punch_key(&S, PX_MEL + PX_LOOP1, 0, -1);
+    run(2 * L16);
+    CHECK(on_n(11)->a == 65 && on_n(12)->a == 66);   /* released on 65: on it goes */
+    /* loop 2: a beat */
+    reset();
+    for (i = 0; i < 16; i++)
+        note(0, i, 60 + i, 100);
+    start();
+    run(5 * L16 + 10);
+    seq_punch_key(&S, PX_MEL + PX_LOOP2, 1, -1);
+    run(8 * L16);
+    CHECK(on_n(6)->a == 66 && on_n(7)->a == 67 && on_n(8)->a == 68 && on_n(9)->a == 65 && on_n(10)->a == 66 &&
+          on_n(13)->a == 65);
+    seq_punch_key(&S, PX_MEL + PX_LOOP2, 0, -1);
+    /* a drum track loops the same way, with the span in its own steps (scale 1/2: four steps) */
     reset();
     par[0][TP_ENGINE] = EG_DRUMLINE;
-    seq_punch_key(&S, PD_KS_FILL, 1, -1);
+    P.pat[0][0].scale = TS_HALF;
+    for (i = 0; i < 16; i++)
+        note(0, i, 1 + i % 11, 100);
+    start();
+    run(4 * L16 + 10);                /* step 9 (index 8) */
+    seq_punch_key(&S, PX_LOOP1, 1, -1);
+    run(4 * L16);
+    CHECK(nth(E_DRUM, 0, 9)->a == 9 && nth(E_DRUM, 0, 12)->a == 8 && nth(E_DRUM, 0, 16)->a == 8);
+    printf("ok %s\n", cur);
+}
+
+static void t_echo(void)
+{
+    cur = "echo";
+    reset();
+    note(0, 0, 60, 100);
+    note(0, 1, 62, 100);
+    start();
+    run(10);
+    seq_punch_key(&S, PX_MEL + PX_ECHO, 1, -1);     /* steps 1 and 2 repeat, each pass 70 % as loud */
+    run(6 * L16);
+    CHECK(count(E_ON, 0) >= 6 && on_n(0)->b == 100 && on_n(1)->b == 100 && on_n(2)->b == 69 && on_n(3)->b == 69);
+    CHECK(on_n(4)->b == 48 && on_n(5)->b == 48 && on_n(6)->b == 33);
+    seq_punch_key(&S, PX_MEL + PX_ECHO, 0, -1);
+    nev = 0;
+    run(17 * L16);
+    CHECK(count(E_ON, 0) >= 2 && on_n(1)->b == 100 && on_n(1)->a == 60);   /* a fresh pass at full velocity */
+    /* drums too */
+    reset();
+    par[0][TP_ENGINE] = EG_DRUMLINE;
+    note(0, 0, 1, 100);
+    seq_punch_key(&S, PX_ECHO, 1, -1);
+    start();
+    run(4 * L16 + 10);
+    CHECK(count(E_DRUM, 0) == 3 && nth(E_DRUM, 0, 0)->b == 100 && nth(E_DRUM, 0, 1)->b == 69 &&
+          nth(E_DRUM, 0, 2)->b == 48);
+    printf("ok %s\n", cur);
+}
+
+static void t_fills(void)
+{
+    int i, kicks = 0, snares = 0, hats = 0;
+    cur = "fills";
+    reset();
+    par[0][TP_ENGINE] = EG_DRUMLINE;
+    note(0, 0, 5, 100);               /* the pattern's own hits are replaced while the fill runs */
+    seq_punch_key(&S, PX_FILL1, 1, -1);
     start();
     run(16 * L16);
     for (i = 0; i < nev; i++)
         if (ev[i].kind == E_DRUM) {
             kicks += ev[i].a == 0;
             snares += ev[i].a == 1;
+            hats += ev[i].a == 2;
         }
-    CHECK(kicks == 4 && snares == 2 && near(nth(E_DRUM, 0, 1)->t, 4 * L16 + 2, 2));
-    /* fill: the last sound hit on every empty step; octave up on the hits */
-    reset();
-    par[0][TP_ENGINE] = EG_DRUMLINE;
-    note(0, 0, 5, 100);
-    seq_punch_key(&S, PD_FILL, 1, -1);
-    seq_punch_key(&S, PD_OCT_UP, 1, -1);
-    start();
-    run(16 * L16);
-    CHECK(count(E_DRUM, 0) == 16 && nth(E_DRUM, 0, 1)->a == 4 && nth(E_DRUM, 0, 1)->c == 12);
-    printf("ok %s\n", cur);
-}
-
-static void t_loop4(void)
-{
-    int i;
-    cur = "loop4";
-    reset();
-    for (i = 0; i < 16; i++)
-        note(0, i, 60 + i, 100);
-    start();
-    run(5 * L16 + 10);                /* on step 6 (index 5): the loop is steps 5..8 */
-    seq_punch_key(&S, PM_LOOP4, 1, -1);
-    run(8 * L16);
-    CHECK(on_n(6)->a == 66 && on_n(7)->a == 67 && on_n(8)->a == 64 && on_n(9)->a == 65 && on_n(12)->a == 64);
-    seq_punch_key(&S, PM_LOOP4, 0, -1);
-    run(2 * L16);
-    CHECK(on_n(14)->a == 66 && on_n(15)->a == 67);   /* released on 65: on it goes */
-    printf("ok %s\n", cur);
-}
-
-static void t_half_double(void)
-{
-    int i;
-    cur = "half-double";
-    reset();
-    for (i = 0; i < 16; i++)
-        note(0, i, 60 + i, 100);
-    seq_punch_key(&S, PM_HALF, 1, -1);
-    start();
-    run(4 * L16 + 10);
-    CHECK(count(E_ON, 0) == 3 && near(on_n(1)->t, 2 * L16 + 1, 2));
-    seq_punch_key(&S, PM_HALF, 0, -1);
-    seq_punch_key(&S, PM_DOUBLE, 1, -1);
+    CHECK(count(E_DRUM, 0) == 12 && snares == 12 && kicks == 0);
+    CHECK(near(nth(E_DRUM, 0, 1)->t, 2 * L16 + 1, 2) && near(nth(E_DRUM, 0, 4)->t, 8 * L16 + 4, 2) &&
+          near(nth(E_DRUM, 0, 5)->t, 9 * L16 + 4, 2) && nth(E_DRUM, 0, 5)->b == 110);
+    seq_punch_key(&S, PX_FILL1, 0, -1);
     nev = 0;
-    run(4 * L16);                     /* the step already scheduled keeps its time; then every half step */
-    CHECK(count(E_ON, 0) >= 5 && near(on_n(2)->t - on_n(1)->t, L16 / 2, 2));
-    /* reverse */
-    reset();
-    for (i = 0; i < 16; i++)
-        note(0, i, 60 + i, 100);
-    seq_punch_key(&S, PM_REVERSE, 1, -1);
-    start();
-    run(3 * L16 + 10);
-    CHECK(on_n(0)->a == 60 && on_n(1)->a == 75 && on_n(2)->a == 74);
-    /* octave down, and a ramp */
+    run(16 * L16);
+    CHECK(count(E_DRUM, 0) == 1 && nth(E_DRUM, 0, 0)->a == 4);
+    /* fill 2: a kick on the beats, hats in sixteenths */
+    seq_punch_key(&S, PX_FILL2, 1, -1);
+    nev = 0;
+    run(16 * L16);
+    kicks = snares = hats = 0;
+    for (i = 0; i < nev; i++)
+        if (ev[i].kind == E_DRUM) {
+            kicks += ev[i].a == 0;
+            snares += ev[i].a == 1;
+            hats += ev[i].a == 2;
+        }
+    CHECK(kicks == 4 && hats == 16 && snares == 0);
+    seq_punch_key(&S, PX_FILL2, 0, -1);
+    /* the random fill: sounds 1..3 on most sixteenths */
+    seq_punch_key(&S, PX_RNDFILL, 1, -1);
+    nev = 0;
+    run(32 * L16);
+    CHECK(count(E_DRUM, 0) > 12 && count(E_DRUM, 0) < 32);
+    for (i = 0; i < nev; i++)
+        if (ev[i].kind == E_DRUM)
+            CHECK(ev[i].a <= 2 && ev[i].b >= 70 && ev[i].b <= 110);
+    seq_punch_key(&S, PX_RNDFILL, 0, -1);
+    /* a synth track: its pattern's notes (60 67 64, distinct and sorted: 60 64 67) in a new rhythm */
     reset();
     note(0, 0, 60, 100);
-    note(0, 4, 60, 100);
-    seq_punch_key(&S, PM_OCT_DOWN, 1, -1);
-    seq_punch_key(&S, PM_RAMP, 1, -1);
+    note(0, 2, 67, 100);
+    note(0, 4, 64, 100);
+    note(0, 6, 60, 100);
+    seq_punch_key(&S, PX_MEL + PX_FILL1, 1, -1);
     start();
-    run(5 * L16);
-    CHECK(on_n(0)->a == 48 && on_n(1)->a == 52);
+    run(8 * L16);
+    CHECK(count(E_ON, 0) == 8 && on_n(0)->a == 60 && on_n(1)->a == 64 && on_n(2)->a == 67 && on_n(3)->a == 60 &&
+          near(on_n(1)->t, L16, 1) && near(nth(E_OFF, 0, 0)->t, L16 / 2, 1));
+    seq_punch_key(&S, PX_MEL + PX_FILL1, 0, -1);
+    seq_punch_key(&S, PX_MEL + PX_FILL2, 1, -1);
+    nev = 0;
+    run(8 * L16);
+    CHECK(on_n(0)->a == 60 && on_n(1)->a == 67 && on_n(2)->a == 64 && on_n(3)->a == 60 && on_n(4)->a == 67);
+    seq_punch_key(&S, PX_MEL + PX_FILL2, 0, -1);
+    seq_punch_key(&S, PX_MEL + PX_RNDFILL, 1, -1);
+    nev = 0;
+    run(32 * L16);
+    CHECK(count(E_ON, 0) > 12 && count(E_ON, 0) < 32);
+    for (i = 0; i < count(E_ON, 0); i++)
+        CHECK(on_n(i)->a == 60 || on_n(i)->a == 64 || on_n(i)->a == 67);
+    seq_punch_key(&S, PX_MEL + PX_RNDFILL, 0, -1);
+    /* the fill's notes go through the brain of a routed track, and pitch takes them down an octave */
+    par[0][TP_BRAIN] = 1;
+    seq_brain_key(&S, 62, 1);         /* +1 degree */
+    seq_punch_key(&S, PX_MEL + PX_FILL1, 1, -1);
+    seq_punch_key(&S, PX_MEL + PX_PITCH, 1, -1);
+    nev = 0;
+    run(3 * L16);
+    CHECK(on_n(0)->a == 62 - 12 && on_n(1)->a == 65 - 12 && on_n(2)->a == 69 - 12);
+    printf("ok %s\n", cur);
+}
+
+/* drum offs: the gated and loop play modes end with the step's length, the key's release, or stop */
+static void t_drum_off(void)
+{
+    cur = "drum-off";
+    reset();
+    par[0][TP_ENGINE] = EG_DRUMLINE;
+    note(0, 0, 3, 100);               /* the pattern's 50 %: half a step */
+    note(0, 4, 1, 100);
+    st(0, 4)->len = 8;                /* two steps */
+    note(0, 8, 2, 100);
+    st(0, 8)->comp = SC_MULTIPLY;
+    st(0, 8)->cval = 1;               /* two hits: each a half step */
+    start();
+    run(10 * L16);
+    CHECK(count(E_DOFF, 0) == 4);
+    CHECK(nth(E_DOFF, 0, 0)->a == 2 && near(nth(E_DOFF, 0, 0)->t, L16 / 2, 1));
+    CHECK(nth(E_DOFF, 0, 1)->a == 0 && near(nth(E_DOFF, 0, 1)->t, 6 * L16 + 3, 2));
+    CHECK(nth(E_DOFF, 0, 2)->a == 1 && near(nth(E_DOFF, 0, 2)->t, 8 * L16 + L16 / 2 + 4, 2) &&
+          nth(E_DOFF, 0, 3)->a == 1 && near(nth(E_DOFF, 0, 3)->t, 9 * L16 + 4, 2));
+    /* a key holds its sound until released; stop lets go of what is down */
+    nev = 0;
+    seq_key(&S, 0, 5, 1, 100);
+    run(3 * L16);
+    CHECK(count(E_DRUM, 0) == 1 && count(E_DOFF, 0) == 0);
+    seq_key(&S, 0, 5, 0, 0);
+    run(10);
+    CHECK(count(E_DOFF, 0) == 1 && nth(E_DOFF, 0, 0)->a == 4);
+    seq_key(&S, 0, 7, 1, 100);
+    seq_key(&S, 0, 8, 1, 100);
+    run(10);
+    nev = 0;
+    stop();
+    CHECK(count(E_DOFF, 0) == 2 && nth(E_DOFF, 0, 0)->a == 6 && nth(E_DOFF, 0, 1)->a == 7);
+    /* fills get offs too: a hat every sixteenth, off half a sixteenth later */
+    nev = 0;
+    seq_punch_key(&S, PX_FILL2, 1, -1);
+    start();
+    run(2 * L16);
+    CHECK(count(E_DOFF, 0) >= 3 && nth(E_DOFF, 0, 0)->a == 0 && near(nth(E_DOFF, 0, 1)->t, L16 / 2, 1));
+    printf("ok %s\n", cur);
+}
+
+static void t_pitch_short_long(void)
+{
+    cur = "pitch-short-long";
+    reset();
+    par[1][TP_ENGINE] = EG_DRUMLINE;
+    note(0, 0, 60, 100);
+    note(1, 0, 3, 100);
+    seq_punch_key(&S, PX_PITCH, 1, -1);
+    seq_punch_key(&S, PX_MEL + PX_PITCH, 1, -1);
+    start();
+    run(10);
+    CHECK(on_n(0)->a == 48 && nth(E_DRUM, 1, 0)->c == 12);   /* synths down, drums up */
+    seq_punch_key(&S, PX_PITCH, 0, -1);
+    seq_punch_key(&S, PX_MEL + PX_PITCH, 0, -1);
+    seq_punch_key(&S, PX_SHORT, 1, -1);
+    seq_punch_key(&S, PX_MEL + PX_SHORT, 1, -1);
+    nev = 0;
+    run_to(16 * L16 + 20);
+    run(L16);
+    CHECK(on_n(0)->a == 60 && near(off_of(on_n(0))->t - on_n(0)->t, L16 / 4, 2));   /* a quarter step */
+    CHECK((nth(E_DRUM, 1, 0)->tag & 1u) == 1u && nth(E_DRUM, 1, 0)->c == 0);
+    seq_punch_key(&S, PX_SHORT, 0, -1);
+    seq_punch_key(&S, PX_MEL + PX_SHORT, 0, -1);
+    seq_punch_key(&S, PX_LONG, 1, -1);
+    seq_punch_key(&S, PX_MEL + PX_LONG, 1, -1);
+    nev = 0;
+    run_to(32 * L16 + 20);
+    run(3 * L16);
+    CHECK(near(off_of(on_n(0))->t - on_n(0)->t, 2 * L16, 2));                        /* two steps */
+    CHECK((nth(E_DRUM, 1, 0)->tag & 2u) == 2u);
+    /* filter / vibrato and stereo only reach the engine's masks */
+    seq_punch_key(&S, PX_FILTER, 1, -1);
+    seq_punch_key(&S, PX_MEL + PX_STEREO, 1, -1);
+    run(10);
+    CHECK(nth(E_PUNCH, -1, count(E_PUNCH, -1) - 1)->a == ((1 << PX_LONG) | (1 << PX_FILTER)) &&
+          nth(E_PUNCH, -1, count(E_PUNCH, -1) - 1)->b == ((1 << PX_LONG) | (1 << PX_STEREO)));
+    printf("ok %s\n", cur);
+}
+
+/* sequenced punch-ins, and recording held punch keys into the PUNCH track */
+static void t_punch_seq(void)
+{
+    cur = "punch-seq";
+    reset();
+    note(0, 0, 60, 100);
+    note(0, 1, 60, 100);
+    note(0, 2, 60, 100);
+    P.pat[AUX_PUNCH][0].st[1].note[0] = 1 + PX_MEL + PX_DUCK;   /* the melodic duck on step 2, a step long */
+    P.pat[AUX_PUNCH][0].st[1].vel = 100;
+    P.pat[AUX_PUNCH][0].st[1].len = 4;
+    start();
+    run(3 * L16);
+    CHECK(count(E_ON, 0) == 2 && near(on_n(1)->t, 2 * L16 + 1, 2));
+    CHECK(nth(E_PUNCH, -1, 0) && nth(E_PUNCH, -1, 0)->b == (1 << PX_DUCK) && nth(E_PUNCH, -1, 1)->b == 0);
+    /* an invalid value (an idle bit) does nothing */
+    P.pat[AUX_PUNCH][0].st[1].note[0] = 1 + 13;
+    stop();
+    nev = 0;
+    start();
+    run(3 * L16);
+    CHECK(count(E_ON, 0) == 3 && count(E_PUNCH, -1) == 0);
+    /* recording: a punch key held two steps lands on the step it started with that length */
+    reset();
+    S.rec = 1;
+    start();
+    run(4 * L16 + 10);
+    seq_punch_key(&S, PX_MEL + PX_LOOP1, 1, -1);
+    run(2 * L16);
+    seq_punch_key(&S, PX_MEL + PX_LOOP1, 0, -1);
+    run(10);
+    CHECK(P.pat[AUX_PUNCH][0].st[4].note[0] == 1 + PX_MEL + PX_LOOP1 && P.pat[AUX_PUNCH][0].st[4].len == 8);
+    /* a per-track one records the same way, in the track's octave */
+    par[1][TP_ENGINE] = EG_DRUMLINE;
+    run_to(8 * L16 + 10);
+    seq_punch_key(&S, PX_MEL + PX_FILL1, 1, 1);     /* aimed at the drum track: the percussive bit */
+    run(L16);
+    seq_punch_key(&S, PX_MEL + PX_FILL1, 0, 1);
+    run(10);
+    CHECK(P.pat[AUX_PUNCH][0].st[8].note[0] == 1 + PX_FILL1 && P.pat[AUX_PUNCH][0].st[8].len == 4);
     printf("ok %s\n", cur);
 }
 
@@ -864,6 +1488,71 @@ static void t_record(void)
     stop();
     CHECK(seq_step_rec(&S, 0, 5, 72, 100) == 1 && st(0, 5)->note[0] == 72);
     CHECK(seq_step_rec(&S, 0, 5, 72, 100) == 0 && seq_step_rec(&S, 0, 5, 76, 100) == 1 && st(0, 5)->note[1] == 76);
+    /* a step held + keys: the notes toggled */
+    {
+        static const uint8_t add[2] = {72, 79};
+        CHECK(seq_step_add_notes(&S, 0, 5, add, 2, 90) == 2 && st(0, 5)->note[0] == 76 && st(0, 5)->note[1] == 79 &&
+              st(0, 5)->vel == 90);
+        CHECK(seq_step_add_notes(&S, 0, 9, add, 2, 0) == 2 && st(0, 9)->note[0] == 72 && st(0, 9)->vel == 100);
+    }
+    /* momentary: rec goes off while a key is held: its length is still written */
+    reset();
+    start();
+    run(L16 * 2);
+    seq_rec(&S, 1);
+    seq_key(&S, 0, 60, 1, 100);
+    run(L16 / 2);
+    seq_rec(&S, 0);
+    run(L16 / 2);
+    seq_key(&S, 0, 60, 0, 0);
+    run(10);
+    seq_key(&S, 0, 64, 1, 100);       /* rec is off: not recorded */
+    run(10);
+    seq_key(&S, 0, 64, 0, 0);
+    run(10);
+    CHECK(st(0, 2)->note[0] == 60 && st(0, 2)->len == 4 && st(0, 2)->note[1] == 0 && st(0, 3)->note[0] == 0);
+    printf("ok %s\n", cur);
+}
+
+/* live recording the OP-XY way: the transport waits for the first key, which lands on step 1 */
+static void t_rec_wait(void)
+{
+    cur = "rec-wait";
+    reset();
+    note(1, 0, 67, 100);
+    seq_rec(&S, 2);
+    start();
+    run(3 * L16);
+    CHECK(S.playing && S.rec_wait && count(E_ON, -1) == 0 && count(E_STEP, -1) == 0);
+    seq_key(&S, 0, 60, 1, 100);
+    run(L16 / 2);
+    CHECK(S.rec_wait == 0 && count(E_ON, 0) == 1 && on_n(0)->tag == (0x100u | 60u));   /* the key itself, once */
+    CHECK(count(E_ON, 1) == 1 && near(nth(E_ON, 1, 0)->t, 3 * L16 + 1, 2));            /* the others start now */
+    CHECK(st(0, 0)->note[0] == 60 && st(0, 0)->vel == 100 && st(0, 0)->nudge == 0);
+    seq_key(&S, 0, 60, 0, 0);
+    run(10);
+    CHECK(st(0, 0)->len == 2);
+    run_to(3 * L16 + 1 + 16 * L16);  /* the next pass plays the recorded note */
+    run(10);
+    CHECK(count(E_ON, 0) == 2 && on_n(1)->a == 60 && (on_n(1)->tag & 0x10000u));
+    /* a drum key the same way, with the metronome silent while waiting */
+    reset();
+    par[0][TP_ENGINE] = EG_DRUMLINE;
+    S.metronome = 2;
+    seq_rec(&S, 2);
+    start();
+    run(2 * L16);
+    CHECK(count(E_METRO, -1) == 0);
+    seq_key(&S, 0, 3, 1, 100);
+    run(10);
+    CHECK(count(E_DRUM, 0) == 1 && count(E_METRO, -1) == 1 && st(0, 0)->note[0] == 3);
+    /* seq_rec(2) while playing is a plain rec */
+    stop();
+    seq_rec(&S, 0);
+    start();
+    seq_rec(&S, 2);
+    run(L16);
+    CHECK(S.rec == 1 && S.rec_wait == 0 && count(E_STEP, 0) >= 1);
     printf("ok %s\n", cur);
 }
 
@@ -942,10 +1631,12 @@ static void t_aux_tracks(void)
     reset();
     note(0, 0, 60, 100);
     note(0, 1, 60, 100);
-    P.pat[AUX_PUNCH][0].st[1].note[0] = PM_MUTE + 1;     /* the melodic mute on step 2, a step long */
+    P.pat[AUX_PUNCH][0].st[1].note[0] = 1 + PX_MEL + PX_DUCK;   /* the melodic duck on step 2, a step long */
     P.pat[AUX_PUNCH][0].st[1].vel = 100;
+    P.pat[AUX_PUNCH][0].st[1].len = 4;
     P.pat[AUX_TAPE][0].st[0].note[0] = 4;               /* segment 4 for a step */
     P.pat[AUX_TAPE][0].st[0].vel = 100;
+    P.pat[AUX_TAPE][0].st[0].len = 4;
     start();
     run(3 * L16);
     CHECK(count(E_ON, 0) == 1);       /* step 2 muted by the sequenced FX */
@@ -986,7 +1677,7 @@ int main(void)
     t_pattern_helpers();
     t_timing();
     t_scale();
-    t_swing();
+    t_groove();
     t_length();
     t_chord();
     t_pulse();
@@ -999,6 +1690,7 @@ int main(void)
     t_bend();
     t_jump();
     t_skip();
+    t_components();
     t_cond();
     t_locks();
     t_scene();
@@ -1007,11 +1699,16 @@ int main(void)
     t_arp();
     t_maestro();
     t_hold_player();
-    t_stutter();
-    t_ks_fill();
-    t_loop4();
-    t_half_double();
+    t_punch_keys();
+    t_duck();
+    t_loops();
+    t_echo();
+    t_fills();
+    t_pitch_short_long();
+    t_drum_off();
+    t_punch_seq();
     t_record();
+    t_rec_wait();
     t_ext_clock();
     t_midi_out();
     t_count_in();

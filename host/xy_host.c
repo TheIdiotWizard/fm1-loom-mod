@@ -21,7 +21,9 @@
  *   steps T PAT                  print track T's pattern PAT: each step's notes, component, condition
  *   step T PAT S NOTE VEL        write one note on step S (NOTE 0 clears the step)
  *   scene N                      switch to scene N now
- *   bpm N                        the tempo
+ *   punch KEY on|off             a punch-in key (0..26 = F3..G5, or w0../b0..) held or released, on the group
+ *   brainkey N on|off            a key on the BRAIN track (MIDI note N)
+ *   bpm N                        the tempo (a decimal allowed: 0.1 BPM steps)
  *   cores N                      the second core on (1) or off (0): its job then runs in place
  *   wav FILE | wavstop           start / stop recording the output
  *   peakreset                    restart the output peak (expect peak_db_min / peak_db_max)
@@ -29,8 +31,9 @@
  *   leds                         print the lit buttons and keys
  *   expect WHAT VALUE            check state: exit 1 on mismatch; VALUE "<N" / ">N" is a bound. WHAT:
  *                                playing, step T, scene, voices, dirty, store_writes, midi_out, clocks_out,
- *                                tempo, trk, page NAME, comp T S, note T PAT S, cores, guard, parT.P,
- *                                peak_db_max / peak_db_min
+ *                                tempo, trk, page NAME, comp T S (prints both components; checks the first),
+ *                                note T PAT S, cores, guard, parT.P, peak_db_max / peak_db_min,
+ *                                punch_drum / punch_mel (the masks in effect, PX_* bits)
  *   reboot                       re-run boot from the simulated flash (persistence test)
  *   listen                       a screen reader starts listening (HELLO, again every 2 s): each SAY is printed
  *   where                        the reader asks for everything on the screen
@@ -480,14 +483,14 @@ static void steps_print(int t, int p)
     printf("  track %d pattern %d: %d steps, scale %d, nlen %d\n", t, p, tp->len, tp->scale, tp->nlen);
     for (s = 0; s < tp->len; s++) {
         const step_t *st = &tp->st[s];
-        if (step_empty(st) && !st->comp && !st->cond)
+        if (step_empty(st) && !st->comp && !st->comp2 && !st->cond)
             continue;
         printf("    %2d:", s + 1);
         for (k = 0; k < SN; k++)
             if (st->note[k])
                 printf(" %d", st->note[k]);
-        printf("  vel %d len %d nudge %d comp %d/%d cond %d\n", st->vel, st->len, st->nudge, st->comp, st->cval,
-               st->cond);
+        printf("  vel %d len %d nudge %d comp %d/%d comp2 %d/%d cond %d\n", st->vel, st->len, st->nudge, st->comp,
+               st->cval, st->comp2, st->cval2, st->cond);
     }
 }
 
@@ -518,6 +521,10 @@ static int expect(const char *what, const char *val, const char *b, const char *
         got = (int)(seq_tempo(&seq) + 0.5f);
     else if (!strcmp(what, "trk"))
         got = proj.trk_sel + 1;
+    else if (!strcmp(what, "punch_drum"))           /* the punch masks in effect (seq.h PX_* bits) */
+        got = (int)eng_punch_drum;
+    else if (!strcmp(what, "punch_mel"))
+        got = (int)eng_punch_mel;
     else if (!strcmp(what, "page")) {               /* expect page NAME */
         const char *p = ui_page_name();
         int bad = strcmp(p, val) != 0;
@@ -530,6 +537,8 @@ static int expect(const char *what, const char *val, const char *b, const char *
             printf("FAIL expect comp: no track %s step %s\n", val, b);
             return 1;
         }
+        printf("  comp %s step %s: %d/%d and %d/%d\n", val, b, tp->st[s].comp, tp->st[s].cval, tp->st[s].comp2,
+               tp->st[s].cval2);
         got = tp->st[s].comp;
         val = c;
     } else if (!strncmp(what, "par", 3)) {          /* parT.P: parameter P of track T */
@@ -691,9 +700,20 @@ int main(int argc, char **argv)
                 step_set_notes(&tp->st[s], &n1, 1, vel);
             }
         } else if (!strcmp(cmd, "scene"))
-            seq_set_scene(&seq, (atoi(a) - 1) & (NSCENE - 1));
-        else if (!strcmp(cmd, "bpm"))
-            seq.bpm = (float)atof(a);
+            engine_scene((atoi(a) - 1) & (NSCENE - 1), 0);
+        else if (!strcmp(cmd, "punch")) {            /* punch KEY on|off: through the key's punch bit, on the group */
+            int fx = punch_of_key(key_of(a));
+            if (fx < 0) {
+                printf("line %d: key %s has no punch-in fx\n", lineno, a);
+                return 2;
+            }
+            engine_punch(fx, !strcmp(b, "on"), -1);
+            run_ms(1);
+        } else if (!strcmp(cmd, "brainkey")) {       /* brainkey NOTE on|off */
+            engine_brain_key(atoi(a), !strcmp(b, "on"));
+            run_ms(1);
+        } else if (!strcmp(cmd, "bpm"))
+            engine_tempo((int)(atof(a) * 10.0 + 0.5));
         else if (!strcmp(cmd, "cores"))
             plat_cpu2_set(atoi(a));
         else if (!strcmp(cmd, "wav")) {

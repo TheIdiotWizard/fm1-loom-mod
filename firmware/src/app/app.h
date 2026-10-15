@@ -30,7 +30,8 @@ typedef struct {
     uint32_t magic, format;
     char name[NAME_LEN];
     uint16_t tempo_x10;                 /* 400..3000 */
-    uint8_t swing, groove;              /* the project's (a pattern's own overrides) */
+    uint8_t swing;                      /* unused since the grooves (a reserved byte; the UI may still write it) */
+    uint8_t groove;                     /* the project's groove type (pattern.h GR_*); each track has its amount */
     uint8_t metronome;                  /* 0 off, 1 while recording, 2 on */
     uint8_t lights;                     /* 0 off, 1 keys and glow, 2 keys only */
     uint8_t send_clock, send_notes, one_core, usb_full;

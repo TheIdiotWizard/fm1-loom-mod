@@ -35,9 +35,9 @@ volatile uint32_t eng_scope_w;
 
 /* the units, in the pool (their structs are opaque: a byte array each, 8-aligned for their floats) */
 static uint8_t synth_mem[SYNTH_BYTES] POOL __attribute__((aligned(8)));
-/* drumline units: NDL of them for the pool's sake (four drum tracks at once; a fifth drum track stays silent
- * until one of the others changes engine) */
-#define NDL 4
+/* drumline units: NDL of them for the pool's sake (three drum tracks at once; a fourth drum track stays silent
+ * until one of the others changes engine). Three, not four, since step_t grew to twelve bytes. */
+#define NDL 3
 static uint8_t dl_mem[NDL][DRUMLINE_BYTES] POOL __attribute__((aligned(8)));
 static uint8_t dl_slot[NTRK];                              /* the unit a drum track owns, 0xFF none */
 static uint8_t dl_owner[NDL];                              /* the track owning each unit, 0xFF free */
@@ -70,23 +70,12 @@ static void dl_drop(int t)
 #define TAPE ((tape_t *)(void *)tape_mem)
 #define MST ((master_t *)(void *)mst_mem)
 /* the lines (the memory plan, docs/superpowers/specs: one delay, one reverb, the tape). FX I has the
- * reverb line, FX II the delay lines: the defaults (FX I reverb, FX II delay) and the classic
- * reverb-into-delay. A second delay pair (66 KB) or reverb (24 KB) does not fit beside the canvas,
- * the patterns and the tape; fx_has() tells the UI which effects a slot can do. */
-#ifndef XY_FX1_DELAY
-#define XY_FX1_DELAY 0
-#endif
-#ifndef XY_FX2_REVERB
-#define XY_FX2_REVERB 0
-#endif
-static int16_t rv1_line[FX_RV_LEN] POOL;
-static int16_t dly2_l[FX_DLY_LEN] POOL, dly2_r[FX_DLY_LEN] POOL;
-#if XY_FX1_DELAY
+ * delay lines, FX II the reverb line: the notebook's default project (FX I delay, FX II reverb) and the
+ * classic delay-into-reverb (FX I's return feeds FX II). A second delay pair (88 KB) or reverb (24 KB)
+ * does not fit beside the canvas, the patterns and the tape; fx_has() tells the UI which effects a slot
+ * can do. */
 static int16_t dly1_l[FX_DLY_LEN] POOL, dly1_r[FX_DLY_LEN] POOL;
-#endif
-#if XY_FX2_REVERB
 static int16_t rv2_line[FX_RV_LEN] POOL;
-#endif
 static int16_t tape_ring[TAPE_LEN] POOL;
 
 /* the engine's parameter copy (drumlines, tape, FX read it; locks override it) and the project's
@@ -101,7 +90,10 @@ static float metro_ph, metro_inc;
 static int16_t bend_c[NTRK];                      /* the bend component's cents, per track */
 static uint8_t perf_tail[NTRK], perf_mute[NTRK];  /* the drum tracks' punch state (the synth's perf_t is the synth's) */
 static int8_t perf_pan[NTRK];
+static int8_t perf_pan_base[NTRK];                /* the sequencer's pan offset (the arp's stereo), under the LFO */
+static uint8_t dl_punch_hp[NTRK];                 /* a drum track under the punch filter (its dynamic filter raised) */
 static float pan_lfo_ph;                          /* the punch pan LFO, ~2 Hz */
+static float vib_ph;                              /* the punch vibrato, 6 Hz */
 
 /* the second core */
 static int (*c2_run)(void (*)(uint32_t), uint32_t);
@@ -161,7 +153,7 @@ static void guard_apply(void)
 /* ------------------------------------------------------- command queue --- */
 /* uint32 commands, single producer (main loop) / single consumer (audio ISR): type:4 | a:8 | b:8 | c:12 */
 enum { C_PARAM, C_ALL, C_KEY, C_KEYS_OFF, C_PUNCH, C_TAPE_KEY, C_BRAIN_KEY, C_MASTER, C_FX, C_TAPE, C_PANIC,
-       C_METRO, C_NOP };
+       C_METRO, C_TEMPO, C_GROOVE, C_SCENE, C_NOP };     /* sixteen: the type is four bits */
 #define CQ 512u
 static uint32_t cq[CQ];
 static volatile uint32_t cq_w, cq_r;
@@ -242,6 +234,24 @@ void engine_tape_set(int pitch, int speed, int length, int mix)
 }
 void engine_panic(void) { cq_put(C_PANIC, 0, 0, 0); }
 void engine_metronome(int mode) { cq_put(C_METRO, (uint32_t)mode, 0, 0); }
+void engine_tempo(int bpm_x10)                  /* 400..3000 fits the command's twelve-bit value */
+{
+    if (bpm_x10 < 400)
+        bpm_x10 = 400;
+    if (bpm_x10 > 3000)
+        bpm_x10 = 3000;
+    cq_put(C_TEMPO, 0, 0, (uint32_t)bpm_x10);
+}
+void engine_groove(int type)
+{
+    if (type >= 0 && type < NGROOVE)
+        cq_put(C_GROOVE, (uint32_t)type, 0, 0);
+}
+void engine_scene(int scene, int cued)
+{
+    if (scene >= 0 && scene < NSCENE)
+        cq_put(C_SCENE, (uint32_t)scene, (uint32_t)(cued != 0), 0);
+}
 void engine_transport(int what)                 /* the sequencer's flags: written from any context */
 {
     switch (what) {
@@ -313,6 +323,31 @@ __attribute__((noinline)) static void meter(int p, const float *x, uint32_t n)
 }
 
 /* ------------------------------------------------------------- params --- */
+/* a drum track's Filter page into its drumline (engine.h: the dynamic filter's four values, forced on
+ * with a raised low cut while the punch filter is on it) */
+static void dl_filter_update(int t)
+{
+    const uint8_t *p = epar[t];
+    int type = p[TP_FTYPE], locut = p[TP_CUT], comp = p[TP_RES], drive = p[TP_FENV], hicut = p[TP_KTRK];
+    if (!eng_drum[t])
+        return;
+    if (dl_punch_hp[t]) {
+        if (type != FT_DYNAMIC) {                           /* neutral: only the low cut acts */
+            comp = 0;
+            drive = 0;
+            hicut = 127;
+            locut = 0;
+        }
+        type = FT_DYNAMIC;
+        if (locut < PUNCH_HP)
+            locut = PUNCH_HP;
+    }
+    drumline_filter(DL(t), type, locut, comp, drive, hicut);
+}
+static int is_filter_param(int param)
+{
+    return param == TP_FTYPE || param == TP_CUT || param == TP_RES || param == TP_FENV || param == TP_KTRK;
+}
 /* a lock or a knob reaching a unit that reads epar (the drumline reads it live; the tape and the FX
  * are told) */
 static void aux_changed(int trk, int param)
@@ -336,9 +371,15 @@ static void apply_param(int trk, int param, int val)       /* ISR: C_PARAM */
                 drumline_choke(DL(trk));
             dl_drop(trk);
             eng_drum[trk] = (uint8_t)(drum && dl_take(trk));
-            if (eng_drum[trk])
+            if (eng_drum[trk]) {
                 drumline_init(DL(trk), epar[trk]);
+                dl_filter_update(trk);
+            }
         }
+    } else if (trk < NTRK && eng_drum[trk] && is_filter_param(param) && !locked) {
+        dl_filter_update(trk);
+    } else if (trk == AUX_BRAIN && param == TP_E4) {
+        seq.brain_link = (uint8_t)(val > NTRK ? NTRK : val);   /* the linked track 1..8, 0 none */
     } else if (trk >= NTRK && !locked) {
         aux_changed(trk, param);
     }
@@ -357,9 +398,13 @@ static void apply_all(int trk)                             /* ISR: C_ALL (a load
             drumline_choke(DL(trk));
         dl_drop(trk);
         eng_drum[trk] = (uint8_t)(drum && dl_take(trk));
-        if (eng_drum[trk])
+        if (eng_drum[trk]) {
             drumline_init(DL(trk), epar[trk]);
+            dl_filter_update(trk);
+        }
     } else {
+        if (trk == AUX_BRAIN)
+            seq.brain_link = (uint8_t)(epar[trk][TP_E4] > NTRK ? NTRK : epar[trk][TP_E4]);
         aux_changed(trk, TP_E1);
     }
 }
@@ -388,6 +433,19 @@ static void s_drum(void *x, int trk, int sound, int vel, int pitch_semi, int sho
     if (trk == proj.trk_sel)
         eng_drum_hit[sound] = (uint8_t)(vel >= 127 ? 255 : vel * 2);
 }
+static void s_drum_off(void *x, int trk, int sound)    /* the key or the step ends: gated and loop modes stop */
+{
+    (void)x;
+    if (trk < 0 || trk >= NTRK || !eng_drum[trk] || sound < 0 || sound >= NDRUM)
+        return;
+    drumline_release(DL(trk), sound);
+}
+static void s_pan(void *x, int trk, int pan)           /* the player's pan offset (the arp's stereo), -64..64 */
+{
+    (void)x;
+    if (trk >= 0 && trk < NTRK)
+        perf_pan_base[trk] = (int8_t)(pan < -64 ? -64 : pan > 64 ? 64 : pan);
+}
 static void s_lock(void *x, int trk, int param, int val)
 {
     (void)x;
@@ -406,6 +464,8 @@ static void s_lock(void *x, int trk, int param, int val)
     }
     if (trk >= NTRK)
         aux_changed(trk, param);
+    else if (is_filter_param(param))
+        dl_filter_update(trk);
 }
 static void s_bend(void *x, int trk, int cents)
 {
@@ -414,7 +474,10 @@ static void s_bend(void *x, int trk, int cents)
         bend_c[trk] = (int16_t)cents;
 }
 /* the live FX state: per track, its group's mask (drum tracks the drum FX, the rest the melodic) into
- * the track's performance state. Mute wins; the pan LFO runs each stretch (perf_tick) */
+ * the track's performance state. Both masks arrive as bits PX_* (the sequencer shifts the melodic
+ * octave down; eng_punch_mel is the same). Here: duck (mute), filter (drums: the high-pass and a wobble on what is long;
+ * melodic: a short vibrato), stereo (the pan LFO), long (the drums' tails). Loops, echo, fills, pitch
+ * and the note lengths are the sequencer's own. */
 static uint32_t punch_d, punch_m;
 static void s_punch(void *x, uint32_t drum_mask, uint32_t mel_mask)
 {
@@ -451,50 +514,49 @@ static void s_metro(void *x, int accent)
     metro_inc = (accent ? 1760.0f : 1320.0f) / 44100.0f;
     synth_duck_trigger(SY, NTRK);                        /* (8 = the metronome, synth.h) */
 }
-static const seq_sink_t SINK = {s_note_on, s_note_off, s_drum, s_lock, s_bend, s_punch, s_tape_seg, s_tape_step,
-                                s_midi, s_step, s_scene, s_metro, 0};
+/* named members: the sequencer may grow its sink at the end without this changing */
+static const seq_sink_t SINK = {
+    .note_on = s_note_on, .note_off = s_note_off, .drum = s_drum, .lock = s_lock, .bend = s_bend, .punch = s_punch,
+    .tape_seg = s_tape_seg, .tape_step = s_tape_step, .midi = s_midi, .step = s_step, .scene = s_scene,
+    .metro = s_metro, .pan = s_pan, .drum_off = s_drum_off, .ctx = 0};
 
 /* the performance state of every instrument track from the punch masks and the bends: once a stretch */
-static int fx_slot_of(int type)                    /* the slot doing this effect, or -1 */
-{
-    return fx_type[0] == type ? 0 : fx_type[1] == type ? 1 : -1;
-}
+#define PUNCH_VIB_DRUM 30.0f                               /* cents, the wobble under the drums' filter */
+#define PUNCH_VIB_MEL 20.0f                                /* the melodic tracks' short vibrato */
 static void perf_tick(uint32_t n)
 {
-    int t, dly = fx_slot_of(FXT_DELAY), rev = fx_slot_of(FXT_REVERB);
-    float lfo;
+    int t;
+    float lfo, vib;
     pan_lfo_ph += (float)n * (2.0f / 44100.0f);
     if (pan_lfo_ph >= 1.0f)
         pan_lfo_ph -= 1.0f;
+    vib_ph += (float)n * (6.0f / 44100.0f);
+    if (vib_ph >= 1.0f)
+        vib_ph -= 1.0f;
     lfo = fm_sin_turns(pan_lfo_ph);
+    vib = fm_sin_turns(vib_ph);
     for (t = 0; t < NTRK; t++) {
         perf_t *p = synth_perf(SY, t);
-        uint32_t m = eng_drum[t] ? punch_d : punch_m >> 16;
-        int mute, pan_on, tail = 0, oct = 0, cut = 0, s_dly = 0, s_rev = 0;
-        if (eng_drum[t]) {
-            mute = (m >> PD_MUTE) & 1u;
-            pan_on = (m >> PD_PAN) & 1u;
-            tail = (m >> PD_TAILS) & 1u;
-            oct = (m >> PD_OCT_UP) & 1u ? 1200 : 0;
-            s_dly = (m >> PD_ECHO) & 1u;
-        } else {
-            mute = (m >> (PM_MUTE - 16)) & 1u;
-            pan_on = (m >> (PM_PAN - 16)) & 1u;
-            oct = (m >> (PM_OCT_UP - 16)) & 1u ? 1200 : (m >> (PM_OCT_DOWN - 16)) & 1u ? -1200 : 0;
-            s_dly = (m >> (PM_DELAY - 16)) & 1u;
-            s_rev = (m >> (PM_REVERB - 16)) & 1u;
-            cut = (m >> (PM_FILT_DOWN - 16)) & 1u ? -80 : (m >> (PM_FILT_UP - 16)) & 1u ? 80 : 0;
-        }
-        p->pitch_c = (int16_t)(bend_c[t] + oct);
-        p->cut = (int16_t)cut;
-        p->pan = (int8_t)(pan_on ? (int)(lfo * 60.0f) : 0);
+        int drum = eng_drum[t];
+        uint32_t m = drum ? punch_d : punch_m;
+        int mute = (int)((m >> PX_DUCK) & 1u), pan_on = (int)((m >> PX_STEREO) & 1u);
+        int filt = (int)((m >> PX_FILTER) & 1u), tail = (int)((m >> PX_LONG) & 1u), pan;
+        p->pitch_c = (int16_t)(bend_c[t] + (filt ? (int)(vib * (drum ? PUNCH_VIB_DRUM : PUNCH_VIB_MEL)) : 0));
+        p->cut = 0;
+        p->hp = (uint8_t)(drum && filt ? PUNCH_HP : 0);
+        pan = perf_pan_base[t] + (pan_on ? (int)(lfo * 60.0f) : 0);
+        p->pan = (int8_t)(pan < -127 ? -127 : pan > 127 ? 127 : pan);
         p->mute = (uint8_t)mute;
-        p->send1 = (uint8_t)((dly == 0 && s_dly) || (rev == 0 && s_rev) ? 100 : 0);
-        p->send2 = (uint8_t)((dly == 1 && s_dly) || (rev == 1 && s_rev) ? 100 : 0);
+        p->send1 = 0;
+        p->send2 = 0;
         p->long_tail = (uint8_t)tail;
         perf_tail[t] = (uint8_t)tail;
         perf_mute[t] = (uint8_t)mute;
         perf_pan[t] = p->pan;
+        if (drum && dl_punch_hp[t] != (uint8_t)filt) {    /* the drumline's filter follows the punch state */
+            dl_punch_hp[t] = (uint8_t)filt;
+            dl_filter_update(t);
+        }
     }
 }
 
@@ -578,6 +640,14 @@ static void drain(void)
             break;
         }
         case C_METRO: seq.metronome = (uint8_t)a; break;
+        case C_TEMPO: seq.bpm = (float)v * 0.1f; break;
+        case C_GROOVE: seq.groove_type = (uint8_t)a; break;
+        case C_SCENE:
+            if (b)
+                seq_cue_scene(&seq, (int)a);
+            else
+                seq_set_scene(&seq, (int)a);
+            break;
         default: break;
         }
     }
@@ -825,9 +895,13 @@ void engine_init(patterns_t *P, uint8_t (*par)[NTP])
         dl_owner[k] = 0xFF;
     for (t = 0; t < NTRK; t++) {
         dl_slot[t] = 0xFF;
+        dl_punch_hp[t] = 0;
+        perf_pan_base[t] = 0;
         eng_drum[t] = (uint8_t)(par[t][TP_ENGINE] == EG_DRUMLINE && dl_take(t));
-        if (eng_drum[t])
+        if (eng_drum[t]) {
             drumline_init(DL(t), epar[t]);
+            dl_filter_update(t);
+        }
         for (k = 0; k < GL_N; k++) {
             trk_glide[t][k].cur = -1.0f;
             trk_glide[t][k].tgt = 0.0f;
@@ -838,16 +912,8 @@ void engine_init(patterns_t *P, uint8_t (*par)[NTP])
         ret_glide[k][0].cur = ret_glide[k][1].cur = -1.0f;
         tape_glide[k].cur = -1.0f;
     }
-#if XY_FX1_DELAY
-    fx_init(FXS(0), dly1_l, dly1_r, rv1_line);
-#else
-    fx_init(FXS(0), 0, 0, rv1_line);
-#endif
-#if XY_FX2_REVERB
-    fx_init(FXS(1), dly2_l, dly2_r, rv2_line);
-#else
-    fx_init(FXS(1), dly2_l, dly2_r, 0);
-#endif
+    fx_init(FXS(0), dly1_l, dly1_r, 0);                   /* FX I: the delay lines, no reverb */
+    fx_init(FXS(1), 0, 0, rv2_line);                      /* FX II: the reverb line, no delay */
     fx_type[0] = epar[AUX_FX1][TP_ENGINE];
     fx_type[1] = epar[AUX_FX2][TP_ENGINE];
     fx_set(FXS(0), fx_type[0], epar[AUX_FX1] + TP_E1);
@@ -856,10 +922,12 @@ void engine_init(patterns_t *P, uint8_t (*par)[NTP])
     tape_set(TAPE, epar[AUX_TAPE][TP_E1], epar[AUX_TAPE][TP_E2], epar[AUX_TAPE][TP_E3], epar[AUX_TAPE][TP_E4]);
     master_init(MST);
     seq_init(&seq, P, par);
+    seq.groove_type = (uint8_t)(proj.groove < NGROOVE ? proj.groove : GR_SHUFFLE);
+    seq.brain_link = (uint8_t)(par[AUX_BRAIN][TP_E4] > NTRK ? NTRK : par[AUX_BRAIN][TP_E4]);
     for (t = 0; t < NSEQT; t++)
         eng_step[t] = 0;
     eng_voices_max = NVOICE;
 }
 
-/* the UI asks before offering an effect: FX II has no reverb line, FX I no delay (the memory plan) */
+/* the UI asks before offering an effect: FX I has no reverb line, FX II no delay (the memory plan) */
 int engine_fx_has(int slot, int type) { return fx_has(FXS(slot & 1), type); }

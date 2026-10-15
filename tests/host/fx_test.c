@@ -1,11 +1,14 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* The effects (dsp/fx.c) on their own: every send effect takes an impulse and a noise burst without
- * NaN and stays bounded; the delay's first echo lands on the beat at 120 BPM and ping-pongs; the
- * reverb decays; the tape loops the segment that was asked for and its dry gain follows mix; the
- * master is bit-transparent at EQ blend 0 (apart from the limiter's 64-sample lookahead), its
- * limiter never passes 1.0, its compressor pulls loud input down, its EQ moves the bands; and the
- * cost of each in instructions a sample (macOS: proc_pid_rusage). Each effect's burst is written to
- * build/host/fx_<name>.wav for inspection (nothing here plays audio).
+ * NaN and stays bounded, at mid knobs and at the notebook's defaults; the delay's first echo lands
+ * on the beat at 120 BPM (size 1/4 = 0.5 s, dotted 1/8 = 0.375 s) and ping-pongs; the delay's and
+ * the reverb's dry knob passes the send or not; the reverb decays; the distortion's clip hardens the
+ * edge; the lofi's drift spreads the sides; the tape loops the segment that was asked for, its dry
+ * gain follows mix, pitch +1 octave and speed 200 % double its rate; the master is bit-transparent at
+ * EQ blend 0 (apart from the limiter's 64-sample lookahead), its limiter never passes 1.0, its
+ * compressor pulls loud input down, its EQ moves the bands; and the cost of each in instructions a
+ * sample (macOS: proc_pid_rusage). Each effect's burst is written to build/host/fx_<name>.wav for
+ * inspection (nothing here plays audio).
  *   tests/host/fx_test.sh */
 #include <stdio.h>
 #include <string.h>
@@ -147,6 +150,23 @@ int main(void)
                  (double)db(r.rms_after), (double)db(r.rms_end));
         check(name, !r.nan && r.peak > 0.001f && r.peak < 4.0f);
     }
+    {   /* the notebook's defaults, as printed (00..99, stored * 1.28), and every effect runs on them */
+        static const uint8_t printed[NFXT][4] = {{59, 50, 50, 50}, {65, 50, 50, 99}, {6, 99, 50, 99},
+                                                 {50, 73, 61, 99}, {30, 61, 30, 50}, {69, 0, 29, 99}};
+        int ok = 1, k;
+        for (t = 0; t < NFXT; t++) {
+            for (k = 0; k < 4; k++)
+                ok &= FXT_DEFAULT[t][k] == (uint8_t)((float)printed[t][k] * 1.28f + 0.5f);
+            run_fx(t, FXT_DEFAULT[t], &r, 0);
+            ok &= !r.nan && r.peak > 0.001f && r.peak < 4.0f;
+        }
+        check("FXT_DEFAULT: the printed values; every effect runs on its defaults", ok);
+        check("delay: size fine feedback dry; distortion: drive clip lo cut hi cut; reverb: size mod tone dry",
+              !strcmp(FXT_KNOB[FXT_DELAY][1], "fine") && !strcmp(FXT_KNOB[FXT_DELAY][2], "feedback") &&
+              !strcmp(FXT_KNOB[FXT_DIST][1], "clip") && !strcmp(FXT_KNOB[FXT_REVERB][2], "tone") &&
+              !strcmp(FXT_KNOB[FXT_REVERB][3], "dry") && !strcmp(FXT_KNOB[FXT_LOFI][3], "drift") &&
+              !strcmp(MS_NAME[MS_SAT_BLEND], "mix"));
+    }
     check("fx_has: every effect with its lines", fx_has(fx, FXT_REVERB) && fx_has(fx, FXT_DELAY) && fx_has(fx, FXT_LOFI));
     fx_init(fx, dly_l, dly_r, 0);
     check("fx_has: no reverb without its line", !fx_has(fx, FXT_REVERB) && fx_has(fx, FXT_CHORUS));
@@ -163,18 +183,19 @@ int main(void)
         check("knobs at their ends: finite, under +18 dBFS", ok);
     }
 
-    printf("-- delay at 120 BPM: size 4 sixteenths = 0.5 s\n");
+    printf("-- delay at 120 BPM: size 1/4 = 0.5 s, dotted 1/8 = 0.375 s\n");
     {
-        static const uint8_t kn[4] = {48, 64, 64, 0};        /* (48 * 8) >> 7 = 3: 4 sixteenths; fb 0.47; no dry */
-        run_fx(FXT_DELAY, kn, &r, 0);
-        snprintf(name, sizeof name, "  first echo left at %d (22050), right at %d (44100)", r.peak_l_at, r.peak_r_at);
-        /* the window stops at 2205: look at the echoes of the impulse in a longer run instead */
-        {
+        /* size 100: (100 * 8) >> 7 = 6, 1/4; size 85: 5, 1/8D; fine 64 (none); feedback 0.47; no dry.
+         * The impulse's echoes are looked for in a run longer than run_fx's window */
+        static const uint8_t kn[2][4] = {{100, 64, 64, 0}, {85, 64, 64, 0}};
+        static const int at[2] = {22050, 16538};
+        int s;
+        for (s = 0; s < 2; s++) {
             float pl = 0.0f, pr = 0.0f;
             int at_l = 0, at_r = 0;
             fx_init(fx, dly_l, dly_r, rv);
             fx_tempo(fx, 120.0f);
-            fx_set(fx, FXT_DELAY, kn);
+            fx_set(fx, FXT_DELAY, kn[s]);
             for (b = 0; b < 50000 / BLK; b++) {
                 memset(in, 0, sizeof in);
                 if (b == 0)
@@ -188,11 +209,13 @@ int main(void)
                     if (tt > 100 && fm_fabsf(orr[i]) > pr) { pr = fm_fabsf(orr[i]); at_r = tt; }
                 }
             }
-            snprintf(name, sizeof name, "  first echo left at %d (22050), right at %d (44100)", at_l, at_r);
-            check(name, at_l >= 22048 && at_l <= 22053 && at_r >= 44098 && at_r <= 44104 && pl > 0.3f && pr > 0.1f);
+            snprintf(name, sizeof name, "  %s: first echo left at %d (%d), right at %d (%d)", s ? "1/8D" : "1/4 ",
+                     at_l, at[s], at_r, 2 * at[s]);
+            check(name, at_l >= at[s] - 2 && at_l <= at[s] + 3 && at_r >= 2 * at[s] - 2 && at_r <= 2 * at[s] + 4 &&
+                        pl > 0.3f && pr > 0.1f);
         }
         {   /* the dry knob passes the send */
-            static const uint8_t kd[4] = {48, 0, 64, 127};
+            static const uint8_t kd[4] = {100, 64, 0, 127};
             fx_init(fx, dly_l, dly_r, rv);
             fx_set(fx, FXT_DELAY, kd);
             memset(in, 0, sizeof in);
@@ -207,9 +230,22 @@ int main(void)
         }
     }
 
-    printf("-- reverb decays, and is silent when left alone\n");
+    printf("-- reverb decays, and is silent when left alone; its dry knob\n");
     {
         static const uint8_t kn[4] = {64, 40, 40, 127};
+        int d;
+        for (d = 0; d < 2; d++) {                                /* dry 0 removes the dry, dry 127 passes it */
+            uint8_t kd[4] = {64, 40, 64, (uint8_t)(d ? 127 : 0)};
+            fx_init(fx, dly_l, dly_r, rv);
+            fx_set(fx, FXT_REVERB, kd);
+            memset(in, 0, sizeof in);
+            in[10] = 1.0f;
+            memset(ol, 0, sizeof ol);
+            memset(orr, 0, sizeof orr);
+            fx_process(fx, in, ol, orr, BLK);                    /* the combs answer ~1100 samples later */
+            snprintf(name, sizeof name, "  reverb dry %d: the send at %.2f", d ? 127 : 0, (double)ol[10]);
+            check(name, d ? (ol[10] > 0.6f && ol[10] < 0.8f) : ol[10] == 0.0f);
+        }
         run_fx(FXT_REVERB, kn, &r, 0);
         snprintf(name, sizeof name, "  after the burst %.1f dB, two seconds on %.1f dB", (double)db(r.rms_after),
                  (double)db(r.rms_end));
@@ -230,7 +266,7 @@ int main(void)
 
     printf("-- the slot's filter page and a change of effect\n");
     {
-        static const uint8_t kn[4] = {0, 0, 0, 127};               /* the distortion at amount 0: a wire */
+        static const uint8_t kn[4] = {0, 0, 0, 127};               /* the distortion at drive 1, cuts open: near a wire */
         float lo = 0.0f, hi = 0.0f, lo2 = 0.0f, hi2 = 0.0f;
         fx_init(fx, dly_l, dly_r, rv);
         fx_set(fx, FXT_DIST, kn);
@@ -303,6 +339,54 @@ int main(void)
         }
     }
 
+    printf("-- distortion: clip hardens the edge; lofi: drift spreads the sides\n");
+    {
+        float e[2] = {0.0f, 0.0f}, pk[2] = {0.0f, 0.0f};
+        int c;
+        for (c = 0; c < 2; c++) {                                /* a 0.4 sine, drive 24: tanh, then a hard clip */
+            uint8_t kn[4] = {24, (uint8_t)(c ? 127 : 0), 0, 127};
+            fx_init(fx, dly_l, dly_r, rv);
+            fx_set(fx, FXT_DIST, kn);
+            for (b = 0; b < 60; b++) {
+                for (i = 0; i < BLK; i++)
+                    in[i] = 0.4f * fm_sin_turns((float)(b * BLK + i) * (200.0f / SR));
+                memset(ol, 0, sizeof ol);
+                memset(orr, 0, sizeof orr);
+                fx_process(fx, in, ol, orr, BLK);
+                if (b >= 30)
+                    for (i = 0; i < BLK; i++) {
+                        e[c] += ol[i] * ol[i];
+                        pk[c] = fm_maxf(pk[c], fm_fabsf(ol[i]));
+                    }
+            }
+        }
+        snprintf(name, sizeof name, "  clip 127 over clip 0: %.1f dB more RMS, the same peak (%.2f, %.2f)",
+                 (double)(10.0f * 0.30103f * fm_log2f(e[1] / e[0])), (double)pk[0], (double)pk[1]);
+        check(name, e[1] > e[0] * 1.1f && pk[1] > pk[0] * 1.1f && pk[1] < 1.0f);
+        for (c = 0; c < 2; c++) {                                /* drift 0: L = R exactly; drift 127: they differ */
+            uint8_t kn[4] = {64, 93, 78, (uint8_t)(c ? 127 : 0)};
+            float diff = 0.0f, e2 = 0.0f;
+            int same = 1;
+            fx_init(fx, dly_l, dly_r, rv);
+            fx_set(fx, FXT_LOFI, kn);
+            for (b = 0; b < 60; b++) {
+                for (i = 0; i < BLK; i++)
+                    in[i] = 0.3f * noise();
+                memset(ol, 0, sizeof ol);
+                memset(orr, 0, sizeof orr);
+                fx_process(fx, in, ol, orr, BLK);
+                for (i = 0; i < BLK; i++) {
+                    same &= ol[i] == orr[i];
+                    diff += (ol[i] - orr[i]) * (ol[i] - orr[i]);
+                    e2 += ol[i] * ol[i];
+                }
+            }
+            snprintf(name, sizeof name, "  lofi drift %d: the sides %s (L-R at %.1f dB of L)", c ? 127 : 0,
+                     c ? "differ" : "are the same", (double)(10.0f * 0.30103f * fm_log2f(diff / e2 + 1e-12f)));
+            check(name, c ? (!same && diff > e2 * 0.5f) : same);
+        }
+    }
+
     printf("-- tape: 16 steps of markers at 120 BPM, then segments loop\n");
     {
         /* step k holds a 300 Hz sine at amplitude (k + 1) / 16: a segment is known by its level.
@@ -371,11 +455,12 @@ int main(void)
             check(name, dry > 0.45f && dry < 0.55f && mn < 0.1f && pk2 > 0.4f);
             tape_segment(tp, 0, 0);
         }
-        {   /* pitch +12: the loop plays twice as fast (a 300 Hz marker becomes 600 Hz: more zero crossings) */
-            int zc1 = 0, zc2 = 0, p;
+        {   /* pitch +1 octave (knob 96: the fourth of five zones), or speed 200 % (knob 127): the loop plays
+             * twice as fast (a 300 Hz marker becomes 600 Hz: twice the zero crossings) */
+            int zc[3] = {0, 0, 0}, p;
             float last;
-            for (p = 0; p < 2; p++) {
-                tape_set(tp, p ? 96 : 64, 64, 0, 127);
+            for (p = 0; p < 3; p++) {
+                tape_set(tp, p == 1 ? 96 : 64, p == 2 ? 127 : 64, 0, 127);
                 tape_segment(tp, 15, 1);
                 last = 0.0f;
                 for (b = 0; b < 60; b++) {
@@ -386,7 +471,7 @@ int main(void)
                     if (b >= 20)
                         for (i = 0; i < BLK; i++) {
                             if ((ol[i] > 0.0f) != (last > 0.0f))
-                                *(p ? &zc2 : &zc1) += 1;
+                                zc[p] += 1;
                             last = ol[i];
                         }
                 }
@@ -396,8 +481,37 @@ int main(void)
                     tape_process(tp, in, ol, orr, BLK);
                 }
             }
-            snprintf(name, sizeof name, "  pitch +12 doubles the rate (%d -> %d zero crossings)", zc1, zc2);
-            check(name, zc2 > zc1 * 18 / 10 && zc2 < zc1 * 22 / 10);
+            snprintf(name, sizeof name, "  pitch +1 octave doubles the rate (%d -> %d zero crossings)", zc[0], zc[1]);
+            check(name, zc[1] > zc[0] * 18 / 10 && zc[1] < zc[0] * 22 / 10);
+            snprintf(name, sizeof name, "  speed 200 %% doubles the rate (%d -> %d zero crossings)", zc[0], zc[2]);
+            check(name, zc[2] > zc[0] * 18 / 10 && zc[2] < zc[0] * 22 / 10);
+            {   /* the five pitch zones: 0..25 -2, 26..51 -1, 52..76 x1, 77..102 +1, 103..127 +2 */
+                int z[3] = {0, 0, 0}, q;
+                for (q = 0; q < 3; q++) {
+                    tape_set(tp, q == 0 ? 25 : q == 1 ? 52 : 76, 64, 0, 127);
+                    tape_segment(tp, 15, 1);
+                    last = 0.0f;
+                    for (b = 0; b < 60; b++) {
+                        memset(in, 0, sizeof in);
+                        memset(ol, 0, sizeof ol);
+                        memset(orr, 0, sizeof orr);
+                        tape_process(tp, in, ol, orr, BLK);
+                        if (b >= 20)
+                            for (i = 0; i < BLK; i++) {
+                                if ((ol[i] > 0.0f) != (last > 0.0f))
+                                    z[q] += 1;
+                                last = ol[i];
+                            }
+                    }
+                    tape_segment(tp, 15, 0);
+                    for (b = 0; b < 10; b++) {
+                        memset(in, 0, sizeof in);
+                        tape_process(tp, in, ol, orr, BLK);
+                    }
+                }
+                snprintf(name, sizeof name, "  pitch 25 is -2 octaves (%d), 52 and 76 are x1 (%d, %d)", z[0], z[1], z[2]);
+                check(name, z[0] > zc[0] * 2 / 10 && z[0] < zc[0] * 3 / 10 && z[1] == zc[0] && z[2] == zc[0]);
+            }
         }
     }
 

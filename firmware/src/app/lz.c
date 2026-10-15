@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* A small LZ77 for the project's patterns, song and motion (project.c), which are mostly empty
- * steps and repeats: 64 steps x 32 patterns plus the lanes are ~30 KB raw and a few KB packed.
+ * steps and repeats: 64 steps x 88 patterns plus the lanes are ~75 KB raw and a few KB packed.
  *
  * Stream: a control byte c, then
  *   c < 0x80   c + 1 literal bytes follow (1..128);
@@ -10,15 +10,17 @@
  *
  * The compressor writes through a sink (a run of bytes at a time), so its output can go to the
  * flash objects one chunk at a time, and reads its input in place. It remembers the last position
- * of each 3-byte hash (lz_head, 4 KB) and tries the byte before too (runs). The decompressor reads
- * a byte at a time from a source and writes into place. No allocation; inputs under 64 KB. */
+ * of each 3-byte hash (lz_head, 8 KB) and tries the byte before too (runs). The decompressor reads
+ * a byte at a time from a source and writes into place. No allocation; inputs up to 16 MB (a match
+ * reaches at most 64 KB back: the distance is a u16; a farther candidate is passed over). */
 #include <stdint.h>
 
 #define LZ_MIN 3u
 #define LZ_MAXLEN (0x7Fu + LZ_MIN)
 #define LZ_MAXLIT 128u
 #define LZ_HBITS 11
-#define LZ_NONE 0xFFFFu
+#define LZ_NONE 0xFFFFFFFFu
+#define LZ_MAXDIST 65536u
 
 typedef struct {
     int (*put)(void *ctx, const uint8_t *p, uint32_t n);   /* 0 = taken; else the compression stops */
@@ -30,7 +32,7 @@ typedef struct {
     void *ctx;
 } lz_src_t;
 
-static uint16_t lz_head[1u << LZ_HBITS];
+static uint32_t lz_head[1u << LZ_HBITS];
 
 static uint32_t lz_hash(const uint8_t *p)
 {
@@ -62,7 +64,7 @@ static int lz_literals(lz_sink_t *o, const uint8_t *p, uint32_t n)
 static int lz_compress(const uint8_t *in, uint32_t n, lz_sink_t *o)
 {
     uint32_t i = 0, lit = 0, k;
-    if (n >= LZ_NONE)
+    if (n >= 0x1000000u)
         return -1;
     for (k = 0; k < (1u << LZ_HBITS); k++)
         lz_head[k] = LZ_NONE;
@@ -70,8 +72,8 @@ static int lz_compress(const uint8_t *in, uint32_t n, lz_sink_t *o)
         uint32_t best = 0, dist = 0;
         if (i + LZ_MIN <= n) {
             uint32_t h = lz_hash(in + i), c = lz_head[h], len;
-            lz_head[h] = (uint16_t)i;
-            if (c != LZ_NONE && (len = lz_match_len(in, n, c, i)) > best) {
+            lz_head[h] = i;
+            if (c != LZ_NONE && i - c <= LZ_MAXDIST && (len = lz_match_len(in, n, c, i)) > best) {
                 best = len;
                 dist = i - c;
             }
@@ -92,7 +94,7 @@ static int lz_compress(const uint8_t *in, uint32_t n, lz_sink_t *o)
                 return -1;
         }
         for (k = 1; k < best && i + k + LZ_MIN <= n; k++)       /* the positions inside the match */
-            lz_head[lz_hash(in + i + k)] = (uint16_t)(i + k);
+            lz_head[lz_hash(in + i + k)] = i + k;
         i += best;
         lit = i;
     }

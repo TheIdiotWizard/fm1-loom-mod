@@ -21,8 +21,10 @@
  *
  * Players: the keys reach the engine through seq_key(): arp (clocked here), maestro (the recorded
  * chord, transposed, rolled), hold; the brain shifts routed tracks' notes diatonically (its degree
- * from its keys or its steps). Punch-in FX are a bit mask per group, from held keys or the punch
- * track's steps; the sequencer derives the perf state and fires the fill patterns.
+ * from its keys or its steps; its link track plays its keys in parallel). Punch-in FX are a bit mask
+ * per group, from held keys (seq_punch_key, group-wide or aimed at one track) or the punch track's
+ * steps; the sequencer runs the ones that change the sequence (duck, the loops, echo, the fills,
+ * pitch, short, long) and hands the engine the masks for the rest (filter / vibrato, stereo).
  *
  * Clock: internal (BPM) or MIDI clock in (24 ppqn, seq_ext_clock); clock and transport out through
  * the sink. Everything the main loop changes is a flag or a byte, picked up at the next block. */
@@ -33,12 +35,37 @@
 #define NTP_ALL NTP                   /* aux tracks use the same parameter array as the instrument tracks */
 
 #define SEQ_FS 44100u
-#define NPUNCH_FX 32                  /* bit numbers: 0..11 drum FX, 16..30 melodic FX */
-enum { PD_MUTE, PD_STUTTER, PD_FILL, PD_PAN, PD_HALF_FILL, PD_OCT_UP, PD_ECHO, PD_KS_FILL, PD_SHORT, PD_HATS,
-       PD_TAILS, PD_RANDOM };
-enum { PM_MUTE = 16, PM_STUTTER, PM_LOOP4, PM_PAN, PM_OCT_UP, PM_OCT_DOWN, PM_DELAY, PM_REVERB, PM_FILT_DOWN,
-       PM_FILT_UP, PM_RAMP, PM_RANDOM, PM_HALF, PM_DOUBLE, PM_REVERSE };
-extern const char *const PUNCH_NAME[NPUNCH_FX];   /* "" where unused */
+/* punch-in FX: the OP-XY's twelve, the same in both octaves (the notebook p. 121). White keys 1..7 of an
+ * octave: duck, loop 1 (fast), loop 2 (slow), echo, fill 1, fill 2, random fill; its black keys 1..5: filter /
+ * vibrato, stereo, pitch, short, long. Bits 0..11 = the lower octave (percussive tracks), 16..27 = the upper
+ * (melodic tracks). On the FM-1 the lower octave is keys F3..E4, the upper F4..E5 (F5, F#5, G5 idle). */
+#define NPUNCH_FX 32
+#define NPUNCH 12
+enum { PX_DUCK, PX_LOOP1, PX_LOOP2, PX_ECHO, PX_FILL1, PX_FILL2, PX_RNDFILL, PX_FILTER, PX_STEREO, PX_PITCH,
+       PX_SHORT, PX_LONG };
+#define PX_MEL 16                     /* + PX_* = the melodic octave's bit */
+#define PX_VALID(fx) ((fx) >= 0 && (fx) < NPUNCH_FX && ((fx) & 15) < NPUNCH)   /* a real bit: 0..11, 16..27 */
+extern const char *const PUNCH_NAME[NPUNCH];          /* "duck", "loop 1", ... */
+/* a key number 0..26 (F3 = 0) to its punch bit, -1 for the idle keys; and back */
+int punch_of_key(int key);
+int punch_key_of(int fx);
+/* What each effect does here (the engine does filter / vibrato and stereo from the masks):
+ *   duck      the group's (or the track's) steps and keys do not sound (mute wins over everything)
+ *   loop 1    the step playing at the punch-in and the next ones over two sixteenths repeat while held
+ *   loop 2    the same over a beat (four sixteenths)
+ *   echo      loop 1's span, its velocity falling to 70 % every pass
+ *   fill 1    drums: snares in eighths over the first half of the bar, sixteenths over the second;
+ *             synths: the pattern's own notes (every distinct note it holds, sorted) climbing in sixteenths
+ *   fill 2    drums: a kick on every beat and hats in sixteenths; synths: the notes alternating low / high
+ *   rnd fill  drums: a random one of sounds 1..3 on three sixteenths in four; synths: a random pattern note
+ *             on three sixteenths in four. The fills replace the track's own steps while held, and
+ *             play on the bar's sixteenths whatever the track's scale (an empty synth pattern is silent)
+ *   pitch     drums an octave up (pitch_semi 12 on the drum call), synths an octave down (the note)
+ *   short     drums: short_gate on the drum call; synths: the gate is 25 % of the step
+ *   long      drums: long_tail on the drum call; synths: the gate is 200 % of the step
+ * The PUNCH track's steps hold an effect as note[0] = 1 + its bit: 1..12 the percussive octave, 17..28 the
+ * melodic one (the UI writes the same); a step's length is how long it holds. Live recording writes held
+ * punch keys there (seq_punch_key with rec on while playing), per-track ones included. */
 
 /* brain scales (the key's), 12-bit masks in BRAIN_SCALE[] */
 enum { BS_MAJOR, BS_MINOR, BS_DORIAN, BS_MIXO, BS_LYDIAN, BS_PHRYGIAN, BS_HARM_MINOR, BS_PENTA, BS_PENTA_MIN,
@@ -50,6 +77,7 @@ int brain_shift(int note, int key, int scale, int degree, int mode);   /* the no
 int brain_detect(const uint8_t *hist12, int *key, int *scale);         /* best key + scale for a pitch-class
                                                                         * histogram; 1 = confident */
 int scale_step(int note, int key, int scale, int steps);               /* a note `steps` degrees along the scale */
+int scale_snap(int note, int key, int scale);                          /* the nearest scale note (ties go down) */
 
 typedef struct {
     void (*note_on)(void *ctx, int trk, int note, int vel, int glide_ms, uint32_t tag);
@@ -64,6 +92,10 @@ typedef struct {
     void (*step)(void *ctx, int trk, int step);                    /* UI playheads */
     void (*scene)(void *ctx, int scene);                           /* a scene started */
     void (*metro)(void *ctx, int accent);                          /* a metronome click (accent: the bar) */
+    void (*pan)(void *ctx, int trk, int pan);                      /* the arp's stereo: the track's pan offset
+                                                                    * -64..63 for its next notes (0 = centre) */
+    void (*drum_off)(void *ctx, int trk, int sound);               /* a drum's key / step ends (gated and loop play
+                                                                    * modes stop; the engine's drumline_release) */
     void *ctx;
 } seq_sink_t;
 
@@ -72,10 +104,11 @@ typedef struct {
     uint32_t off_at;                  /* samples left, Q8 (counted down; due under 256) */
     uint32_t tag;
     uint8_t used;
-    uint8_t kind;                     /* OFF_NOTE: sink note_off; OFF_PUNCH: clear a punch_seq bit; OFF_TAPE: a segment off */
+    uint8_t kind;                     /* OFF_NOTE: sink note_off; OFF_PUNCH: clear a punch_seq bit; OFF_TAPE: a segment off;
+                                       * OFF_DRUM: sink drum_off (note = the sound + 1) */
     uint8_t note;                     /* the MIDI note echoed, 0 none */
 } seq_off_t;
-enum { OFF_NOTE, OFF_PUNCH, OFF_TAPE };
+enum { OFF_NOTE, OFF_PUNCH, OFF_TAPE, OFF_DRUM };
 
 typedef struct {                      /* one track's runtime (interrupt only) */
     uint8_t pos;                      /* the step playing */
@@ -91,27 +124,28 @@ typedef struct {                      /* one track's runtime (interrupt only) */
     uint32_t bend_t, bend_len;        /* samples into the bend, its length */
     seq_off_t off[SEQ_PENDING];
     uint8_t last_note[SN];            /* the notes sounding (step mode: one step at a time) */
-    uint8_t held_drum;                /* fill FX: the last sound hit (1..11, 0 none) */
-    uint8_t loop4_from;               /* PM_LOOP4: the step it loops from */
-    uint8_t loop4_on;
+    uint8_t act[NSC];                 /* the step's components in force: act[SC_x] = value + 1, 0 = absent */
+    uint8_t loop_on;                  /* a punch loop runs: steps loop_from .. loop_from + loop_span - 1 */
+    uint8_t loop_from, loop_span;
+    uint16_t echo_gain;               /* the loop's velocity, Q8 (echo: x 0.7 a pass) */
     uint8_t stall_kind;               /* SC_PULSE or SC_HOLD while stall > 0 */
     uint8_t jump_to;                  /* the jump component's next step, 0xFF none */
     uint8_t nlast;                    /* notes in last_note[] */
     uint8_t last_step;                /* the step last_note[] came from */
-    uint8_t last_vel, last_glide;     /* for retriggers (ratchets, stutter) */
-    uint8_t ramp_semi;                /* PM_RAMP: semitones added, one more each sixteenth */
+    uint8_t last_vel, last_glide;     /* for retriggers (ratchets) */
     uint8_t ext_ticks;                /* external clock: ticks into this step */
-    uint8_t stut_on;                  /* a stutter is running */
-    uint8_t echo_n, echo_vel;         /* PD_ECHO: the hit to repeat */
-    uint8_t echo_sound[SN];
+    uint8_t fill_on;                  /* a punch fill runs: the pattern's steps are silent */
+    uint8_t fill_i;                   /* the fill's note counter */
+    uint8_t fill_kind;                /* 1 fill 1, 2 fill 2, 3 random: the counter restarts when it changes */
+    uint8_t nfill;                    /* synth fills: the pattern's distinct notes, sorted */
+    uint8_t fill_notes[16];
+    uint8_t skip_note;                /* the note live recording just put on step 1: the step does not sound it again */
     uint8_t bend_last_set;
     int16_t bend_last;                /* cents last sent */
     int16_t bend_amp;                 /* random 2: the amplitude rolled */
     uint32_t sub_to_next;             /* ratchets: samples to the next hit, Q8 (NEVER none) */
-    uint32_t stut_to_next;            /* stutter: the next retrigger, Q8 */
-    uint32_t echo_to_next;            /* echo: the repeat, Q8 */
     uint32_t age;                     /* samples since the step fired, Q8 (live record quantise) */
-    int32_t off_q8;                   /* the current step's timing offset (swing, groove, nudge), Q8 */
+    int32_t off_q8;                   /* the current step's timing offset (groove, nudge), Q8 */
 } seq_trk_t;
 
 typedef struct {
@@ -125,8 +159,12 @@ typedef struct {
 typedef struct {                      /* a player (per track; the arp's clock runs here) */
     uint8_t held[16], nheld;          /* the keys down, in order */
     uint8_t latched;                  /* hold: notes stay */
-    uint8_t arp_i, arp_oct, arp_dir;
+    uint8_t arp_oct, arp_dir;
+    uint32_t arp_i;                   /* the arp's position in its cycle */
     uint8_t arp_note;                 /* sounding arp note, 0 none */
+    uint8_t arp_vel;                  /* the last key's velocity: the arp's */
+    uint8_t arp_side;                 /* stereo: the side of the next note */
+    int8_t pan_sent;                  /* the pan last sent through the sink */
     uint32_t arp_to_next, arp_to_off; /* Q8 */
     uint8_t chord[SN * 2], nchord;    /* maestro: the recorded chord (up to 8 notes) */
     uint8_t maestro_root;             /* the key playing it, 0 none */
@@ -137,6 +175,7 @@ typedef struct {                      /* a player (per track; the arp's clock ru
     uint8_t roll[SN * 2], nroll;      /* maestro: the strum in its order */
     uint8_t roll_vel;
     uint8_t arp_wait;                 /* the first arp note waits for the grid */
+    uint16_t drums_down;              /* a drum track: bit sound = its key is down (released through drum_off) */
 } player_t;
 
 typedef struct {
@@ -152,19 +191,21 @@ typedef struct {
     volatile uint8_t ext, send_clock, send_notes;
     volatile uint8_t metronome;       /* 0 off, 1 while recording, 2 on */
     volatile uint8_t rec;             /* live recording: the keys write steps */
+    volatile uint8_t rec_wait;        /* seq_rec(2): the transport waits for the first key, which lands on step 1 */
     volatile uint8_t count_in;        /* bars of count-in left before rec */
+    volatile uint8_t groove_type;     /* the project's groove GR_* (the UI / engine writes); each pattern's
+                                       * signed `groove` is its amount */
     float bpm, ext_bpm;
     /* the brain */
-    volatile uint8_t brain_mode, brain_key, brain_scale, brain_deg, brain_link, brain_auto_ok;
+    volatile uint8_t brain_mode, brain_key, brain_scale, brain_deg, brain_auto_ok;
+    volatile uint8_t brain_link;      /* 0 off, 1..8 = instrument track t + 1 played from the brain's keys too */
     volatile uint16_t brain_route;    /* bit t = track t follows */
     uint8_t brain_hist[12];
+    uint32_t brain_phys[4];           /* the brain's keys down (bit note): the lowest is the chord's root */
     /* punch-in */
-    volatile uint32_t punch_keys;     /* bits NPUNCH_FX: held keys (UI writes) */
+    uint32_t punch_keys;              /* bits NPUNCH_FX: held keys (set from the key ring, in the interrupt) */
+    uint8_t punch_tgt[NPUNCH_FX];     /* each held key's target: 0xFF = its octave's group, else one track */
     uint32_t punch_seq;               /* from the punch track's steps */
-    uint32_t punch_last;
-    volatile uint8_t punch_target;    /* 0xFF = the group, else one track (hold HOME + key on a track) */
-    uint8_t punch_phase;              /* stutter / fill counters */
-    uint32_t punch_to_next;
     /* runtime */
     seq_trk_t t[NSEQT];
     lane_rt_t lrt[NLANE];
@@ -190,7 +231,6 @@ typedef struct {
     uint8_t ext_six;                  /* external clock: ticks into the sixteenth */
     uint8_t chunk_cap;                /* a bend or a lock ramp runs: advance in chunks */
     uint8_t brain_seen[4];            /* the BRAIN track's E1..E4 last read */
-    uint8_t ramp_ticks;               /* sixteenths passed this block: the ramp FX rises after the steps */
     uint32_t tape_last;               /* samples per sixteenth last sent to the tape */
     uint32_t punch_sent_d, punch_sent_m;
     uint8_t rec_note[8], rec_trk[8], rec_step[8];   /* live record: keys down and the steps they took */
@@ -210,23 +250,38 @@ void seq_cue_scene(seq_t *s, int scene);       /* at the bar (now, if stopped) *
 void seq_set_scene(seq_t *s, int scene);       /* now: the scene's patterns, mutes, brain */
 void seq_cue_pattern(seq_t *s, int trk, int pat);   /* one track's pattern at its wrap */
 float seq_tempo(const seq_t *s);
-uint32_t seq_step_q8(const seq_t *s, int trk);     /* a step of track trk in samples Q8 (its scale, no swing) */
+uint32_t seq_step_q8(const seq_t *s, int trk);     /* a step of track trk in samples Q8 (its scale, no groove) */
 int seq_bar_step(const seq_t *s);                   /* 0..15: the sixteenth of the bar (UI, metronome) */
 
 /* the keys (main loop): through the track's player and the brain, to the engine; tag = the key */
 void seq_key(seq_t *s, int trk, int note, int on, int vel);
 void seq_key_all_off(seq_t *s, int trk);
-void seq_maestro_record(seq_t *s, int trk, const uint8_t *notes, int n);   /* the maestro's chord */
-void seq_brain_key(seq_t *s, int note, int on);     /* a key on the BRAIN track: degree from the key */
-void seq_punch_key(seq_t *s, int fx, int on, int target_trk);   /* fx 0..30; target -1 = the group */
+void seq_maestro_record(seq_t *s, int trk, const uint8_t *notes, int n);   /* the maestro's chord (up to 8) */
+/* a key on the BRAIN track: the lowest key held is the chord's root, its pitch class against the key's tonic
+ * (in the octave of middle C) sets the degree; the link track plays the key as pressed, in parallel */
+void seq_brain_key(seq_t *s, int note, int on);
+/* a punch-in key: fx = the bit (0..11 the percussive octave, 16..27 the melodic one); target_trk -1 = every
+ * track of that octave's group, t = that track only (the bit is moved to the track's own octave). With rec on
+ * while playing the key is recorded into the PUNCH track's pattern. The latch (PUNCH track E1) is the UI's:
+ * it sends on / off as the latched state changes */
+void seq_punch_key(seq_t *s, int fx, int on, int target_trk);
+int punch_group_of(const seq_t *s, int trk);        /* 0 percussive (a drumline track), 1 melodic */
+uint32_t seq_punch_mask(const seq_t *s, int trk);   /* the 12 PX_* bits in force on track trk now (held keys aimed at
+                                                     * it or its group, and the sequenced ones); the engine's per-track
+                                                     * view, finer than the two masks the punch sink gets */
 void seq_tape_key(seq_t *s, int seg, int on);
 
 /* live / step recording (main loop) */
-void seq_rec(seq_t *s, int on);                     /* live: keys write steps (quantised) while playing */
+/* on: 0 off; 1 the keys write steps (quantised) while playing (momentary: on while REC is held); 2 the same,
+ * and if the transport is started afterwards it waits for the first key, which lands on step 1 (the OP-XY's
+ * live recording); count_in (bars) stays as an option on top */
+void seq_rec(seq_t *s, int on);
 void seq_rec_knob(seq_t *s, int trk, int param, int val);   /* REC held + a knob: a lock on the step playing */
 int seq_rec_pos(const seq_t *s, int trk);           /* the step live keys land on now */
 int seq_step_rec(seq_t *s, int trk, int step, int note, int vel);   /* step record: the note into the step of the
                                                      * track's pattern (overdubs; the UI moves its cursor); 1 = written */
+int seq_step_add_notes(seq_t *s, int trk, int step, const uint8_t *notes, int n, int vel);   /* a step held + keys:
+                                                     * each note toggled on the step; returns the notes it holds after */
 /* step helpers (main loop) */
 void step_set_notes(step_t *st, const uint8_t *notes, int n, int vel);
 void step_toggle_note(step_t *st, int note);
