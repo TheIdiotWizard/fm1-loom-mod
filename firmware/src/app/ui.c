@@ -461,21 +461,26 @@ static void comp_toggle(int c)
     for (int i = 0; i < 16; i++)
         if (ui.cstep >> i & 1u) {
             step_t *st = &tpat(trk)->st[step_shown(i)];
+            /* the interrupt reads comp then cval as two bytes: the kind goes off before its value changes and
+             * on after, so it never pairs a kind with another's value */
             if (st->comp == c) {
-                st->comp = st->comp2;
-                st->cval = st->cval2;
+                uint8_t k2 = st->comp2, v2 = st->cval2;
+                st->comp = SC_NONE;
                 st->comp2 = SC_NONE;
                 st->cval2 = 0;
+                st->cval = v2;
+                st->comp = k2;
             } else if (st->comp2 == c) {
                 st->comp2 = SC_NONE;
                 st->cval2 = 0;
             } else if (!st->comp) {
-                st->comp = (uint8_t)c;
                 st->cval = SC_DEFAULT[c];
+                st->comp = (uint8_t)c;
                 any = 1;
             } else {
-                st->comp2 = (uint8_t)c;              /* (a third replaces the second) */
+                st->comp2 = SC_NONE;                 /* (a third replaces the second) */
                 st->cval2 = SC_DEFAULT[c];
+                st->comp2 = (uint8_t)c;
                 any = 1;
             }
         }
@@ -1629,6 +1634,10 @@ static int save_project(int slot)
     int rc;
     if (playing() && slot != proj_slot) {
         say_no("STOP FIRST", "to change slots");
+        return -1;
+    }
+    if (seq.rec || seq.rec_wait) {    /* a recording writes the patterns while they are packed: the copy would not match its CRC */
+        say_no("STOP RECORDING", "to save");
         return -1;
     }
     rc = project_save(slot);

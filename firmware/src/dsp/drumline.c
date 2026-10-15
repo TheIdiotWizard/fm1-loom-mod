@@ -262,8 +262,8 @@ static void start(drumline_t *d, dvoice_t *v, int sound, int vel, int pitch_semi
     float rnd = fm_minf(1.0f, rnd_key + rnd_trk);
     float lscale = fm_exp2f(((float)par[TP_R] - 64.0f) * (1.0f / 32.0f));   /* length: 0.25x .. 4x */
     sp = &SPEC[model];
-    if (v->on && v->model == DM_RESO && model != DM_RESO)
-        d->line_owner[v->line] = -1;                  /* it leaves its string */
+    if (v->model == DM_RESO && model != DM_RESO && d->line_owner[v->line] == (int)(v - d->v))
+        d->line_owner[v->line] = -1;                  /* it leaves its string (also one choked while waiting) */
     {   /* the voice's constant part: the gains start at the chunk's first control read */
         uint32_t rng = v->rng;
         uint8_t line = v->line;

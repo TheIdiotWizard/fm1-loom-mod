@@ -348,7 +348,11 @@ static int32_t step_off(seq_t *s, int t, int p, uint32_t L)
     const tpat_t *tp = tpat(s, t);
     const step_t *st = &tp->st[p];
     int32_t off = (int32_t)(L / PPS) * st->nudge;
-    int six = step_six(tp, p), amt = groove_amount(tp), g = s->groove_type < NGROOVE ? s->groove_type : 0, tk;
+    int six, amt, g = s->groove_type < NGROOVE ? s->groove_type : 0, tk;
+    if (ts_halves(tp) == 1)
+        off /= 2;                     /* a half-sixteenth step: a full nudge would swallow it */
+    six = step_six(tp, p);
+    amt = groove_amount(tp);
     if (six < 0 || !amt)
         return off;
     tk = GROOVE_T[g][six];
@@ -841,7 +845,8 @@ static void locks_tick(seq_t *s, uint32_t k, const seq_sink_t *o)
             lock_put(s, l->trk, l, r, r->to, o);
             r->ramp = 0;
         } else if (r->age > r->hold && r->len > r->hold) {
-            int v = (int)r->from + ((int)r->to - (int)r->from) * (int)(r->age - r->hold) / (int)(r->len - r->hold);
+            int num = (int)((r->age - r->hold) >> 4), den = (int)((r->len - r->hold) >> 4);   /* samples >> 4: the product stays in an int */
+            int v = (int)r->from + ((int)r->to - (int)r->from) * num / (den > 0 ? den : 1);
             lock_put(s, l->trk, l, r, v, o);
         }
     }

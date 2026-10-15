@@ -210,7 +210,7 @@ static int settings_valid(settings_t *s)
             return 0;
         if (t < NTRK)
             for (k = 0; k < NTP; k++) {
-                const tp_info_t *i = tp_info(k, p[TP_ENGINE]);
+                const tp_info_t *i = tp_info_par(k, p);   /* the ranges depend on the player and LFO type */
                 if (i && (p[k] < i->lo || p[k] > i->hi))
                     p[k] = i->def;
             }
@@ -253,6 +253,14 @@ static void patterns_clamp(void)
         lane_t *l = &pats.lane[k];
         if (l->used && (l->trk >= NALLTRK || l->pat >= NPATT || l->param >= NTP))
             l->used = 0;
+        if (l->used) {                /* a value past the parameter's range would reach the voices unclamped */
+            const tp_info_t *i = tp_info_par(l->param, proj.trk[l->trk].par);
+            int st;
+            if (i)
+                for (st = 0; st < NSTEP; st++)
+                    if (l->val[st] != LOCK_NONE && l->val[st] > i->hi)
+                        l->val[st] = i->hi;
+        }
     }
     for (k = 0; k < NSCENE; k++) {
         scene_t *sc = &pats.scene[k];
