@@ -8,6 +8,7 @@ loop, two send effects, a mixer and master section, sixteen scenes and a song.
 The loop XY-1 is made for: write a short pattern, add a few components, let the brain play a progression,
 season it with punch-in effects while it plays, then put the scenes in order.
 
+- [Quick start](#quick-start)
 - [Cheat sheet](#cheat-sheet)
 - [Getting around](#getting-around)
 - [Steps](#steps)
@@ -20,6 +21,42 @@ season it with punch-in effects while it plays, then put the scenes in order.
 - [Saving](#saving)
 - [Page by page](#page-by-page)
 - [Screen reader](#screen-reader)
+
+## Quick start
+
+Ten minutes from a blank project to a jam, the way the OP-XY is meant to be played. White keys are numbered 1
+to 16 from the left, black keys 1 to 11.
+
+1. **A beat.** Turn **ALGORITHM** until the tag line says T1 drumline. Press **SEQ**. Black key 1 is the
+   kick: press it, then white keys 1, 5, 9 and 13. Press black key 2 for the snare and press white keys 5 and
+   13. Press black key 3 for the hat and press every other white key. Press **PLAY**.
+2. **A bass line.** Turn **ALGORITHM** to T2 prism. Press **EDIT** and play a low note: it is remembered.
+   Press **SEQ** and press white keys 1, 4, 7 and 11. Go back to **EDIT**, play another note, and put it on
+   white key 14. Turn **KNOB 1** on the Engine page while it plays to hear the shape change.
+3. **Components.** Still on T2's Steps page, hold **HOME**, hold white key 7, and press white key 3: multiply.
+   Press black key 3 for three hits. Let go. Hold **HOME**, hold white key 14, press white key 11: jump, and
+   black key 7 for "forward or back": the pattern starts to wander. Hold **HOME**, hold white key 1 and press
+   white key 14: skip trigger, so step 1 plays every other pass.
+4. **A chord track.** Turn **ALGORITHM** to T3. Press **EDIT**, turn **PRESETS** until a pad you like comes
+   up, and hold three keys together. Press **SEQ**, press white key 1, then hold white key 1 and press white
+   key 8 so the chord lasts half the bar. Hold the same three keys on **EDIT** a few keys higher and put them
+   on white key 9.
+5. **The brain.** Turn **ALGORITHM** to BRAIN. Press **EDIT**: the key is C major and T2 and T3 follow.
+   Play an F, then a G, then a C while it plays: everything moves with you, in the scale. Press **SEQ**, turn
+   **SELECT** for the Bar page and press black key 4 so a step is a beat. Back on Steps, play a chord on
+   **EDIT**, press a step, and so on: four steps are a bar of progression.
+6. **Punch-in effects.** Go to any track's **EDIT** page. Hold **HOME** and press a low key: F3 ducks the
+   drums, G3 loops them, B3 echoes, C4 and D4 play fills, E4 a random fill. Hold **HOME** and press a high
+   key for the same on the melodic tracks. Let go and the pattern comes back.
+7. **A scene.** Press **HOME**. White key 1 is the scene playing. Press white key 2: a copy. Now change
+   something: mute the drums with black key 1 on Arrange, or go to T2's Steps and turn **KNOB 1** to
+   P2 for a new pattern. Press white key 1 and 2 in turn to switch between them at once, or hold **HOME** and
+   press one to switch at the bar.
+8. **Save.** Press **SAVE**.
+
+From here: hold a step to see its velocity, length, chance and nudge; hold a step and press **EDIT** to lock a
+knob on it; press **ARP** on T2 and turn **KNOB 1** to arp; turn **ALGORITHM** to TAPE and hold white keys
+while it plays. Hold any button for a second and a card explains it.
 
 ## Cheat sheet
 
