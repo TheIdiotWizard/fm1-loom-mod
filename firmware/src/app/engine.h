@@ -33,6 +33,7 @@ void engine_tape_key(int seg, int on);
 void engine_brain_key(int note, int on);
 void engine_master(int p, int val);
 void engine_fx(int slot, int type, const uint8_t knob[4], int hp, int lp);
+int engine_fx_has(int slot, int type);                   /* the slot can do this effect (fx.h fx_has) */
 void engine_tape_set(int pitch, int speed, int length, int mix);
 void engine_panic(void);
 void engine_midi_in(uint32_t pkt);                       /* a USB-MIDI packet (the main loop passes them) */

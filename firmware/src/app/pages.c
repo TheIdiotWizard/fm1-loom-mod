@@ -10,23 +10,22 @@
 /* the colours, one meaning each (Polly's paper): teal = sounding now (the playhead, the scene playing, a
  * voice sounding), coral = you (the cursor, the held step, the knob last turned, REC, messages), ink and
  * its neutrals = what stays put */
-#define K_BG RGB(250, 244, 232)
-#define K_PANEL RGB(236, 228, 212)
-#define K_PANEL2 RGB(222, 211, 192)
-#define K_LINE RGB(216, 205, 186)
-#define K_DIM RGB(112, 98, 84)
-#define K_FAINT RGB(150, 136, 118)
-#define K_TEXT RGB(72, 58, 48)
-#define K_ACCENT RGB(242, 120, 72)
-#define K_ACCENT_L RGB(248, 196, 172)
-#define K_TEAL RGB(38, 166, 154)
-#define K_TEAL_T RGB(196, 230, 222)
-#define K_TEAL_M RGB(118, 196, 186)
-#define K_REC K_ACCENT
-/* the knobs' four shades, as the OP-XY's encoders: dark, mid, light grey, white (outlined) */
-#define K_SH0 RGB(60, 56, 54)
-#define K_SH1 RGB(128, 122, 118)
-#define K_SH2 RGB(188, 182, 176)
+#define K_BG RGB(0, 0, 0)
+#define K_PANEL RGB(30, 30, 34)
+#define K_PANEL2 RGB(58, 58, 64)
+#define K_LINE RGB(60, 60, 66)
+#define K_DIM RGB(150, 150, 156)
+#define K_FAINT RGB(96, 96, 102)
+#define K_TEXT RGB(235, 235, 238)
+#define K_NOW RGB(215, 215, 220)                     /* sounding now: a bright fill, dark text on it */
+#define K_NOW_T RGB(70, 70, 78)
+#define K_NOW_M RGB(130, 130, 138)
+#define K_REC RGB(232, 44, 38)                        /* red: recording, locks, questions, nothing else */
+#define K_SEL K_TEXT                                  /* the cursor, a held step, the knob last turned: white */
+/* the knobs' four shades, as the OP-XY's encoders: dark, mid, light grey, white */
+#define K_SH0 RGB(90, 90, 96)
+#define K_SH1 RGB(140, 140, 146)
+#define K_SH2 RGB(190, 190, 196)
 #define K_SH3 RGB(255, 255, 255)
 
 /* the pages (the spec's Buttons table): a button opens its first page; SELECT turns them */
@@ -414,10 +413,14 @@ static int tp_page_param(int p, int k, int trk)      /* the TP_* a page's knob k
     if (p < P_ENGINE || p > P_MIX || k < 0 || k > 3)
         return -1;
     if (is_aux(trk) && p < P_MIX) {                  /* an aux track's Engine page: its own four, page 2: TP_P1.. */
+        if (p == P_ENGINE && trk >= AUX_FX1)     /* an FX track: the effect, then its first three knobs */
+            return k == 0 ? TP_ENGINE : TP_E1 + k - 1;
         if (p == P_ENGINE)
             return TP_E1 + k;
-        if (p == P_PLAY && trk >= AUX_FX1)
-            return TP_P1 + k;
+        if (p == P_PLAY && trk >= AUX_FX1) {     /* page 2: the fourth knob, high-pass, low-pass, the feed into FX II */
+            static const int8_t F2[4] = {TP_E4, TP_FENV, TP_CUT, TP_SEND2};
+            return k == 3 && trk != AUX_FX1 ? -1 : F2[k];
+        }
         return -1;
     }
     if (p == P_MIX && is_aux(trk))
@@ -431,10 +434,10 @@ static int tp_page_param(int p, int k, int trk)      /* the TP_* a page's knob k
 #define AL_X 28
 static void alert_box(int kind)
 {
-    uint16_t fill = kind == AL_ASK ? K_ACCENT : kind == AL_NO ? K_TEXT : K_PANEL;
-    uint16_t edge = kind == AL_ASK ? K_TEXT : kind == AL_NO ? K_ACCENT : K_DIM;
-    uint16_t badge = kind == AL_ASK ? K_BG : kind == AL_NO ? K_ACCENT : K_TEXT;
-    uint16_t mark = kind == AL_ASK ? K_ACCENT : K_BG;
+    uint16_t fill = kind == AL_ASK ? K_REC : kind == AL_NO ? K_PANEL2 : K_PANEL;
+    uint16_t edge = kind == AL_ASK ? K_TEXT : kind == AL_NO ? K_TEXT : K_DIM;
+    uint16_t badge = kind == AL_ASK ? K_TEXT : kind == AL_NO ? K_TEXT : K_DIM;
+    uint16_t mark = kind == AL_ASK ? K_REC : K_BG;
     int32_t bx = 6, by = 4;
     cv_round(1, 1, 238, HDR_H - 2, 7, edge);
     cv_round(2, 2, 236, HDR_H - 4, 6, fill);
@@ -473,22 +476,22 @@ static void draw_header(void)
     if (ask) {
         alert_box(AL_ASK);
         if (text_w(&FONT_B, ui.ask_q) <= 206)
-            cv_text(AL_X, 4, &FONT_B, ui.ask_q, K_BG);
+            cv_text(AL_X, 4, &FONT_B, ui.ask_q, K_TEXT);
         else if (text_w(&FONT_S, ui.ask_q) <= 208)
-            cv_text(AL_X, 5, &FONT_S, ui.ask_q, K_BG);
+            cv_text(AL_X, 5, &FONT_S, ui.ask_q, K_TEXT);
         else
-            text_fit(AL_X, 5, &FONT_XS, ui.ask_q, 232 - AL_X, K_BG);
+            text_fit(AL_X, 5, &FONT_XS, ui.ask_q, 232 - AL_X, K_TEXT);
     } else if (cnt && playing()) {
         int32_t x = cv_text(8, 4, &FONT_B, "Count-in", K_TEXT);
         num_s((uint32_t)cnt, t);
-        cv_text(x + 8, 4, &FONT_B, t, K_ACCENT);
+        cv_text(x + 8, 4, &FONT_B, t, K_REC);
         cv_round(222, 8, 9, 9, 4, K_REC);
     } else if (msg) {
         int no = ui.msg_no;
         int32_t x;
         alert_box(no ? AL_NO : ui.msg_kind);
-        x = cv_text(AL_X, 4, &FONT_B, ui.msg[0], no ? K_BG : K_TEXT);
-        text_fit(x + 8, 4, &FONT_B, ui.msg[1], 232 - (x + 8), no ? K_ACCENT_L : K_ACCENT);
+        x = cv_text(AL_X, 4, &FONT_B, ui.msg[0], K_TEXT);
+        text_fit(x + 8, 4, &FONT_B, ui.msg[1], 232 - (x + 8), K_DIM);
     } else {
         int32_t r = 232, x = 8;
         const char *bn = BTN_LABEL[PAGE_BTN[page_group(ui.page)].btn];
@@ -640,6 +643,10 @@ static void lock_knobs(knob_t *k)
         }
     }
 }
+static const char *fxk_name(const char *n)        /* an effect's knob name, short enough for the strip */
+{
+    return s_eq(n, "frequency") ? "FREQ" : s_eq(n, "modulation") ? "MOD" : s_eq(n, "feedback") ? "FDBK" : n;
+}
 static void aux_engine_knobs(knob_t *k, int trk)
 {
     const uint8_t *par = proj.trk[trk].par;
@@ -654,21 +661,23 @@ static void aux_engine_knobs(knob_t *k, int trk)
         for (int i = 0; i < 4; i++)
             kn(&k[i], TAPE_KNOB[i], par[TP_E1 + i], 127);
     } else {
-        int type = par[TP_E1] % NFXT;
+        int type = par[TP_ENGINE] % NFXT;
         kname(&k[0], "effect", FXT_NAME, type, NFXT);
         for (int i = 0; i < 3; i++)
-            kn(&k[1 + i], FXT_KNOB[type][i], par[TP_E2 + i], 127);
+            kn(&k[1 + i], fxk_name(FXT_KNOB[type][i]), par[TP_E1 + i], 127);
     }
 }
 static void aux_engine2_knobs(knob_t *k, int trk)
 {
     const uint8_t *par = proj.trk[trk].par;
-    int type = par[TP_E1] % NFXT;
-    kn(&k[0], FXT_KNOB[type][3], par[TP_P1], 127);
-    kn(&k[1], FX2_KNOB[1], par[TP_P2], 127);
-    kn(&k[2], FX2_KNOB[2], par[TP_P3], 127);
+    int type = par[TP_ENGINE] % NFXT;
+    kn(&k[0], fxk_name(FXT_KNOB[type][3]), par[TP_E4], 127);
+    kn(&k[1], FX2_KNOB[1], par[TP_FENV], 127);
+    kn(&k[2], FX2_KNOB[2], par[TP_CUT], 127);
     if (trk == AUX_FX1)
-        kn(&k[3], FX2_KNOB[3], par[TP_P4], 127);
+        kn(&k[3], FX2_KNOB[3], par[TP_SEND2], 127);
+    else
+        kv(&k[3], FX2_KNOB[3], "-", 0, 0);
 }
 static void players_knobs(knob_t *k, int trk)
 {
@@ -730,10 +739,10 @@ static void page_knobs(knob_t *k)
     case P_BAR:
         if (!is_seqt(trk))
             break;
-        kn(&k[0], "QUANTISE", tp->quant, 100);
+        kn(&k[0], "QUANT", tp->quant, 100);
         t[0] = 0;
         step_len_text(tp->nlen, t);
-        kv(&k[1], "NOTE LEN", t, tp->nlen, 16);
+        kv(&k[1], "NOTE", t, tp->nlen, 16);
         kname(&k[2], "GROOVE", GROOVE_NAME, tp->groove, NGROOVE);
         kn(&k[3], "SHAPE", tp->shape, 100);
         break;
@@ -826,7 +835,7 @@ static void draw_knobs(void)
     cv_round(4, 0, 232, KNB_H - 2, 6, K_PANEL);
     for (i = 0; i < 4; i++) {
         int32_t x = (int32_t)i * 60, cx = x + 30, nw, nx;
-        int hot = now_touch && ui.touched == (int)i;
+        int hot = now_touch && ui.touched == (int)i, lock = ui.lockpg && !s_eq(k[i].val, "-");   /* a lock: red */
         if (i)
             cv_rect(x, 10, 1, KNB_H - 22, K_LINE);
         if (!k[i].name)
@@ -835,23 +844,22 @@ static void draw_knobs(void)
         if (nw > 46)
             nw = 46;
         nx = cx - (nw + 9) / 2 + 9;                  /* the shade swatch, then the name */
-        cv_round(nx - 9, 4, 7, 7, 2, i == 3 ? K_DIM : SHADE[i]);
-        if (i == 3)
-            cv_round(nx - 8, 5, 5, 5, 1, K_SH3);
+        cv_round(nx - 9, 4, 7, 7, 2, K_DIM);
+        cv_round(nx - 8, 5, 5, 5, 1, SHADE[i]);
         text_fit(nx, 0, &FONT_XS, k[i].name, 46, hot ? K_TEXT : K_DIM);
         if (upper_only(k[i].val) && text_w(&FONT_M, k[i].val) <= 56)
-            text_c(cx, cap_y(12, 28, &FONT_M), &FONT_M, k[i].val, hot ? K_ACCENT : K_TEXT);
+            text_c(cx, cap_y(12, 28, &FONT_M), &FONT_M, k[i].val, hot ? K_SEL : lock ? K_REC : K_TEXT);
         else if (text_w(&FONT_B, k[i].val) <= 54)
-            text_c(cx, cap_y(12, 28, &FONT_B), &FONT_B, k[i].val, hot ? K_ACCENT : K_TEXT);
+            text_c(cx, cap_y(12, 28, &FONT_B), &FONT_B, k[i].val, hot ? K_SEL : lock ? K_REC : K_TEXT);
         else if (text_w(&FONT_XS, k[i].val) <= 54)
-            text_c(cx, cap_y(12, 28, &FONT_XS), &FONT_XS, k[i].val, hot ? K_ACCENT : K_TEXT);
+            text_c(cx, cap_y(12, 28, &FONT_XS), &FONT_XS, k[i].val, hot ? K_SEL : lock ? K_REC : K_TEXT);
         else
-            text_fit(x + 3, cap_y(12, 28, &FONT_XS), &FONT_XS, k[i].val, 54, hot ? K_ACCENT : K_TEXT);
+            text_fit(x + 3, cap_y(12, 28, &FONT_XS), &FONT_XS, k[i].val, 54, hot ? K_SEL : lock ? K_REC : K_TEXT);
         if (k[i].max > 0) {
             int32_t bw = 44 * k[i].num / k[i].max;
             cv_round(cx - 22, 41, 44, 6, 3, K_LINE);
             if (bw > 0)
-                cv_round(cx - 22, 41, bw < 6 ? 6 : bw, 6, 3, hot ? K_ACCENT : K_FAINT);
+                cv_round(cx - 22, 41, bw < 6 ? 6 : bw, 6, 3, hot ? K_SEL : K_FAINT);
         }
     }
     cv_blit(0, KNB_Y);
@@ -1294,6 +1302,7 @@ static void draw_card(void)
     }
     if (i >= 0) {
         cv_text(x + 10, cap_y(y - 30, 20, &FONT_B), &FONT_B, CARD[i].title, K_TEXT);
+        cv_rect(18, y - 6, 204, 1, K_DIM);
         y = wrap(20, y, 200, &FONT_S, CARD[i].l1, K_TEXT);
         if (CARD[i].l2)
             y = wrap(20, y + 4, 200, &FONT_S, CARD[i].l2, K_DIM);
@@ -1428,7 +1437,7 @@ static void list_paint(int32_t oy)
     for (i = lst.top; i < lst.n && i < lst.top + LIST_SHOWN; i++) {
         int32_t y = 1 + (int32_t)(i - lst.top) * LIST_RH - oy, ty = cap_y(y, LIST_RH - 1, &FONT_S);
         int on = i == lst.sel, k = lst.row[i].kind;
-        uint16_t fg = on ? K_BG : K_TEXT, dim = on ? K_LINE : K_DIM;
+        uint16_t fg = on ? K_BG : K_TEXT, dim = on ? K_PANEL2 : K_DIM;
         const char *v = lst.row[i].val;
         cv_round(6, y, 222, LIST_RH - 1, 5, on ? K_TEXT : K_PANEL);
         if (k == LK_KNOB) {
@@ -1515,7 +1524,7 @@ static void draw_arrange(void)
             num_s((uint32_t)tr + 1u, nm);
         else
             s_cat(nm, tr == AUX_BRAIN ? "BR" : tr == AUX_PUNCH ? "PU" : "TP");
-        text_r(22, y - 3, &FONT_XS, nm, tr == sel_trk() ? K_ACCENT : ink);
+        text_r(22, y - 3, &FONT_XS, nm, tr == sel_trk() ? K_TEXT : muted ? K_FAINT : K_DIM);
         num_s((uint32_t)pt + 1u, s_cat(t, "P"));
         cv_round(27, y, 20, 8, 3, muted ? K_LINE : K_PANEL2);
         text_c(37, y - 3, &FONT_XS, t, ink);
@@ -1523,23 +1532,23 @@ static void draw_arrange(void)
         if (len > 0 && len <= NSTEP)
             cv_rect(52, y + 3, 96 * len / NSTEP, 2, muted ? K_LINE : K_LINE);
         if (playing() && !muted && len > 0)
-            cv_round(52 + 94 * (pos % len) / (len > 1 ? len - 1 : 1), y + 1, 3, 6, 1, K_TEAL);
+            cv_round(52 + 94 * (pos % len) / (len > 1 ? len - 1 : 1), y + 1, 3, 6, 1, K_NOW);
         if (muted)
-            cv_text(152, y - 3, &FONT_XS, "mute", K_FAINT);
+            cv_text(152, y - 3, &FONT_XS, "mute", K_DIM);
     }
     cv_rect(168, 4, 1, 112, K_LINE);
     text_c(204, 8, &FONT_XS, cue != 0xFF && cue != sc ? "scene, next" : "scene", K_DIM);
     num_s((uint32_t)sc + 1u, t);
-    text_c(204, 24, &FONT_L, t, playing() ? K_TEAL : K_TEXT);
+    text_c(204, 24, &FONT_L, t, playing() ? K_NOW : K_TEXT);
     if (cue != 0xFF && cue != sc) {
         num_s((uint32_t)cue + 1u, t);
-        text_c(204, 62, &FONT_B, t, K_ACCENT);
+        text_c(204, 62, &FONT_B, t, K_TEXT);
     }
     for (int i = 0; i < NSCENE; i++) {              /* the 16 scenes: used ones filled, the current ringed */
         int32_t x = 176 + (i % 8) * 7, y = 92 + (i / 8) * 9;
-        cv_round(x, y, 5, 6, 1, pats.scene[i].used ? (i == sc ? K_TEAL : K_DIM) : K_LINE);
+        cv_round(x, y, 5, 6, 1, pats.scene[i].used ? (i == sc ? K_NOW : K_DIM) : K_LINE);
         if (i == cue && cue != sc)
-            cv_round(x, y, 5, 6, 1, K_ACCENT);
+            cv_frame(x, y, 5, 6, 1, K_TEXT, K_BG);
     }
     cv_blit(0, MAIN_Y);
 }
@@ -1566,14 +1575,14 @@ static void draw_song(void)
         int32_t x = 8 + (i - top) % 4 * 57, y = 6 + (i - top) / 4 * 27;
         int on = seq.song_on && playing() && i == pp;
         if (i == sg->len) {                          /* the end: an outlined "end" / "loop" cell */
-            cv_frame(x, y, 52, 22, 5, i == cur ? K_ACCENT : K_LINE, K_BG);
+            cv_frame(x, y, 52, 22, 5, i == cur ? K_SEL : K_LINE, K_BG);
             text_c(x + 26, y + 3, &FONT_XS, sg->loop ? "loop" : "end", K_DIM);
             continue;
         }
-        cv_round(x, y, 52, 22, 5, on ? K_TEAL : K_PANEL);
+        cv_round(x, y, 52, 22, 5, on ? K_NOW : K_PANEL);
         if (i == cur) {
-            cv_round(x, y, 52, 22, 5, K_ACCENT);
-            cv_round(x + 2, y + 2, 48, 18, 4, on ? K_TEAL : K_PANEL);
+            cv_round(x, y, 52, 22, 5, K_SEL);
+            cv_round(x + 2, y + 2, 48, 18, 4, on ? K_NOW : K_PANEL);
         }
         num_s((uint32_t)sg->slot[i].scene + 1u, s_cat(t, "S"));
         cv_text(x + 6, y + 3, &FONT_B, t, on ? K_BG : K_TEXT);
@@ -1582,7 +1591,7 @@ static void draw_song(void)
     }
     if (sg->len >= 16) {
         num_s((uint32_t)sg->len, s_cat(num_s((uint32_t)top + 1u, s_cat(t, "slots ")), " to "));
-        text_r(232, 112, &FONT_XS, t, K_FAINT);
+        text_r(232, 112, &FONT_XS, t, K_DIM);
     }
     cv_blit(0, MAIN_Y);
 }
@@ -1667,9 +1676,9 @@ static void draw_steps(void)
         for (int b = 0; b < NBAR; b++) {            /* the bars: the one shown ringed, the one playing teal */
             int32_t x = 176 + b * 14;
             uint16_t c = b < nb ? K_DIM : K_LINE;
-            cv_round(x, 3, 10, 8, 2, b == pb && playing() ? K_TEAL : c);
+            cv_round(x, 3, 10, 8, 2, b == pb && playing() ? K_NOW : c);
             if (b == ui.bar)
-                cv_frame(x - 2, 1, 14, 12, 3, K_ACCENT, b == pb && playing() ? K_TEAL : c);
+                cv_frame(x - 2, 1, 14, 12, 3, K_SEL, b == pb && playing() ? K_NOW : c);
             num_s((uint32_t)b + 1u, t);
             text_c(x + 5, -1, &FONT_XS, t, b == ui.bar || (b == pb && playing()) ? K_BG : K_TEXT);
         }
@@ -1685,25 +1694,25 @@ static void draw_steps(void)
                 on |= st->note[k] == ui.dsound + 1;
         bg = !in ? K_BG : on ? K_PANEL2 : K_PANEL;
         if (playing() && s == ph && in)
-            bg = on ? K_TEAL : K_TEAL_T;
+            bg = on ? K_NOW : K_NOW_T;
         cv_round(x, y, ST_CW - 2, ST_CH, 4, bg);
         if (!in)
             cv_frame(x, y, ST_CW - 2, ST_CH, 4, K_LINE, K_BG);
         if (held)
-            cv_frame(x, y, ST_CW - 2, ST_CH, 4, K_ACCENT, bg), cv_frame(x + 1, y + 1, ST_CW - 4, ST_CH - 2, 3, K_ACCENT, bg);
+            cv_frame(x, y, ST_CW - 2, ST_CH, 4, K_SEL, bg), cv_frame(x + 1, y + 1, ST_CW - 4, ST_CH - 2, 3, K_SEL, bg);
         if (ui.rec_armed && s == ui.cursor)
             cv_frame(x, y, ST_CW - 2, ST_CH, 4, K_REC, bg);
         num_s((uint32_t)s + 1u, t);
-        cv_text(x + 3, y - 1, &FONT_XS, t, bg == K_TEAL ? K_BG : K_FAINT);
+        cv_text(x + 3, y - 1, &FONT_XS, t, bg == K_NOW ? K_BG : K_DIM);
         if (drum && !step_empty(st) && !on)           /* another sound on the step: a small mark */
             cv_round(x + ST_CW - 9, y + 3, 4, 4, 2, K_FAINT);
         if (on || (drum && !step_empty(st))) {
             cell_notes(st, drum, t);
             if (drum) {                              /* the sound's first letters */
                 t[3] = 0;
-                text_c(x + (ST_CW - 2) / 2, y + 15, &FONT_XS, t, bg == K_TEAL ? K_BG : on ? K_TEXT : K_FAINT);
+                text_c(x + (ST_CW - 2) / 2, y + 15, &FONT_XS, t, bg == K_NOW ? K_BG : on ? K_TEXT : K_FAINT);
             } else if (trk == AUX_BRAIN) {           /* a degree */
-                text_c(x + (ST_CW - 2) / 2, y + 15, &FONT_S, t, bg == K_TEAL ? K_BG : K_TEXT);
+                text_c(x + (ST_CW - 2) / 2, y + 15, &FONT_S, t, bg == K_NOW ? K_BG : K_TEXT);
             } else {
                 char l1[12], *e = l1;
                 int n = 0;
@@ -1712,7 +1721,7 @@ static void draw_steps(void)
                     n++;
                     if (n == 2 || !st->note[k + 1] || k == SN - 1) {
                         text_c(x + (ST_CW - 2) / 2, y + (n <= 2 && k < 2 ? 13 : 25), &FONT_XS, l1,
-                               bg == K_TEAL ? K_BG : K_TEXT);
+                               bg == K_NOW ? K_BG : K_TEXT);
                         e = l1;
                         if (k >= 1)
                             n = 3;
@@ -1722,11 +1731,11 @@ static void draw_steps(void)
             }
         }
         if (st->comp)
-            text_r(x + ST_CW - 5, y + ST_CH - 14, &FONT_XS, COMP_GLYPH[st->comp % NSC], bg == K_TEAL ? K_BG : K_ACCENT);
+            text_r(x + ST_CW - 5, y + ST_CH - 14, &FONT_XS, COMP_GLYPH[st->comp % NSC], bg == K_NOW ? K_BG : K_TEXT);
         if (st->cond)
-            cv_text(x + 3, y + ST_CH - 14, &FONT_XS, "%", bg == K_TEAL ? K_BG : K_DIM);
+            cv_text(x + 3, y + ST_CH - 14, &FONT_XS, "%", bg == K_NOW ? K_BG : K_DIM);
         if (step_has_lock(pats.lane, trk, pt, s))
-            cv_round(x + ST_CW - 9, y + 3, 4, 4, 2, bg == K_TEAL ? K_BG : K_ACCENT);
+            cv_round(x + ST_CW - 9, y + 3, 4, 4, 2, K_REC);
     }
     cv_blit(0, MAIN_Y);
 }
@@ -1761,7 +1770,7 @@ static void draw_bar(void)
             if (steps < 16 && steps > 0)
                 cv_round(x + w * steps / 16, 34, w - w * steps / 16, 40, 5, K_PANEL);
             if (playing() && ph / 16 == b)
-                cv_round(x + 2 + 46 * (ph % 16) / 16, 36, 4, 36, 2, K_TEAL);
+                cv_round(x + 2 + 46 * (ph % 16) / 16, 36, 4, 36, 2, K_NOW);
             num_s((uint32_t)b + 1u, t);
             text_c(x + w / 2, 46, &FONT_B, t, b < nb ? K_TEXT : K_FAINT);
         }
@@ -1770,7 +1779,7 @@ static void draw_bar(void)
     e = num_s((uint32_t)tp->quant, s_cat(t + s_len(t), ", quantise "));
     s_cat(e, "%");
     cv_text(12, 86, &FONT_XS, t, K_DIM);
-    cv_text(12, 100, &FONT_XS, "SEL: clear, copy, paste, rotate, duplicate a bar", K_FAINT);
+    cv_text(12, 100, &FONT_XS, "SEL: clear, copy, paste, rotate, duplicate a bar", K_DIM);
     cv_blit(0, MAIN_Y);
 }
 
@@ -1782,7 +1791,7 @@ static void pic_simple(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8
         for (int32_t x = 0; x < w - 1; x += 2) {
             int32_t ph = (x * 32 / w + f / 2 + k * 6) & 31;
             int32_t y = cy + sin100((uint32_t)ph) * amp / 100 + (k - 2) * 3;
-            cv_rect(x0 + x, y, 2, 2, k == 2 ? K_TEAL : K_DIM);
+            cv_rect(x0 + x, y, 2, 2, k == 2 ? K_NOW : K_DIM);
         }
     }
 }
@@ -1795,7 +1804,7 @@ static void pic_prism(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_
     cv_line(cx - 36, bot, cx + 36, bot, K_TEXT);
     cv_line(x0 + 4, y0 + h / 2 + 10, cx - 14, y0 + h / 2 - 4, K_DIM);   /* the ray in */
     for (int k = -1; k <= 1; k++)                    /* three out, spread by the ratio */
-        cv_line(cx + 14, y0 + h / 2 - 4 + k * 2, x0 + w - 4, y0 + h / 2 + k * spread, k ? K_ACCENT : K_TEAL);
+        cv_line(cx + 14, y0 + h / 2 - 4 + k * 2, x0 + w - 4, y0 + h / 2 + k * spread, k ? K_DIM : K_NOW);
 }
 static void pic_wave(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
 {
@@ -1805,7 +1814,7 @@ static void pic_wave(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t
     for (int32_t x = 0; x < w; x++) {
         int32_t s = eng_scope[(r + SCOPE_N - (uint32_t)w + (uint32_t)x) % SCOPE_N];
         int32_t y = cy - s * (h / 2 - 4) / 32768;
-        cv_line(x0 + x, py, x0 + x, y, K_TEAL);
+        cv_line(x0 + x, py, x0 + x, y, K_NOW);
         py = y;
     }
     cv_rect(x0, cy, w, 1, K_LINE);
@@ -1819,8 +1828,8 @@ static void pic_axis(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t
         uint32_t k = f / 2;
         int32_t mx = cx + cos100(k) * r1 / 100, my = cy + sin100(k) * r1 / 100;
         for (uint32_t j = 0; j < 32; j += 2)
-            cv_rect(mx + cos100(j + f) * r2 / 100, my + sin100(j + f) * r2 / 100, 2, 2, K_TEAL);
-        cv_line(cx, cy, mx, my, K_ACCENT);
+            cv_rect(mx + cos100(j + f) * r2 / 100, my + sin100(j + f) * r2 / 100, 2, 2, K_NOW);
+        cv_line(cx, cy, mx, my, K_DIM);
     }
 }
 static void pic_epiano(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
@@ -1828,7 +1837,7 @@ static void pic_epiano(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8
     int32_t kw = w / 8;
     (void)f;
     cv_round(x0 + 4, y0 + 6, w - 8, 10, 3, K_DIM);   /* the tine bar */
-    cv_round(x0 + 4 + p[TP_E4] * (w - 20) / 127, y0 + 4, 12, 14, 4, K_ACCENT);
+    cv_round(x0 + 4 + p[TP_E4] * (w - 20) / 127, y0 + 4, 12, 14, 4, K_NOW);
     for (int k = 0; k < 8; k++)
         cv_round(x0 + k * kw + 1, y0 + 24, kw - 2, h - 28, 2, k % 7 == 1 || k % 7 == 3 || k % 7 == 6 ? K_TEXT : K_PANEL2);
 }
@@ -1838,7 +1847,7 @@ static void pic_organ(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_
     for (int k = 0; k < 4; k++) {                    /* four drawbars: type, bass, tremolo, speed */
         int32_t x = x0 + 20 + k * (w - 40) / 3 - 6, v = p[TP_E1 + k] * (h - 20) / 127;
         cv_round(x, y0 + 4, 12, h - 8, 3, K_PANEL2);
-        cv_round(x, y0 + h - 4 - v - 8, 12, v + 8, 3, k ? K_DIM : K_TEAL);
+        cv_round(x, y0 + h - 4 - v - 8, 12, v + 8, 3, k ? K_DIM : K_NOW);
     }
 }
 static void pic_hardsync(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
@@ -1848,9 +1857,9 @@ static void pic_hardsync(int32_t x0, int32_t y0, int32_t w, int32_t h, const uin
     for (int32_t x = 0; x < w; x++) {               /* a saw reset every period: the notch */
         int32_t y = cy + h / 2 - 6 - (x % period) * (h - 12) / period;
         if (x % period == 0)
-            cv_line(x0 + x, py, x0 + x, y, K_ACCENT);
+            cv_line(x0 + x, py, x0 + x, y, K_DIM);
         else
-            cv_line(x0 + x, py, x0 + x, y, K_TEAL);
+            cv_line(x0 + x, py, x0 + x, y, K_NOW);
         py = y;
     }
 }
@@ -1863,7 +1872,7 @@ static void pic_dissolve(int32_t x0, int32_t y0, int32_t w, int32_t h, const uin
             int32_t x = (int32_t)((r >> 8) % (uint32_t)w), y = (int32_t)((r >> 20) % (uint32_t)h);
             int32_t dx = x - w / 2, dy = (y - h / 2) * 2;
             if (dx * dx + dy * dy < (w / 2) * (w / 2))
-                cv_rect(x0 + x, y0 + y, 2, 2, (r >> 4 & 3u) ? K_DIM : K_TEAL);
+                cv_rect(x0 + x, y0 + y, 2, 2, (r >> 4 & 3u) ? K_DIM : K_NOW);
         }
     }
 }
@@ -1873,9 +1882,9 @@ static void pic_drumline(int32_t x0, int32_t y0, int32_t w, int32_t h, const uin
     (void)p; (void)f;
     for (int k = 0; k < DL_NSOUND; k++) {
         int32_t x = x0 + (k % 6) * pw + 2, y = y0 + (k / 6) * ph + 2, hit = eng_drum_hit[k];
-        cv_round(x, y, pw - 4, ph - 4, 4, hit > 40 ? K_TEAL : k == ui.dsound ? K_PANEL2 : K_PANEL);
+        cv_round(x, y, pw - 4, ph - 4, 4, hit > 40 ? K_NOW : k == ui.dsound ? K_PANEL2 : K_PANEL);
         if (k == ui.dsound)
-            cv_frame(x, y, pw - 4, ph - 4, 4, K_ACCENT, hit > 40 ? K_TEAL : K_PANEL2);
+            cv_frame(x, y, pw - 4, ph - 4, 4, K_SEL, hit > 40 ? K_NOW : K_PANEL2);
         text_c(x + (pw - 4) / 2, y + (ph - 4) / 2 - 7, &FONT_XS, DL_SOUND_NAME[k], hit > 40 ? K_BG : K_TEXT);
     }
 }
@@ -1936,7 +1945,7 @@ static void draw_brain(void)
     if (deg > 0)
         e = s_cat(e, "+");
     num_i(deg, e);
-    cv_text(12, 44, &FONT_B, t, deg ? K_TEAL : K_DIM);
+    cv_text(12, 44, &FONT_B, t, deg ? K_NOW : K_DIM);
     cv_text(12, 70, &FONT_XS, "tracks that follow", K_DIM);
     for (int i = 0; i < NTRK; i++) {
         int32_t x = 12 + i * 27;
@@ -1973,15 +1982,14 @@ static void draw_punch(void)
     }
     if (!n)
         s_cat(t, "hold a key for an effect");
-    text_fit(10, 4, n ? &FONT_B : &FONT_S, t, 220, n ? K_TEAL : K_DIM);
+    text_fit(10, 4, n ? &FONT_B : &FONT_S, t, 220, n ? K_NOW : K_DIM);
     cv_text(10, 24, &FONT_XS, "drums", K_DIM);
     text_r(230, 24, &FONT_XS, "melodic", K_DIM);
     for (int k = 0; k < 16; k++) {                   /* the keys: a small keyboard, the held ones teal */
         int32_t x = 8 + k * 14;
         int key = WHITE_K[k], fx = key < NPUNCH_D ? key : 16 + key - NPUNCH_D;
         int on = fx < 16 ? (dm >> fx & 1u) : (mm >> (fx - 16) & 1u);
-        cv_round(x, 40, 13, 60, 2, on ? K_TEAL : K_BG);
-        cv_frame(x, 40, 13, 60, 2, K_DIM, on ? K_TEAL : K_BG);
+        cv_round(x, 40, 13, 60, 2, on ? K_NOW : K_PANEL2);
     }
     for (int k = 0; k < 11; k++) {
         int key = BLACK_K[k], fx = key < NPUNCH_D ? key : 16 + key - NPUNCH_D;
@@ -1989,10 +1997,10 @@ static void draw_punch(void)
         int32_t wi = 0;
         while (WHITE_K[wi] < key)
             wi++;
-        cv_round(8 + wi * 14 - 5, 40, 10, 34, 2, on ? K_TEAL : K_TEXT);
+        cv_frame(8 + wi * 14 - 5, 40, 10, 34, 2, K_DIM, on ? K_NOW : K_BG);
     }
-    cv_rect(8 + 7 * 14 - 1, 36, 2, 70, K_ACCENT_L);   /* the split: F3..E4 drums, F4..G5 melodic */
-    cv_text(10, 104, &FONT_XS, proj.trk[AUX_PUNCH].par[TP_E1] ? "latch on: a key toggles" : "momentary: while held", K_FAINT);
+    cv_rect(8 + 7 * 14 - 1, 36, 2, 70, K_DIM);   /* the split: F3..E4 drums, F4..G5 melodic */
+    cv_text(10, 104, &FONT_XS, proj.trk[AUX_PUNCH].par[TP_E1] ? "latch on: a key toggles" : "momentary: while held", K_DIM);
     cv_blit(0, MAIN_Y);
 }
 static void draw_tape(void)
@@ -2011,13 +2019,13 @@ static void draw_tape(void)
         uint32_t a = (uint32_t)k * 2u;
         int32_t x = cx + cos100(a) * r / 100, y = cy + sin100(a) * r / 100;
         int on = held >> k & 1u;
-        cv_round(x - 5, y - 5, 11, 11, 4, on ? K_TEAL : K_PANEL2);
+        cv_round(x - 5, y - 5, 11, 11, 4, on ? K_NOW : K_PANEL2);
         if (on)
-            cv_frame(x - 6, y - 6, 13, 13, 5, K_TEAL, K_TEAL);
+            cv_frame(x - 6, y - 6, 13, 13, 5, K_NOW, K_NOW);
     }
     if (playing()) {
         uint32_t a = (ui.frame / 4) & 31u;
-        cv_round(cx + cos100(a) * (r - 14) / 100 - 2, cy + sin100(a) * (r - 14) / 100 - 2, 5, 5, 2, K_ACCENT);
+        cv_round(cx + cos100(a) * (r - 14) / 100 - 2, cy + sin100(a) * (r - 14) / 100 - 2, 5, 5, 2, K_TEXT);
     }
     cv_text(130, 10, &FONT_B, "tape", K_TEXT);
     cv_text(130, 30, &FONT_XS, "the last 16 steps,", K_DIM);
@@ -2029,13 +2037,13 @@ static void draw_tape(void)
                 e = num_s((uint32_t)k + 1u, e);
                 e = s_cat(e, " ");
             }
-        cv_text(130, 66, &FONT_S, t, K_TEAL);
+        cv_text(130, 66, &FONT_S, t, K_NOW);
     }
     cv_blit(0, MAIN_Y);
 }
 static void draw_fxtrack(void)
 {
-    int trk = sel_trk(), type = proj.trk[trk].par[TP_E1] % NFXT;
+    int trk = sel_trk(), type = proj.trk[trk].par[TP_ENGINE] % NFXT;
     uint32_t h = hash_u(2166136261u, 0xF0000u | (uint32_t)trk | (uint32_t)type << 4 | (ui.frame / 3) << 8);
     char t[24];
     if (!begin_main(h))
@@ -2049,36 +2057,36 @@ static void draw_fxtrack(void)
         switch (type) {
         case FXT_CHORUS:
             for (int32_t x = 0; x < w; x += 2) {
-                cv_rect(x0 + x, y0 + 20 + sin100((uint32_t)(x / 6 + f / 3)) * 10 / 100, 2, 2, K_TEAL);
+                cv_rect(x0 + x, y0 + 20 + sin100((uint32_t)(x / 6 + f / 3)) * 10 / 100, 2, 2, K_NOW);
                 cv_rect(x0 + x, y0 + 20 + sin100((uint32_t)(x / 6 + f / 3 + 5)) * 10 / 100, 2, 2, K_DIM);
             }
             break;
         case FXT_DELAY:
             for (int k = 0; k < 5; k++)
-                cv_round(x0 + k * 20, y0 + 30 - (30 >> k), 10, 30 >> k, 2, k ? K_DIM : K_TEAL);
+                cv_round(x0 + k * 20, y0 + 30 - (30 >> k), 10, 30 >> k, 2, k ? K_DIM : K_NOW);
             break;
         case FXT_DIST:
             for (int32_t x = 0; x < w; x += 2) {
                 int32_t s = sin100((uint32_t)(x / 3)) * 3;
                 s = s > 100 ? 100 : s < -100 ? -100 : s;
-                cv_rect(x0 + x, y0 + 20 - s * 16 / 100, 2, 2, K_TEAL);
+                cv_rect(x0 + x, y0 + 20 - s * 16 / 100, 2, 2, K_NOW);
             }
             break;
         case FXT_LOFI:
             for (int32_t x = 0; x < w; x += 8)
-                cv_rect(x0 + x, y0 + 20 - sin100((uint32_t)(x / 8)) * 16 / 100, 8, 3, K_TEAL);
+                cv_rect(x0 + x, y0 + 20 - sin100((uint32_t)(x / 8)) * 16 / 100, 8, 3, K_NOW);
             break;
         case FXT_PHASER:
             for (int k = 0; k < 4; k++) {
                 int32_t x = x0 + 10 + k * 24 + sin100(f / 3 + (uint32_t)k * 8) * 6 / 100;
-                cv_round(x, y0, 6, 40, 3, k & 1 ? K_DIM : K_TEAL);
+                cv_round(x, y0, 6, 40, 3, k & 1 ? K_DIM : K_NOW);
             }
             break;
         default:
             for (int k = 0; k < 6; k++) {
                 int32_t rr = 8 + k * 7;
                 for (uint32_t a = 0; a < 32; a += 2)
-                    cv_rect(x0 + 50 + cos100(a) * rr / 100, y0 + 20 + sin100(a) * rr / 200, 1, 1, k & 1 ? K_DIM : K_TEAL);
+                    cv_rect(x0 + 50 + cos100(a) * rr / 100, y0 + 20 + sin100(a) * rr / 200, 1, 1, k & 1 ? K_DIM : K_NOW);
             }
             break;
         }
@@ -2101,7 +2109,7 @@ static void draw_play(void)
                               : p[TP_VMODE] % 3 == VM_MONO ? "one voice, every key restarts it"
                                                             : "one voice, held keys glide", K_DIM);
     for (int v = 0; v < NVOICE; v++)                 /* the voices sounding, all tracks */
-        cv_round(12 + v * 13, 50, 10, 10, 3, v < eng_voices ? K_TEAL : K_LINE);
+        cv_round(12 + v * 13, 50, 10, 10, 3, v < eng_voices ? K_NOW : K_LINE);
     num_s((uint32_t)eng_voices, s_cat(t, "voices sounding "));
     cv_text(12, 66, &FONT_XS, t, K_DIM);
     cv_blit(0, MAIN_Y);
@@ -2124,13 +2132,13 @@ static void draw_env(int filter)
     s = p[b + 2] * hh / 127;
     x = x0;
     cv_rect(x0, y0 + hh, w, 1, K_LINE);
-    cv_line(x, y0 + hh, x + a, y0, K_TEAL);
+    cv_line(x, y0 + hh, x + a, y0, K_NOW);
     x += a;
-    cv_line(x, y0, x + d, y0 + hh - s, K_TEAL);
+    cv_line(x, y0, x + d, y0 + hh - s, K_NOW);
     x += d;
-    cv_rect(x, y0 + hh - s, w - a - d - r, 2, K_TEAL);
+    cv_rect(x, y0 + hh - s, w - a - d - r, 2, K_NOW);
     x += w - a - d - r;
-    cv_line(x, y0 + hh - s, x + r, y0 + hh, K_TEAL);
+    cv_line(x, y0 + hh - s, x + r, y0 + hh, K_NOW);
     cv_text(x0, y0 + hh + 6, &FONT_XS, filter ? "filter envelope" : "amp envelope", K_DIM);
     cv_blit(0, MAIN_Y);
 }
@@ -2161,12 +2169,12 @@ static void draw_filter(void)
                 y = y0;
         }
         if (py >= 0)
-            cv_line(x - 1, py, x, y, K_TEAL);
+            cv_line(x - 1, py, x, y, K_NOW);
         py = y;
     }
-    cv_rect(fc, y0, 1, hh, K_ACCENT_L);
+    cv_rect(fc, y0, 1, hh, K_FAINT);
     cv_text(x0, y0 + hh + 6, &FONT_XS, FT_NAME[ft], K_DIM);
-    text_r(x0 + w, y0 + hh + 6, &FONT_XS, p[TP_KTRK] ? "key tracking on" : "", K_FAINT);
+    text_r(x0 + w, y0 + hh + 6, &FONT_XS, p[TP_KTRK] ? "key tracking on" : "", K_DIM);
     cv_blit(0, MAIN_Y);
 }
 static void draw_sends(void)
@@ -2185,7 +2193,7 @@ static void draw_sends(void)
         cv_text(12, y - 2, &FONT_S, NM[i], K_TEXT);
         cv_round(64, y + 3, 160, 8, 4, K_LINE);
         if (v > 0)
-            cv_round(64, y + 3, v < 8 ? 8 : v, 8, 4, K_TEAL);
+            cv_round(64, y + 3, v < 8 ? 8 : v, 8, 4, K_NOW);
     }
     cv_blit(0, MAIN_Y);
 }
@@ -2216,7 +2224,7 @@ static void draw_lfo(void)
             y = cy - (int32_t)((r >> 16) % (uint32_t)(2 * amp + 1)) + amp;
         } else
             y = cy + amp - (x % 48 < 6 ? 2 * amp : 2 * amp * (48 - x % 48) / 48);
-        cv_rect(x0 + x, y, 2, 2, K_TEAL);
+        cv_rect(x0 + x, y, 2, 2, K_NOW);
     }
     {
         char t[40], *e = s_cat(t, "to ");
@@ -2273,7 +2281,7 @@ static void draw_players(void)
         int n = 48 + k, held = 0;
         for (int i = 0; i < pr->nheld && i < 16; i++)
             held |= pr->held[i] == n;
-        cv_round(x, 76, 8, 30, 2, pr->arp_note == n ? K_ACCENT : held ? K_TEAL : (k % 12 == 1 || k % 12 == 3 ||
+        cv_round(x, 76, 8, 30, 2, pr->arp_note == n ? K_TEXT : held ? K_NOW_M : (k % 12 == 1 || k % 12 == 3 ||
                                                            k % 12 == 6 || k % 12 == 8 || k % 12 == 10) ? K_DIM : K_PANEL2);
     }
     cv_blit(0, MAIN_Y);
@@ -2294,13 +2302,13 @@ static void draw_mix(void)
         int muted = t < NSEQT && (seq.mute >> t & 1u);
         cv_round(x, 6, 14, 84, 3, K_PANEL);
         if (lvl > 0)
-            cv_round(x, 90 - lvl, 14, lvl, 3, muted ? K_LINE : K_TEAL);
+            cv_round(x, 90 - lvl, 14, lvl, 3, muted ? K_LINE : K_NOW);
         if (t == sel) {                              /* the selected strip: a coral ring around it */
-            cv_frame(x - 1, 5, 16, 86, 4, K_ACCENT, K_PANEL);
+            cv_frame(x - 1, 5, 16, 86, 4, K_SEL, K_PANEL);
             if (lvl > 0)
-                cv_round(x + 1, 90 - lvl, 12, lvl - 1, 2, muted ? K_LINE : K_TEAL);
+                cv_round(x + 1, 90 - lvl, 12, lvl - 1, 2, muted ? K_LINE : K_NOW);
         }
-        text_c(x + 7, 94, &FONT_XS, SHORT_NM[t], t == sel ? K_ACCENT : muted ? K_FAINT : K_TEXT);
+        text_c(x + 7, 94, &FONT_XS, SHORT_NM[t], t == sel ? K_TEXT : muted ? K_FAINT : K_DIM);
         if (muted)
             cv_rect(x + 2, 108, 10, 2, K_FAINT);
     }
@@ -2323,7 +2331,7 @@ static void draw_master(void)
         for (int32_t x = 0; x < w; x += 2) {
             int32_t b = x < w / 3 ? m[MS_EQ_LO] : x < 2 * w / 3 ? m[MS_EQ_MID] : m[MS_EQ_HI];
             int32_t y = cy - (b - 64) * (hh / 2 - 6) * (int32_t)m[MS_EQ_BLEND] / (64 * 127);
-            cv_rect(x0 + x, y, 2, 2, K_TEAL);
+            cv_rect(x0 + x, y, 2, 2, K_NOW);
         }
         cv_text(x0, y0 + hh + 6, &FONT_XS, "low  mid  high, by the blend", K_DIM);
     } else if (pg == 1) {                            /* the saturator: a bent line */
@@ -2335,7 +2343,7 @@ static void draw_master(void)
             {
                 int32_t y = cy - out * (hh / 2 - 4) / 100;
                 if (py >= 0)
-                    cv_line(x0 + x - 1, py, x0 + x, y, K_TEAL);
+                    cv_line(x0 + x - 1, py, x0 + x, y, K_NOW);
                 py = y;
             }
         }
@@ -2345,7 +2353,7 @@ static void draw_master(void)
         for (int i = 0; i < 4; i++) {
             int32_t x = x0 + i * 52, v = m[MS_PERC + i] * (hh - 10) / 127;
             cv_round(x + 8, y0, 30, hh, 4, K_PANEL);
-            cv_round(x + 8, y0 + hh - v, 30, v, 4, i == 2 ? K_ACCENT_L : K_TEAL);
+            cv_round(x + 8, y0 + hh - v, 30, v, 4, i == 2 ? K_NOW_M : K_NOW);
             text_c(x + 23, y0 + hh + 6, &FONT_XS, NM[i], K_DIM);
         }
     }

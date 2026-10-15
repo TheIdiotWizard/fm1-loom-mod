@@ -548,12 +548,14 @@ static void drain(void)
         case C_MASTER: master_set(MST, (int)a, (int)v); break;
         case C_FX:
             if (a < 2u) {
-                int k;
-                fx_type[a] = fx_req[a].type;
+                int k, type = fx_req[a].type;
+                if (!fx_has(FXS(a), type))
+                    type = FXT_CHORUS;                      /* what the slot runs instead (fx_set's fallback) */
+                fx_type[a] = (uint8_t)type;
                 for (k = 0; k < 4; k++)
                     epar[AUX_FX1 + a][TP_E1 + k] = fx_req[a].knob[k];
-                epar[AUX_FX1 + a][TP_ENGINE] = fx_req[a].type;
-                fx_set(FXS(a), fx_req[a].type, fx_req[a].knob);
+                epar[AUX_FX1 + a][TP_ENGINE] = (uint8_t)type;
+                fx_set(FXS(a), type, fx_req[a].knob);
                 fx_filter(FXS(a), fx_req[a].hp, fx_req[a].lp);
             }
             break;
@@ -858,3 +860,6 @@ void engine_init(patterns_t *P, uint8_t (*par)[NTP])
         eng_step[t] = 0;
     eng_voices_max = NVOICE;
 }
+
+/* the UI asks before offering an effect: FX II has no reverb line, FX I no delay (the memory plan) */
+int engine_fx_has(int slot, int type) { return fx_has(FXS(slot & 1), type); }

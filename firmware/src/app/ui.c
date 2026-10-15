@@ -127,9 +127,9 @@ static void apply_brain(void)
 }
 static void apply_fx(int trk)
 {
-    const uint8_t *p = proj.trk[trk].par;
-    uint8_t kn[4] = {p[TP_E2], p[TP_E3], p[TP_E4], p[TP_P1]};
-    engine_fx(trk - AUX_FX1, p[TP_E1] % NFXT, kn, p[TP_P2], p[TP_P3]);
+    const uint8_t *p = proj.trk[trk].par;    /* the engine's layout: TP_ENGINE the effect, E1..E4 its knobs,
+                                              * FENV the high-pass, CUT the low-pass (SEND2: the feed, by engine_set) */
+    engine_fx(trk - AUX_FX1, p[TP_ENGINE] % NFXT, p + TP_E1, p[TP_FENV], p[TP_CUT]);
 }
 static void apply_aux(int trk)
 {
@@ -155,7 +155,7 @@ static void set_tp(int trk, int p, int v)
     if (par[p] == v)
         return;
     par[p] = (uint8_t)v;
-    if (p == TP_ENGINE) {                        /* another engine: its default sound, the name goes */
+    if (p == TP_ENGINE && !is_aux(trk)) {        /* another engine: its default sound, the name goes */
         sound_default(par, v);
         memset(proj.trk[trk].name, 0, NAME_LEN);
         engine_set_all(trk);
@@ -1042,10 +1042,17 @@ static void aux_knob(int trk, int k, int32_t e)
         hi = k == 0 || k == 3 ? 1 : k == 1 ? 11 : NBS - 1;
     else if (trk == AUX_PUNCH)
         hi = k == 0 ? 1 : -1;
-    else if (trk >= AUX_FX1 && ui.page == P_ENGINE && k == 0)
-        hi = NFXT - 1;
-    else if (trk >= AUX_FX1 && ui.page == P_PLAY && k == 3 && trk != AUX_FX1)
-        hi = -1;
+    else if (trk >= AUX_FX1 && ui.page == P_ENGINE && k == 0) {   /* the effect: only those the slot can do */
+        int t = par[TP_ENGINE] % NFXT, d = e > 0 ? 1 : -1;
+        for (int tries = 0; tries < NFXT; tries++) {
+            t = clampi(t + d, 0, NFXT - 1);
+            if (engine_fx_has(trk - AUX_FX1, t))
+                break;
+        }
+        if (engine_fx_has(trk - AUX_FX1, t))
+            set_tp(trk, TP_ENGINE, t);
+        return;
+    }
     if (hi < 0)
         return;
     set_tp(trk, p, clampi(par[p] + e, 0, hi));

@@ -1133,7 +1133,7 @@ static void voice_chunk(synth_t *s, voice_t *v)
     if (!v_sounding(v))
         return;
     for (i = 0; i < 4; i++)
-        c->e[i] = pf(s, trk, TP_E1 + i, dest, off) * (1.0f / 127.0f);
+        c->e[i] = fm_minf(pf(s, trk, TP_E1 + i, dest, off), 127.0f) * (1.0f / 127.0f);   /* a foreign lock value stays in range */
     {   /* the envelopes' coefficients cost an exp each: only for a knob that moved */
         static const uint8_t EP[8] = {TP_A, TP_D, TP_S, TP_R, TP_FA, TP_FD, TP_FS, TP_FR};
         float *co[8];

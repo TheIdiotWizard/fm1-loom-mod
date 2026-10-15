@@ -18,11 +18,15 @@ FX I	effects 1
 FX II	effects 2
 VEL	velocity
 NOTE LEN	note length
+QUANT	quantise
 LEN	length
 PORTA	portamento
 CUT	cutoff
 RES	resonance
 FENV	envelope amount
+FREQ	frequency
+FDBK	feedback
+MOD	modulation
 ENV AMT	envelope amount
 KTRK	key tracking
 keytrack	key tracking

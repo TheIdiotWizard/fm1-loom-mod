@@ -626,6 +626,18 @@ static void lock_put(seq_t *s, int t, const lane_t *l, lane_rt_t *r, int v, cons
         o->lock(o->ctx, t, l->param, v);
 }
 
+/* a lane that is gone (cleared, or its slot reused) still had a value on the engine: send it back to the knob */
+static void lane_forget(seq_t *s, lane_rt_t *r, const seq_sink_t *o)
+{
+    (void)s;
+    r->ramp = 0;
+    if (r->applied != LOCK_NONE) {
+        r->applied = LOCK_NONE;
+        if (o->lock)
+            o->lock(o->ctx, r->trk, r->param, LOCK_NONE);
+    }
+}
+
 static void apply_locks(seq_t *s, int t, int p, uint32_t L, const seq_sink_t *o)
 {
     const tpat_t *tp = tpat(s, t);
@@ -637,9 +649,10 @@ static void apply_locks(seq_t *s, int t, int p, uint32_t L, const seq_sink_t *o)
         if (!l->used || l->trk != t)
             continue;
         if (r->gen != l->gen) {
+            lane_forget(s, r, o);     /* the slot was reused: the old lane's value goes back to the knob */
             r->gen = l->gen;
-            r->applied = LOCK_NONE;
-            r->ramp = 0;
+            r->trk = l->trk;
+            r->param = l->param;
         }
         if (l->pat != s->ppat[t]) {   /* another pattern's lane: the knob has it */
             lock_put(s, t, l, r, LOCK_NONE, o);
@@ -676,12 +689,12 @@ static void locks_tick(seq_t *s, uint32_t k, const seq_sink_t *o)
     for (i = 0; i < NLANE; i++) {
         lane_rt_t *r = &s->lrt[i];
         const lane_t *l = &s->P->lane[i];
-        if (!r->ramp)
-            continue;
         if (!l->used || r->gen != l->gen) {
-            r->ramp = 0;
+            lane_forget(s, r, o);
             continue;
         }
+        if (!r->ramp)
+            continue;
         r->age += k;
         if (r->age >= r->len) {
             lock_put(s, l->trk, l, r, r->to, o);
@@ -699,11 +712,11 @@ static void locks_release(seq_t *s, const seq_sink_t *o)
     for (i = 0; i < NLANE; i++) {
         lane_rt_t *r = &s->lrt[i];
         const lane_t *l = &s->P->lane[i];
-        r->ramp = 0;
-        if (l->used && r->gen == l->gen)
+        if (l->used && r->gen == l->gen) {
+            r->ramp = 0;
             lock_put(s, l->trk, l, r, LOCK_NONE, o);
-        else
-            r->applied = LOCK_NONE;
+        } else
+            lane_forget(s, r, o);
     }
 }
 
@@ -1387,10 +1400,13 @@ static void rec_key_off(seq_t *s, int t, int note)
 /* a key on an instrument track, inside the interrupt */
 static void key_in(seq_t *s, int t, int note, int on, int vel, const seq_sink_t *o)
 {
-    player_t *pl = &s->player[t];
-    int player = s->par[t][TP_PLAYER], had_phys = pl->nphys, shifted;
-    if (t >= NTRK || note < 1 || note > 127)
+    player_t *pl;
+    int player, had_phys, shifted;
+    if (t < 0 || t >= NTRK || note < 1 || note > 127)
         return;
+    pl = &s->player[t];
+    player = s->par[t][TP_PLAYER];
+    had_phys = pl->nphys;
     if (s->rec && s->playing && !s->count_in) {
         if (on)
             rec_key_on(s, t, note, vel);
