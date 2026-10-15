@@ -1,4 +1,4 @@
-# a brain progression: track 3 follows the brain, the brain's steps at scale 4 move the key
+# a brain progression: track 3 follows, the brain's steps hold the chords its keys played, at scale 4
 wait 200
 spin ALGO 2
 tap EDIT
@@ -16,15 +16,23 @@ spin K2 2
 spin K3 1
 wait 40
 shot brain_key.png
+turn SELECT 1
+tapkey b1
+wait 40
+shot brain_routing.png
+turn SELECT -1
+key 7 down
+key 11 down
+wait 60
+key 7 up
+key 11 up
 tap SEQ
 expect page Steps
 turn SELECT 1
-spin K3 3
+tapkey b3
 turn SELECT -1
 tapkey w0
-tapkey w4
 tapkey w8
-tapkey w12
 wait 40
 shot brain_steps.png
 tap PLAY

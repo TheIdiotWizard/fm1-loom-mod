@@ -4,6 +4,8 @@ tapkey w0
 tapkey w4
 tap HOME
 spin K1 10
+wait 50
+expect tempo 130
 expect dirty 1
 tap SAVE
 expect dirty 0
@@ -13,8 +15,8 @@ reboot
 wait 300
 expect note 1 1 1 1
 expect note 1 1 5 1
+expect tempo 130
 expect dirty 0
-# a slot: hold SAVE and press white key 2
 press SAVE
 tapkey w1
 release SAVE

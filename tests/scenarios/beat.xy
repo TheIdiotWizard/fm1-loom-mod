@@ -7,7 +7,6 @@ tapkey w8
 tapkey w12
 wait 40
 shot beat_kick.png
-# the snare: black key 2 picks the sound
 tapkey b1
 tapkey w4
 tapkey w12
@@ -28,16 +27,40 @@ expect playing 1
 wait 1200
 shot beat_playing.png
 leds
-# a component on step 7: hold it, press black key 3 (multiply), set its value with K4
+# a component on step 7: hold HOME and the step, white key 3 is multiply, black key 3 its value
 key w6 down
 wait 100
 shot step_held.png
+key w6 up
+press HOME
+key w6 down
+wait 60
+tapkey w2
 tapkey b2
-spin K4 2
 wait 40
 shot step_component.png
+leds
 key w6 up
+release HOME
 expect comp 1 7 3
+# a second component, skip trigger (white key 14), then off again
+press HOME
+key w6 down
+wait 60
+tapkey w13
+tapkey b3
+tapkey b10
+wait 40
+shot step_two_comps.png
+tapkey w13
+key w6 up
+release HOME
+# a step held + a black key: that sound on the step
+key w2 down
+wait 60
+tapkey b0
+key w2 up
+expect note 1 1 3 3
 wait 1500
 tap PLAY
 expect playing 0

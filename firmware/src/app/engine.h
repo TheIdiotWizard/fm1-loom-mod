@@ -62,10 +62,3 @@ extern volatile uint8_t eng_scene_now, eng_scene_cue;
 extern int16_t eng_scope[SCOPE_N];                       /* the last output samples, for the screen */
 extern volatile uint32_t eng_scope_w;
 int engine_core2_state(void);                            /* 0 one core (never had), 1 two, 2 lost, 3 barred */
-
-/* ---- shims for app/ui.c and app/pages.c until their rewrite (the next wave): remove with it ---- */
-#define NPUNCH_D NPUNCH                        /* the drum octave's keys: 0..11 (ui.c punch_fx_of_key) */
-#define FT_LP24 FT_LADDER                      /* the filter types' old names (pages.c) */
-#define FT_HP FT_ZHP
-#define FT_BP FT_ZLP
-#define swing rsv[0]                           /* tpat_t's swing knob writes a reserved byte (ui.c, pages.c) */

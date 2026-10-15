@@ -1,10 +1,12 @@
-# punch-in fx: HOME + a key on any page; on the PUNCH track the keys fire directly
+# punch-in fx: HOME + a key from an instrument track; on the PUNCH track the keys fire the groups
 wait 200
+tap EDIT
 tap PLAY
 wait 500
 press HOME
 key 0 down
 wait 300
+expect punch_drum >0
 shot punch_home.png
 key 0 up
 release HOME
@@ -22,4 +24,10 @@ tapkey 3
 wait 200
 shot punch_latched.png
 tapkey 3
+# the remembered effect on a step
+tap SEQ
+tapkey w0
+expect note 10 1 1 9
+wait 40
+shot punch_steps.png
 tap PLAY

@@ -1,10 +1,7 @@
-# first boot: every page, a screenshot of each (the look), the footer and cards never too wide
+# first boot: every page on a drum track (T1) and a synth track (T3), the aux tracks, cards, a list
 wait 300
 expect page Steps
-wait 40
 shot steps.png
-tap SEQ
-expect page Steps
 turn SELECT 1
 expect page Bar
 wait 40
@@ -20,9 +17,27 @@ shot song.png
 tap EDIT
 expect page Engine
 wait 40
-shot engine.png
+shot drum_engine.png
 turn SELECT 1
 expect page Play
+wait 40
+shot drum_key.png
+turn SELECT 1
+expect page Mode
+wait 40
+shot drum_mode.png
+tap ENV
+wait 40
+shot drum_envelope.png
+tap FX
+wait 40
+shot drum_filter.png
+spin ALGO 2
+expect trk 3
+tap EDIT
+wait 40
+shot engine.png
+turn SELECT 1
 wait 40
 shot play.png
 tap ENV
@@ -38,17 +53,24 @@ turn SELECT 1
 wait 40
 shot sends.png
 tap LFO
+spin K1 1
 wait 40
 shot lfo.png
 turn SELECT 1
 wait 40
 shot lfo2.png
+spin K1 -1
 tap ARP
+spin K1 1
 wait 40
 shot players.png
 turn SELECT 1
 wait 40
 shot players2.png
+turn SELECT 1
+wait 40
+shot players3.png
+spin K1 -1
 tap GLO
 expect page Mix
 wait 40
@@ -82,7 +104,6 @@ wait 1000
 shot card_rec.png
 release REC
 expect playing 0
-# a list and a question
 tap SEL
 wait 40
 shot list_steps.png
@@ -90,9 +111,13 @@ tap HOME
 expect page Steps
 # the aux tracks' pages
 tap EDIT
-spin ALGO 8
+spin ALGO 6
+expect trk 9
 wait 40
 shot brain.png
+turn SELECT 1
+wait 40
+shot brain_routing.png
 spin ALGO 1
 wait 40
 shot punch.png
@@ -105,5 +130,8 @@ shot fx1.png
 turn SELECT 1
 wait 40
 shot fx1_2.png
-spin ALGO -11
+spin ALGO 1
+wait 40
+shot fx2.png
+spin ALGO -12
 expect trk 1

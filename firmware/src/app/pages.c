@@ -5,11 +5,8 @@
  * picture), the tag (where you are: track > pattern > scene, the page dots), the four knobs' strip (with
  * the OP-XY's four shades beside the names), the encoders' line and the footer (what the keys do here).
  * Each band is drawn only when what it shows changed (a hash of it). Over the main band: a help card (a
- * button held alone), a list (SEL). */
+ * button held alone), a list (SEL). The look is the OP-XY's: greyscale, red only for recording and locks. */
 
-/* the colours, one meaning each (Polly's paper): teal = sounding now (the playhead, the scene playing, a
- * voice sounding), coral = you (the cursor, the held step, the knob last turned, REC, messages), ink and
- * its neutrals = what stays put */
 #define K_BG RGB(0, 0, 0)
 #define K_PANEL RGB(30, 30, 34)
 #define K_PANEL2 RGB(58, 58, 64)
@@ -28,15 +25,17 @@
 #define K_SH2 RGB(190, 190, 196)
 #define K_SH3 RGB(255, 255, 255)
 
-/* the pages (the spec's Buttons table): a button opens its first page; SELECT turns them */
-enum { P_ARRANGE, P_SONG, P_STEPS, P_BAR, P_ENGINE, P_PLAY, P_ENV, P_ENV2, P_FILTER, P_SENDS, P_LFO, P_LFO2,
-       P_PLAYERS, P_PLAYERS2, P_MIX, P_MASTER, P_MASTER2, P_MASTER3, P_SETUP, P_STATUS, NPAGES };
-static const char *const PAGE_NAME[NPAGES] = {"Arrange", "Song", "Steps", "Bar", "Engine", "Play", "Envelope",
-                                              "Filter env", "Filter", "Sends", "LFO", "LFO 2", "Players", "Players 2",
-                                              "Mix", "Master EQ", "Master drive", "Master out", "Setup", "Status"};
+/* the pages (the spec's Buttons table): a button opens its first page; SELECT turns them. EDIT has three on
+ * a drum track (the key's knobs, the key, its play mode), ARP three with the arp (its page 2, then hold) */
+enum { P_ARRANGE, P_SONG, P_STEPS, P_BAR, P_ENGINE, P_PLAY, P_ENGINE3, P_ENV, P_ENV2, P_FILTER, P_SENDS, P_LFO,
+       P_LFO2, P_PLAYERS, P_PLAYERS2, P_PLAYERS3, P_MIX, P_MASTER, P_MASTER2, P_MASTER3, P_SETUP, P_STATUS, NPAGES };
+static const char *const PAGE_NAME[NPAGES] = {"Arrange", "Song", "Steps", "Bar", "Engine", "Play", "Mode",
+                                              "Envelope", "Filter env", "Filter", "Sends", "LFO", "LFO 2", "Players",
+                                              "Players 2", "Hold", "Mix", "Master EQ", "Master drive", "Master out",
+                                              "Setup", "Status"};
 static const struct { uint8_t btn, first, n; } PAGE_BTN[] = {
-    {B_HOME, P_ARRANGE, 2}, {B_SEQ, P_STEPS, 2}, {B_EDIT, P_ENGINE, 2}, {B_ENV, P_ENV, 2}, {B_FX, P_FILTER, 2},
-    {B_LFO, P_LFO, 2}, {B_ARP, P_PLAYERS, 2}, {B_GLO, P_MIX, 6}};
+    {B_HOME, P_ARRANGE, 2}, {B_SEQ, P_STEPS, 2}, {B_EDIT, P_ENGINE, 3}, {B_ENV, P_ENV, 2}, {B_FX, P_FILTER, 2},
+    {B_LFO, P_LFO, 2}, {B_ARP, P_PLAYERS, 3}, {B_GLO, P_MIX, 6}};
 #define NPAGE_BTN (sizeof PAGE_BTN / sizeof PAGE_BTN[0])
 static int page_group(int p)
 {
@@ -45,6 +44,7 @@ static int page_group(int p)
             return (int)i;
     return 0;
 }
+static int group_n(int g);                           /* the pages a button has now (the track decides) */
 static const char *const BTN_LABEL[NB] = {"FX", "SEL", "ENV", "LFO", "EDIT", "GLO", "HOME", "SAVE", "ARP", "SEQ",
                                           "PLAY", "REC", "OCT-", "OCT+"};
 
@@ -52,48 +52,42 @@ static const char *const BTN_LABEL[NB] = {"FX", "SEL", "ENV", "LFO", "EDIT", "GL
 static const char *const TRACK_NAME[NALLTRK] = {"T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "BRAIN", "PUNCH",
                                                 "TAPE", "FX I", "FX II"};
 static const char *const NOTE_NAME[12] = {"C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"};
-/* the step components (SC_*), their letter on the grid and their name */
+/* the step components (SC_*: the OP-XY's 14, on the white keys with HOME and a step held), their letter on
+ * the grid and their name */
 static const char *const COMP_NAME[NSC] = {"none", "pulse", "hold", "multiply", "velocity", "ramp up", "ramp down",
-                                           "random", "portamento", "bend", "jump", "skip"};
-static const char *const COMP_GLYPH[NSC] = {"", "P", "H", "M", "V", "^", "v", "?", "~", "B", "J", "S"};
+                                           "random", "portamento", "bend", "tonality", "jump", "skip lock",
+                                           "skip comp", "skip trig"};
+static const char *const COMP_GLYPH[NSC] = {"", "P", "H", "M", "V", "^", "v", "?", "~", "B", "T", "J", "L", "C", "S"};
 static const char *const VEL_VAL[10] = {"4", "8", "16", "32", "64", "100", "112", "127", "0", "random"};
-static const char *const RAMP_VAL[10] = {"2/oct", "3/oct", "4/oct", "5/oct", "6/oct", "2/3oct", "3/3oct", "4/3oct",
-                                         "5/3oct", "random"};
-static const char *const PORTA_VAL[10] = {"10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "random"};
+static const char *const RAMP_VAL[10] = {"2 in 1", "3 in 1", "4 in 1", "5 in 1", "6 in 1", "2 in 3", "3 in 3", "4 in 3",
+                                         "5 in 3", "random"};   /* steps over one / three octaves */
+static const char *const PORTA_VAL[10] = {"10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "off", "random"};
 static const char *const BEND_VAL[10] = {"down-up", "up-down", "bump dn", "bump up", "spring out", "spring in",
                                          "fade dn", "fade up", "random 1", "random 2"};
+static const char *const TON_VAL[10] = {"ignore", "transpose", "oct up", "5th up", "3rd up", "chrom up", "chrom dn",
+                                        "q 33%", "q 66%", "q 100%"};
 static const char *const JUMP_VAL[10] = {"to 1", "to 5", "to 9", "to 13", "forward", "back", "fwd/back", "stay",
                                          "align", "random"};
-static const char *const SKIP_VAL[10] = {"1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "random"};
-static const char *const TS_NAME[NTS] = {"1/2", "1", "2", "3", "4", "6", "8", "16"};
-static const char *const GROOVE_NAME[NGROOVE] = {"swing", "half", "bombora", "wobbly", "gauss", "accents", "island"};
-static const char *const VM_NAME[3] = {"poly", "mono", "legato"};
-static const char *const FT_NAME[NFT] = {"LP12", "LP24", "HP", "BP"};
-static const char *const LT_NAME[NLT] = {"off", "value", "tremolo", "random", "duck"};
-static const char *const LX_NAME[NLT] = {"-", "shape", "vibrato", "smooth", "source"};
-static const char *const PL_NAME[NPL] = {"off", "arp", "maestro", "hold"};
-static const char *const ARP_SPEED[6] = {"1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32"};
-static const char *const ARP_PAT[5] = {"up", "down", "updown", "random", "played"};
-static const char *const MAE_PAT[4] = {"up", "down", "updown", "random"};
+static const char *const TS_NAME[NTS] = {"1/2", "1", "2", "3", "4", "5", "6", "8", "16"};
+static const uint8_t BAR_SCALE_KEY[9] = {TS_1, TS_2, TS_3, TS_4, TS_5, TS_6, TS_8, TS_16, TS_HALF};   /* Bar's black keys */
 static const char *const LIGHTS_NAME[3] = {"off", "on", "keys"};
 static const char *const METRO_NAME[3] = {"off", "rec", "on"};
 static const char *const ONOFF[2] = {"off", "on"};
 static const char *const BRAIN_MODE[2] = {"manual", "auto"};
+static const char *const LINK_NAME[9] = {"off", "T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8"};
 static const char *const FOLLOW_NAME[3] = {"no", "diatonic", "transpose"};
 static const char *const CORE2_NAME[4] = {"one core", "two cores", "lost", "barred"};
 static const char *const USBA_NAME[2] = {"follows knob", "full"};
-/* the aux tracks' Engine pages: their knobs (the aux track's par[TP_E1..E4]; FX pages 2: TP_P1..P4) */
 static const char *const BRAIN_KNOB[4] = {"mode", "key", "scale", "link"};
-static const char *const PUNCH_KNOB[4] = {"latch", 0, 0, 0};
 static const char *const TAPE_KNOB[4] = {"pitch", "speed", "length", "mix"};
-static const char *const FX2_KNOB[4] = {0, "hp", "lp", "to fx II"};
+static const char *const TAPE_PITCH[5] = {"-2", "-1", "x1", "+1", "+2"};
 
 /* the keys: 0 = F3; the white and the black ones in order */
 static const uint8_t WHITE_K[16] = {0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19, 21, 23, 24, 26};
 static const uint8_t BLACK_K[11] = {1, 3, 5, 8, 10, 13, 15, 17, 20, 22, 25};
 #define KEY_BASE 53                                  /* F3 at octave 0 */
-enum { KM_NONE, KM_PLAY, KM_STEP, KM_COMP, KM_SCENE, KM_MUTE, KM_PUNCH, KM_TAPE, KM_BRAIN, KM_SOUND, KM_TRACK,
-       KM_SAVE, KM_LENGTH };                         /* what a held key does (ui.kmode) */
+enum { KM_NONE, KM_PLAY, KM_STEP, KM_CSTEP, KM_COMP, KM_SCENE, KM_MUTE, KM_PUNCH, KM_TAPE, KM_BRAIN, KM_SOUND,
+       KM_TRACK, KM_SAVE, KM_LENGTH, KM_SOLO, KM_SCALE, KM_ROUTE, KM_STEPSOUND };   /* what a held key does */
 
 /* the input's and the screen's state */
 static struct {
@@ -113,42 +107,51 @@ static struct {
     char ask_q[48];
     void (*ask_yes)(void);
     void (*ask_no)(void);
-    uint8_t ask_arg;                                 /* what the question is about (a scene, a slot) */
+    uint8_t ask_arg;
     uint8_t dirty;                                   /* the project changed since it was saved */
     uint8_t bar;                                     /* Steps: the bar shown 0..3 */
-    uint8_t dsound;                                  /* a drum track: the sound shown 0..10 */
-    int8_t oct;                                      /* the keys' octave -3..3 */
+    uint8_t dsound;                                  /* a drum track: the key shown 0..10 */
+    int8_t oct;                                      /* the keys' octave -4..4 */
     uint8_t rem[SN], nrem;                           /* the remembered notes (the last keys held together) */
+    uint8_t rem_fx, rem_seg;                         /* PUNCH: the remembered effect + 1; TAPE: the segment + 1 */
     uint8_t chord[8], nchord;                        /* the keys held together now (notes) */
-    uint16_t held;                                   /* Steps: the white keys down (bit = step of the bar) */
-    uint8_t held_first;                              /* the first of them (the step edited) */
+    uint8_t chord_max[8], nchord_max;                /* the most held together since the last all-up (maestro) */
+    uint16_t held;                                   /* Steps: the white keys down as steps (bit = cell) */
+    uint16_t cstep;                                  /* Steps: HOME + white keys down: the steps for a component */
+    uint8_t held_first;                              /* the first held step (the one edited) */
     uint8_t held_used;                               /* a held step was edited: its release toggles nothing */
+    uint8_t ccomp;                                   /* HOME + step: the component the black keys value */
     uint8_t lockpg;                                  /* a step held + EDIT / ENV / FX / LFO: the lock editor's page + 1 */
     uint8_t cursor;                                  /* step record: the step the keys write */
     uint8_t rec_armed;                               /* REC while stopped: step record */
+    uint8_t rec_held, rec_latched;                   /* REC down while playing (momentary); REC + PLAY latched it */
     uint8_t maestro_rec;                             /* REC on Players with maestro: the next chord is recorded */
     uint8_t kmode[NKEYS], knote[NKEYS];              /* each held key: KM_*, its note / scene / fx */
     uint32_t key_t[NKEYS];
-    uint32_t play_t;                                 /* PLAY's last press (twice quickly: from the top) */
-    uint32_t punch_latched;                          /* PUNCH: the FX kept on after their keys (latch) */
-    uint8_t preset_i;                                /* Engine: the preset last stepped to (PRESETS) */
-    uint8_t pick_engine, pick_preset, pick_slot, pick_follow;   /* the lists' choices */
+    uint32_t play_t;
+    uint32_t punch_latched;
+    uint8_t last_inst;                               /* the instrument track selected last (the FX pages audition it) */
+    uint8_t solo;                                    /* a black key held on Mix: track + 1 soloed */
+    uint16_t solo_mute;                              /* the mutes before the solo */
+    uint8_t preset_i;
+    uint8_t pick_engine, pick_preset, pick_slot, pick_fx;
     uint8_t name_slot;
-    uint8_t playing;                                 /* seq.playing as last seen */
+    uint8_t playing;
     uint8_t scene_seen;
-    uint32_t sig[6];                                 /* the bands' hashes: header, main, knobs, tag, footer, list */
+    uint32_t sig[6];
 } ui;
 
 /* SEL: the screen as a list: the page's knobs, then its actions */
 enum { LK_KNOB, LK_MORE, LK_ACTION, LK_PICK };
 enum { A_CLEAR_NOTES, A_CLEAR_LOCKS, A_CLEAR_BOTH, A_COPY_PAT, A_PASTE_PAT, A_ROT_FWD, A_ROT_BACK, A_DUP_BAR,
        A_ENGINE, A_PRESET, A_SCRAMBLE, A_SAVE_PRESET, A_INIT, A_FOLLOW, A_INSERT_SLOT, A_DELETE_SLOT, A_CLEAR_SONG,
-       A_PLAY_SONG, A_LOAD_PROJ, A_NEW_PROJ, A_USB_AUDIO, A_CLEAR_SCENE, A_PANIC, NACTIONS };
+       A_PLAY_SONG, A_LOAD_PROJ, A_NEW_PROJ, A_USB_AUDIO, A_CLEAR_SCENE, A_PANIC, A_EFFECT, A_REMOVE_NOTE,
+       A_COUNT_IN, NACTIONS };
 static const char *const ACTION_NAME[NACTIONS] = {
     "CLEAR NOTES", "CLEAR LOCKS", "CLEAR NOTES AND LOCKS", "COPY PATTERN", "PASTE PATTERN", "ROTATE FORWARD",
     "ROTATE BACK", "DUPLICATE BAR", "ENGINE", "PRESET", "SCRAMBLE", "SAVE AS PRESET", "RESET SOUND", "FOLLOWS BRAIN",
     "INSERT SCENE", "DELETE SLOT", "CLEAR SONG", "PLAY SONG", "LOAD PROJECT", "NEW PROJECT", "USB AUDIO", "CLEAR SCENE",
-    "ALL NOTES OFF"};
+    "ALL NOTES OFF", "EFFECT", "REMOVE", "COUNT-IN"};
 #define LIST_ROWS 28
 #define LIST_SHOWN 10
 static struct {
@@ -163,7 +166,7 @@ static struct {
     uint8_t valid, trk, pt, redo;
     uint32_t t;
 } undo XY_POOL;
-static tpat_t clip XY_POOL;                          /* COPY PATTERN's copy */
+static tpat_t clip XY_POOL;
 static uint8_t clip_ok;
 
 /* ---------------------------------------------------------- helpers --- */
@@ -228,7 +231,6 @@ static char *note_name(int n, char *b)               /* "C4" (60), "Eb3" */
     char *e = s_cat(b, NOTE_NAME[(n % 12 + 12) % 12]);
     return num_i(n / 12 - 1, e);
 }
-/* sin(2 pi k / 32) x 100 */
 static const int8_t SIN32[32] = {0, 20, 38, 56, 71, 83, 92, 98, 100, 98, 92, 83, 71, 56, 38, 20,
                                  0, -20, -38, -56, -71, -83, -92, -98, -100, -98, -92, -83, -71, -56, -38, -20};
 static int32_t sin100(uint32_t k) { return SIN32[k & 31u]; }
@@ -262,8 +264,6 @@ static void text_r(int32_t xr, int32_t y, const felucca_font_t *f, const char *s
 {
     cv_text(xr - text_w(f, s), y, f, s, c);
 }
-/* the y to draw f at so its capitals sit centred in rows top .. top + h - 1 (XS 3-11, S and B 2-12, M 3-18,
- * L 4-24) */
 static int32_t cap_y(int32_t top, int32_t h, const felucca_font_t *f)
 {
     int32_t c2 = f == &FONT_L ? 28 : f == &FONT_M ? 21 : 14;
@@ -287,14 +287,6 @@ static int upper_only(const char *s)
             return 0;
     return 1;
 }
-static int32_t pill(int32_t x, int32_t y, int32_t w, const char *s, uint16_t bg, uint16_t fg)
-{
-    if (!w)
-        w = text_w(&FONT_S, s) + 16;
-    cv_round(x, y, w, 20, 6, bg);
-    text_c(x + w / 2, y + 2, &FONT_S, s, fg);
-    return x + w;
-}
 static int32_t pill_o(int32_t x, int32_t y, int32_t w, const char *s, uint16_t c, uint16_t fg)
 {
     if (!w)
@@ -304,7 +296,6 @@ static int32_t pill_o(int32_t x, int32_t y, int32_t w, const char *s, uint16_t c
     text_c(x + w / 2, y + 2, &FONT_S, s, fg);
     return x + w;
 }
-/* s in lines of w pixels (at spaces), from y; the y after (draw 0: only measured) */
 static int32_t wrap_do(int32_t x, int32_t y, int32_t w, const felucca_font_t *f, const char *s, uint16_t c, int draw)
 {
     char line[48];
@@ -335,7 +326,6 @@ static int32_t wrap(int32_t x, int32_t y, int32_t w, const felucca_font_t *f, co
 {
     return wrap_do(x, y, w, f, s, c, 1);
 }
-/* text in parts: "KEYS play|REC record" draws a dot between the parts, "T3>P2" a chevron */
 #define SEP_W 13
 static int32_t segs_w(const felucca_font_t *f, const char *s)
 {
@@ -377,7 +367,6 @@ static int32_t segs(int32_t x, int32_t y, const felucca_font_t *f, const char *s
 }
 
 /* --------------------------------------------------------- the model --- */
-#define FLASH_MS 500u
 #define HDR_H 24
 #define MAIN_Y 24
 #define MAIN_H 120
@@ -393,40 +382,62 @@ static int sel_trk(void) { return proj.trk_sel < NALLTRK ? proj.trk_sel : 0; }
 static int is_aux(int t) { return t >= NTRK; }
 static int is_seqt(int t) { return t < NSEQT; }
 static int is_drum(int t) { return t < NTRK && proj.trk[t].par[TP_ENGINE] == EG_DRUMLINE; }
+static int is_fx(int t) { return t >= AUX_FX1; }
 static int cur_scene(void) { return seq.scene < NSCENE ? seq.scene : 0; }
 static int cur_pat(int t) { return is_seqt(t) ? seq.ppat[t] % NPATT : 0; }
 static tpat_t *tpat(int t) { return &pats.pat[is_seqt(t) ? t : 0][cur_pat(t)]; }
 static int playing(void) { return seq.playing; }
-static int recording(void) { return seq.rec || ui.rec_armed || ui.maestro_rec; }
-static int step_shown(int i) { return ui.bar * 16 + i; }   /* the bar's cell i: the pattern's step */
-static int page_is_play(int p)                       /* the keys play the track here */
+static int recording(void) { return seq.rec || seq.rec_wait || ui.rec_armed || ui.maestro_rec; }
+static int step_shown(int i) { return ui.bar * 16 + i; }
+static int home_held(void) { return ui.btn >> B_HOME & 1u; }
+static int pl_type(int t) { return is_aux(t) ? PL_OFF : proj.trk[t].par[TP_PLAYER] % NPL; }
+static int group_n(int g)
 {
-    return p >= P_ENGINE && p <= P_PLAYERS2;
+    int trk = sel_trk(), b = PAGE_BTN[g].btn;
+    if (b == B_EDIT)
+        return is_drum(trk) ? 3 : trk == AUX_PUNCH || trk == AUX_TAPE ? 1 : 2;
+    if (b == B_ARP)
+        return pl_type(trk) == PL_ARP ? 3 : 2;
+    return PAGE_BTN[g].n;
 }
-static int tp_page_param(int p, int k, int trk)      /* the TP_* a page's knob k edits, -1 none */
+/* the TP_* a page's knob k edits, -1 none */
+static int tp_page_param(int p, int k, int trk)
 {
     static const int8_t M[][4] = {
-        {TP_E1, TP_E2, TP_E3, TP_E4}, {TP_VMODE, TP_PORTA, TP_BEND, TP_VOLUME}, {TP_A, TP_D, TP_S, TP_R},
-        {TP_FA, TP_FD, TP_FS, TP_FR}, {TP_CUT, TP_RES, TP_FENV, TP_KTRK}, {TP_FTYPE, TP_SEND1, TP_SEND2, TP_SENDT},
-        {TP_LTYPE, TP_LSPEED, TP_LAMT, TP_LDEST}, {TP_LX, -1, -1, -1}, {TP_PLAYER, TP_P1, TP_P2, TP_P3},
-        {TP_P4, -1, -1, -1}, {TP_LEVEL, TP_PAN, TP_SEND1, TP_SEND2}};
+        {TP_E1, TP_E2, TP_E3, TP_E4}, {TP_VMODE, TP_PORTA, TP_BEND, TP_VOLUME}, {-1, -1, -1, -1},
+        {TP_A, TP_D, TP_S, TP_R}, {TP_FA, TP_FD, TP_FS, TP_FR}, {TP_CUT, TP_RES, TP_FENV, TP_KTRK},
+        {TP_FTYPE, TP_SEND1, TP_SEND2, TP_SENDT}, {TP_LTYPE, TP_LSPEED, TP_LAMT, TP_LDEST}, {TP_LX, TP_LX2, -1, -1},
+        {TP_PLAYER, TP_P1, TP_P2, TP_P3}, {TP_AP1, TP_AP2, TP_AP3, TP_AP4}, {TP_P4, -1, -1, -1},
+        {TP_SEND1, TP_SEND2, TP_PAN, TP_LEVEL}};
     if (p < P_ENGINE || p > P_MIX || k < 0 || k > 3)
         return -1;
-    if (is_aux(trk) && p < P_MIX) {                  /* an aux track's Engine page: its own four, page 2: TP_P1.. */
-        if (p == P_ENGINE && trk >= AUX_FX1)     /* an FX track: the effect, then its first three knobs */
-            return k == 0 ? TP_ENGINE : TP_E1 + k - 1;
+    if (is_aux(trk)) {
+        if (p == P_MIX)
+            return k == 3 ? TP_LEVEL : -1;
         if (p == P_ENGINE)
-            return TP_E1 + k;
-        if (p == P_PLAY && trk >= AUX_FX1) {     /* page 2: the fourth knob, high-pass, low-pass, the feed into FX II */
-            static const int8_t F2[4] = {TP_E4, TP_FENV, TP_CUT, TP_SEND2};
-            return k == 3 && trk != AUX_FX1 ? -1 : F2[k];
+            return trk == AUX_PUNCH && k ? -1 : TP_E1 + k;
+        if (p == P_PLAY && is_fx(trk)) {             /* an FX track's page 2: high-pass, low-pass, the feed into FX II */
+            static const int8_t F2[4] = {TP_FENV, TP_CUT, TP_SEND2, -1};
+            return k == 2 && trk != AUX_FX1 ? -1 : F2[k];
         }
         return -1;
     }
-    if (p == P_MIX && is_aux(trk))
-        return k == 0 ? TP_LEVEL : -1;
-    if (p == P_ENGINE && is_drum(trk))               /* a drum track: the shown sound's model, tune, tone, decay */
-        return TP_DRUM(ui.dsound % DL_NSOUND, k);
+    if (is_drum(trk)) {
+        int key = ui.dsound % DL_NSOUND;
+        if (p == P_ENGINE)
+            return TP_DRUM(key, DP_K1 + k);
+        if (p == P_PLAY) {
+            static const uint8_t K2[4] = {DP_MODEL, DP_RANDOM, DP_PAN, DP_VOLUME};
+            return TP_DRUM(key, K2[k]);
+        }
+        if (p == P_ENGINE3)
+            return k == 0 ? TP_DRUM(key, DP_MODE) : -1;
+    } else if (p == P_ENGINE3)
+        return -1;
+    if (p == P_PLAYERS2 && pl_type(trk) != PL_ARP)
+        return k == 0 ? TP_P4 : -1;
+    if (p == P_PLAYERS3 && pl_type(trk) != PL_ARP)
+        return -1;
     return M[p - P_ENGINE][k];
 }
 
@@ -457,14 +468,19 @@ static void alert_box(int kind)
     } else
         text_c(bx + 8, cap_y(by, 16, &FONT_B), &FONT_B, kind == AL_ASK ? "?" : kind == AL_NO ? "!" : "i", mark);
 }
+static void tempo_text(char *t)                      /* "120.0" */
+{
+    char *e = num_s(proj.tempo_x10 / 10u, t);
+    *e++ = '.';
+    num_s(proj.tempo_x10 % 10u, e);
+}
 static void draw_header(void)
 {
     char t[40];
-    int msg = plat_ms() < ui.msg_until, rec = recording(), ext = seq.ext, ask = ui.ask;
-    int tempo = (int)((proj.tempo_x10 + 5u) / 10u), cnt = seq.count_in;
+    int msg = plat_ms() < ui.msg_until, rec = recording(), ext = seq.ext, ask = ui.ask, cnt = seq.count_in;
     uint32_t h = hash_u(2166136261u, ui.page | (uint32_t)msg << 8 | (uint32_t)ui.dirty << 9 | (uint32_t)rec << 11 |
-                                         (uint32_t)ext << 12 | (uint32_t)ask << 14 | (uint32_t)tempo << 16);
-    h = hash_u(h, (uint32_t)cnt | (uint32_t)playing() << 8);
+                                         (uint32_t)ext << 12 | (uint32_t)ask << 14 | (uint32_t)proj.tempo_x10 << 16);
+    h = hash_u(h, (uint32_t)cnt | (uint32_t)playing() << 8 | (uint32_t)is_drum(sel_trk()) << 9);
     if (msg)
         h = hash_u(h, ui.msg_until ^ (uint32_t)ui.msg_no << 31);
     if (ask)
@@ -495,16 +511,19 @@ static void draw_header(void)
     } else {
         int32_t r = 232, x = 8;
         const char *bn = BTN_LABEL[PAGE_BTN[page_group(ui.page)].btn];
+        const char *pn = PAGE_NAME[ui.page];
         int32_t w = text_w(&FONT_XS, bn) + 6;
+        if (is_drum(sel_trk()) && ui.page == P_PLAY)
+            pn = "Key";
         cv_round(x, 6, w, 13, 2, K_DIM);
         cv_round(x + 1, 7, w - 2, 11, 1, K_BG);
         cv_text(x + 3, cap_y(6, 13, &FONT_XS), &FONT_XS, bn, K_DIM);
         x += w + 6;
-        cv_text(x, 4, &FONT_B, PAGE_NAME[ui.page], K_TEXT);
+        cv_text(x, 4, &FONT_B, pn, K_TEXT);
         if (ext)
             s_cat(t, "ext");
         else
-            num_s((uint32_t)tempo, t);
+            tempo_text(t);
         r -= text_w(&FONT_S, t);
         cv_text(r, 4, &FONT_S, t, K_TEXT);
         r -= 6;
@@ -523,7 +542,7 @@ static void draw_header(void)
 typedef struct {
     const char *name;
     char val[24];
-    int32_t num, max;                                /* the bar: num of max (max 0: no bar) */
+    int32_t num, max;
 } knob_t;
 static void kv(knob_t *k, const char *name, const char *val, int32_t num, int32_t max)
 {
@@ -546,23 +565,34 @@ static void kname(knob_t *k, const char *name, const char *const *names, int v, 
 {
     kv(k, name, names[clampi(v, 0, n - 1)], v, 0);
 }
-/* a track parameter's knob: its name and value as synth.c prints them */
-static void ktp(knob_t *k, int trk, int p)
+static const char *short_name(const char *n)        /* a knob name short enough for the strip */
 {
-    const tp_info_t *in = tp_info(p, proj.trk[trk].par[TP_ENGINE]);
-    char num[12], unit[6], v[24], *e;
-    int val = proj.trk[trk].par[p];
-    tp_text(p, val, proj.trk[trk].par[TP_ENGINE], num, unit);
-    e = s_cat(v, num);
+    return s_eq(n, "frequency") ? "FREQ" : s_eq(n, "modulation") ? "MOD" : s_eq(n, "feedback") ? "FDBK"
+           : s_eq(n, "envelope") ? "ENV" : s_eq(n, "keytrack") ? "KEYTRK" : s_eq(n, "contour") ? "CONTOUR" : n;
+}
+/* a track parameter's knob: its name and value as synth.c prints them (the value v, or the track's) */
+static void ktp_val(knob_t *k, int trk, int p, int v)
+{
+    const uint8_t *par = proj.trk[trk].par;
+    const tp_info_t *in = tp_info_par(p, par);
+    char num[12], unit[6], val[24], *e;
+    if (!in->name || !in->name[0] || s_eq(in->name, "-"))
+        return;
+    tp_text_par(p, v, par, num, unit);
+    e = s_cat(val, num);
     if (unit[0]) {
         if (unit[0] != '%')
             e = s_cat(e, " ");
         s_cat(e, unit);
     }
-    kv(k, in->name, v, val - in->lo, in->kind == PK_NAMES || in->kind == PK_SWITCH ? 0 : in->hi - in->lo);
+    kv(k, short_name(in->name), val, v - in->lo, in->kind == PK_NAMES || in->kind == PK_SWITCH ? 0 : in->hi - in->lo);
 }
-/* a step's value knobs (a step held on Steps) */
-static void step_len_text(int len, char *t)         /* quarter steps: "2", "2.5", "1.25"; 0: the pattern's */
+static void ktp(knob_t *k, int trk, int p)
+{
+    if (p >= 0 && p < NTP)
+        ktp_val(k, trk, p, proj.trk[trk].par[p]);
+}
+static void step_len_text(int len, char *t)         /* quarter steps: "2", "2.5"; 0: the pattern's */
 {
     static const char *const Q[4] = {"", ".25", ".5", ".75"};
     if (!len) {
@@ -585,16 +615,24 @@ static void cond_text(int c, char *t)
 }
 static const char *comp_val_text(int comp, int v, char *t)
 {
-    v = clampi(v, 0, 9);
     switch (comp) {
-    case SC_VELOCITY: return VEL_VAL[v];
-    case SC_RAMP_UP: case SC_RAMP_DOWN: case SC_RANDOM: return RAMP_VAL[v];
-    case SC_PORTAMENTO: return PORTA_VAL[v];
-    case SC_BEND: return BEND_VAL[v];
-    case SC_JUMP: return JUMP_VAL[v];
-    case SC_SKIP: return SKIP_VAL[v];
+    case SC_VELOCITY: return VEL_VAL[clampi(v, 0, 9)];
+    case SC_RAMP_UP: case SC_RAMP_DOWN: case SC_RANDOM: return RAMP_VAL[clampi(v, 0, 9)];
+    case SC_PORTAMENTO: return PORTA_VAL[clampi(v, 0, 9)];
+    case SC_BEND: return BEND_VAL[clampi(v, 0, 9)];
+    case SC_TONALITY: return TON_VAL[clampi(v, 0, 9)];
+    case SC_JUMP: return JUMP_VAL[clampi(v, 0, 9)];
+    case SC_SKIP_LOCK: case SC_SKIP_COMP: case SC_SKIP: {   /* "on 4", "not 4", "1st/4" of the cycle */
+        int n = (int)SK_N((uint32_t)v), m = (int)SK_MODE((uint32_t)v);
+        char *e;
+        if (n >= SC_RANDOM_VAL)
+            return "random";
+        e = s_cat(t, m == 0 ? "on " : m == 1 ? "not " : "1st of ");
+        num_s((uint32_t)n + 1u, e);
+        return t;
+    }
     default:
-        if (v == SC_RANDOM_VAL)
+        if (v >= SC_RANDOM_VAL)
             return "random";
         num_s((uint32_t)v + 1u, t);
         return t;
@@ -611,15 +649,23 @@ static void step_knobs(knob_t *k)
     t[0] = 0;
     cond_text(st->cond, t);
     kv(&k[2], "CHANCE", t, 0, 0);
-    if (st->comp)                                    /* a component on the step: K4 is its value */
-        kv(&k[3], COMP_NAME[st->comp % NSC], comp_val_text(st->comp, st->cval, t), st->cval, 0);
-    else {
+    {
         char *e = t;
         if (st->nudge > 0)
             e = s_cat(e, "+");
         num_i(st->nudge, e);
         kv(&k[3], "NUDGE", t, st->nudge + 12, 24);
     }
+}
+/* HOME + a step held: the strip shows the step's components and their values */
+static void comp_knobs(knob_t *k)
+{
+    const step_t *st = &tpat(sel_trk())->st[step_shown(ui.held_first)];
+    char t[16];
+    kv(&k[0], "COMP 1", st->comp ? COMP_NAME[st->comp % NSC] : "-", 0, 0);
+    kv(&k[1], "VALUE", st->comp ? comp_val_text(st->comp, st->cval, t) : "-", 0, 0);
+    kv(&k[2], "COMP 2", st->comp2 ? COMP_NAME[st->comp2 % NSC] : "-", 0, 0);
+    kv(&k[3], "VALUE", st->comp2 ? comp_val_text(st->comp2, st->cval2, t) : "-", 0, 0);
 }
 /* the lock editor: a step held + EDIT / ENV / FX / LFO: that page's four, with the lock's value ("-": none) */
 static void lock_knobs(knob_t *k)
@@ -629,23 +675,32 @@ static void lock_knobs(knob_t *k)
         int p = tp_page_param(pg, i, trk), ln;
         if (p < 0)
             continue;
-        ktp(&k[i], trk, p);                          /* (the name, the range) */
+        ktp(&k[i], trk, p);
+        if (!k[i].name)
+            continue;
         ln = lane_find(pats.lane, trk, cur_pat(trk), p);
-        if (ln < 0 || pats.lane[ln].val[step] == LOCK_NONE) {
-            kv(&k[i], k[i].name, "-", 0, 0);         /* no lock: the knob's own value plays */
-        } else {
-            char num[12], unit[6], *e;
-            tp_text(p, pats.lane[ln].val[step], proj.trk[trk].par[TP_ENGINE], num, unit);
-            e = s_cat(k[i].val, num);
-            if (unit[0])
-                s_cat(e, unit);
-            k[i].num = pats.lane[ln].val[step] - tp_info(p, proj.trk[trk].par[TP_ENGINE])->lo;
-        }
+        if (ln < 0 || pats.lane[ln].val[step] == LOCK_NONE)
+            kv(&k[i], k[i].name, "-", 0, 0);
+        else
+            ktp_val(&k[i], trk, p, pats.lane[ln].val[step]);
     }
 }
-static const char *fxk_name(const char *n)        /* an effect's knob name, short enough for the strip */
+static void tape_knob(knob_t *k, int i, int v)
 {
-    return s_eq(n, "frequency") ? "FREQ" : s_eq(n, "modulation") ? "MOD" : s_eq(n, "feedback") ? "FDBK" : n;
+    char t[12], *e;
+    if (i == 0)
+        kv(k, TAPE_KNOB[0], TAPE_PITCH[v * 5 / 128], v, 127);
+    else if (i == 1) {
+        e = num_s(50u + (uint32_t)v * 150u / 127u, t);
+        s_cat(e, "%");
+        kv(k, TAPE_KNOB[1], t, v, 127);
+    } else if (i == 2)
+        kn(k, TAPE_KNOB[2], 1 + v * 15 / 127, 16);
+    else {
+        e = num_s((uint32_t)v * 100u / 127u, t);
+        s_cat(e, "%");
+        kv(k, TAPE_KNOB[3], t, v, 127);
+    }
 }
 static void aux_engine_knobs(knob_t *k, int trk)
 {
@@ -654,53 +709,30 @@ static void aux_engine_knobs(knob_t *k, int trk)
         kname(&k[0], BRAIN_KNOB[0], BRAIN_MODE, par[TP_E1], 2);
         kname(&k[1], BRAIN_KNOB[1], NOTE_NAME, par[TP_E2], 12);
         kname(&k[2], BRAIN_KNOB[2], BS_NAME, par[TP_E3], NBS);
-        kname(&k[3], BRAIN_KNOB[3], ONOFF, par[TP_E4], 2);
+        kname(&k[3], BRAIN_KNOB[3], LINK_NAME, par[TP_E4], 9);
     } else if (trk == AUX_PUNCH) {
-        kname(&k[0], PUNCH_KNOB[0], ONOFF, par[TP_E1], 2);
+        kname(&k[0], "latch", ONOFF, par[TP_E1], 2);
     } else if (trk == AUX_TAPE) {
         for (int i = 0; i < 4; i++)
-            kn(&k[i], TAPE_KNOB[i], par[TP_E1 + i], 127);
+            tape_knob(&k[i], i, par[TP_E1 + i]);
     } else {
         int type = par[TP_ENGINE] % NFXT;
-        kname(&k[0], "effect", FXT_NAME, type, NFXT);
-        for (int i = 0; i < 3; i++)
-            kn(&k[1 + i], fxk_name(FXT_KNOB[type][i]), par[TP_E1 + i], 127);
-    }
-}
-static void aux_engine2_knobs(knob_t *k, int trk)
-{
-    const uint8_t *par = proj.trk[trk].par;
-    int type = par[TP_ENGINE] % NFXT;
-    kn(&k[0], fxk_name(FXT_KNOB[type][3]), par[TP_E4], 127);
-    kn(&k[1], FX2_KNOB[1], par[TP_FENV], 127);
-    kn(&k[2], FX2_KNOB[2], par[TP_CUT], 127);
-    if (trk == AUX_FX1)
-        kn(&k[3], FX2_KNOB[3], par[TP_SEND2], 127);
-    else
-        kv(&k[3], FX2_KNOB[3], "-", 0, 0);
-}
-static void players_knobs(knob_t *k, int trk)
-{
-    const uint8_t *par = proj.trk[trk].par;
-    int pl = par[TP_PLAYER] % NPL;
-    kname(&k[0], "PLAYER", PL_NAME, pl, NPL);
-    if (pl == PL_ARP) {
-        kname(&k[1], "SPEED", ARP_SPEED, par[TP_P1], 6);
-        kname(&k[2], "PATTERN", ARP_PAT, par[TP_P2], 5);
-        kn(&k[3], "RANGE", clampi(par[TP_P3], 1, 4), 4);
-    } else if (pl == PL_MAESTRO) {
-        kn(&k[1], "ROLL", par[TP_P1], 127);
-        kname(&k[2], "PATTERN", MAE_PAT, par[TP_P2], 4);
+        for (int i = 0; i < 4; i++)
+            kn(&k[i], short_name(FXT_KNOB[type][i]), par[TP_E1 + i] * 100 / 128, 99);
     }
 }
 static void page_knobs(knob_t *k)
 {
     int trk = sel_trk(), p = ui.page;
     tpat_t *tp = tpat(trk);
-    char t[16];
+    char t[16], *e;
     memset(k, 0, 4 * sizeof k[0]);
     if (ui.lockpg) {
         lock_knobs(k);
+        return;
+    }
+    if (p == P_STEPS && ui.cstep && is_seqt(trk)) {
+        comp_knobs(k);
         return;
     }
     if (p == P_STEPS && ui.held && is_seqt(trk)) {
@@ -709,9 +741,11 @@ static void page_knobs(knob_t *k)
     }
     switch (p) {
     case P_ARRANGE:
-        kn(&k[0], "TEMPO", (int)((proj.tempo_x10 + 5u) / 10u), 300);
-        kn(&k[1], "SWING", proj.swing, 100);
-        kname(&k[2], "GROOVE", GROOVE_NAME, proj.groove, NGROOVE);
+        tempo_text(t);
+        kv(&k[0], "TEMPO", t, (int)proj.tempo_x10 / 10 - 40, 180);
+        kname(&k[1], "GROOVE", GR_NAME, proj.groove, NGROOVE);
+        if (is_seqt(trk))
+            kn(&k[2], "AMOUNT", tp->groove, 0);
         kname(&k[3], "CLICK", METRO_NAME, proj.metronome, 3);
         break;
     case P_SONG: {
@@ -734,16 +768,16 @@ static void page_knobs(knob_t *k)
         kn(&k[0], "PATTERN", cur_pat(trk) + 1, NPATT);
         kn(&k[1], "LENGTH", tp->len, NSTEP);
         kname(&k[2], "SCALE", TS_NAME, tp->scale, NTS);
-        kn(&k[3], "SWING", tp->swing, 100);
+        kn(&k[3], "GROOVE", tp->groove, 0);
         break;
     case P_BAR:
         if (!is_seqt(trk))
             break;
         kn(&k[0], "QUANT", tp->quant, 100);
-        t[0] = 0;
-        step_len_text(tp->nlen, t);
-        kv(&k[1], "NOTE", t, tp->nlen, 16);
-        kname(&k[2], "GROOVE", GROOVE_NAME, tp->groove, NGROOVE);
+        e = num_s(tp->nlen, t);
+        s_cat(e, "%");
+        kv(&k[1], "NOTE", t, tp->nlen, 100);
+        kn(&k[2], "GROOVE", tp->groove, 0);
         kn(&k[3], "SHAPE", tp->shape, 100);
         break;
     case P_ENGINE:
@@ -754,39 +788,26 @@ static void page_knobs(knob_t *k)
                 ktp(&k[i], trk, tp_page_param(p, i, trk));
         break;
     case P_PLAY:
-        if (trk >= AUX_FX1)
-            aux_engine2_knobs(k, trk);
-        else if (!is_aux(trk))
-            for (int i = 0; i < 4; i++)
-                ktp(&k[i], trk, tp_page_param(p, i, trk));
-        break;
-    case P_PLAYERS:
-        if (!is_aux(trk))
-            players_knobs(k, trk);
-        break;
-    case P_PLAYERS2:
-        if (!is_aux(trk) && proj.trk[trk].par[TP_PLAYER] % NPL != PL_OFF)
-            kname(&k[0], "HOLD", ONOFF, proj.trk[trk].par[TP_P4] != 0, 2);
-        break;
-    case P_LFO2:
-        if (!is_aux(trk) && proj.trk[trk].par[TP_LTYPE] % NLT != LT_OFF) {
-            ktp(&k[0], trk, TP_LX);
-            k[0].name = LX_NAME[proj.trk[trk].par[TP_LTYPE] % NLT];
-        }
-        break;
-    case P_ENV: case P_ENV2: case P_FILTER: case P_SENDS: case P_LFO:
-        if (!is_aux(trk))
+        if (is_fx(trk)) {
+            const uint8_t *par = proj.trk[trk].par;
+            kn(&k[0], "HP", par[TP_FENV], 127);
+            kn(&k[1], "LP", par[TP_CUT], 127);
+            if (trk == AUX_FX1)
+                kn(&k[2], "TO FX II", par[TP_SEND2], 127);
+        } else if (!is_aux(trk))
             for (int i = 0; i < 4; i++)
                 ktp(&k[i], trk, tp_page_param(p, i, trk));
         break;
     case P_MIX:
-        ktp(&k[0], trk, TP_LEVEL);
-        if (!is_aux(trk)) {
-            ktp(&k[1], trk, TP_PAN);
-            ktp(&k[2], trk, TP_SEND1);
-            ktp(&k[3], trk, TP_SEND2);
-            k[2].name = "FX I";
-            k[3].name = "FX II";
+        if (is_aux(trk))
+            ktp(&k[3], trk, TP_LEVEL);
+        else {
+            ktp(&k[0], trk, TP_SEND1);
+            ktp(&k[1], trk, TP_SEND2);
+            ktp(&k[2], trk, TP_PAN);
+            ktp(&k[3], trk, TP_LEVEL);
+            k[0].name = "FX I";
+            k[1].name = "FX II";
         }
         break;
     case P_MASTER: case P_MASTER2: case P_MASTER3:
@@ -797,11 +818,16 @@ static void page_knobs(knob_t *k)
         break;
     case P_SETUP:
         kname(&k[0], "LIGHTS", LIGHTS_NAME, proj.lights, 3);
-        kname(&k[1], "CLOCK", ONOFF, proj.send_clock != 0, 2);   /* (MIDI out: clock, notes) */
+        kname(&k[1], "CLOCK", ONOFF, proj.send_clock != 0, 2);
         kname(&k[2], "NOTES", ONOFF, proj.send_notes != 0, 2);
         kv(&k[3], "CORES", proj.one_core ? "one" : "two", 0, 0);
         break;
-    default:
+    case P_STATUS: case P_ARRANGE + 100:
+        break;
+    default:                                         /* the sound pages: every knob through tp_info_par */
+        if (!is_aux(trk))
+            for (int i = 0; i < 4; i++)
+                ktp(&k[i], trk, tp_page_param(p, i, trk));
         break;
     }
 }
@@ -823,7 +849,7 @@ static void draw_knobs(void)
         h = hash_s(h, k[i].name);
         h = hash_u(h, (uint32_t)k[i].num << 8 | (uint32_t)(k[i].name != 0));
     }
-    h = hash_u(h, (uint32_t)now_touch);
+    h = hash_u(h, (uint32_t)now_touch | (uint32_t)ui.lockpg << 1);
     if (h == ui.sig[2])
         return;
     ui.sig[2] = h;
@@ -835,7 +861,8 @@ static void draw_knobs(void)
     cv_round(4, 0, 232, KNB_H - 2, 6, K_PANEL);
     for (i = 0; i < 4; i++) {
         int32_t x = (int32_t)i * 60, cx = x + 30, nw, nx;
-        int hot = now_touch && ui.touched == (int)i, lock = ui.lockpg && !s_eq(k[i].val, "-");   /* a lock: red */
+        int hot = now_touch && ui.touched == (int)i, lock = ui.lockpg && !s_eq(k[i].val, "-");
+        uint16_t vc = hot ? K_SEL : lock ? K_REC : K_TEXT;
         if (i)
             cv_rect(x, 10, 1, KNB_H - 22, K_LINE);
         if (!k[i].name)
@@ -843,18 +870,18 @@ static void draw_knobs(void)
         nw = text_w(&FONT_XS, k[i].name);
         if (nw > 46)
             nw = 46;
-        nx = cx - (nw + 9) / 2 + 9;                  /* the shade swatch, then the name */
+        nx = cx - (nw + 9) / 2 + 9;
         cv_round(nx - 9, 4, 7, 7, 2, K_DIM);
         cv_round(nx - 8, 5, 5, 5, 1, SHADE[i]);
         text_fit(nx, 0, &FONT_XS, k[i].name, 46, hot ? K_TEXT : K_DIM);
         if (upper_only(k[i].val) && text_w(&FONT_M, k[i].val) <= 56)
-            text_c(cx, cap_y(12, 28, &FONT_M), &FONT_M, k[i].val, hot ? K_SEL : lock ? K_REC : K_TEXT);
+            text_c(cx, cap_y(12, 28, &FONT_M), &FONT_M, k[i].val, vc);
         else if (text_w(&FONT_B, k[i].val) <= 54)
-            text_c(cx, cap_y(12, 28, &FONT_B), &FONT_B, k[i].val, hot ? K_SEL : lock ? K_REC : K_TEXT);
+            text_c(cx, cap_y(12, 28, &FONT_B), &FONT_B, k[i].val, vc);
         else if (text_w(&FONT_XS, k[i].val) <= 54)
-            text_c(cx, cap_y(12, 28, &FONT_XS), &FONT_XS, k[i].val, hot ? K_SEL : lock ? K_REC : K_TEXT);
+            text_c(cx, cap_y(12, 28, &FONT_XS), &FONT_XS, k[i].val, vc);
         else
-            text_fit(x + 3, cap_y(12, 28, &FONT_XS), &FONT_XS, k[i].val, 54, hot ? K_SEL : lock ? K_REC : K_TEXT);
+            text_fit(x + 3, cap_y(12, 28, &FONT_XS), &FONT_XS, k[i].val, 54, vc);
         if (k[i].max > 0) {
             int32_t bw = 44 * k[i].num / k[i].max;
             cv_round(cx - 22, 41, 44, 6, 3, K_LINE);
@@ -866,7 +893,7 @@ static void draw_knobs(void)
 }
 
 /* ------------------------------------------------- tag, footer, cards --- */
-static void track_crumb(char *t)                     /* "T3 prism>P2>S1" */
+static void track_crumb(char *t)
 {
     int trk = sel_trk();
     char *e = s_cat(t, TRACK_NAME[trk]);
@@ -874,9 +901,8 @@ static void track_crumb(char *t)                     /* "T3 prism>P2>S1" */
         e = s_cat(e, " ");
         e = s_cat(e, EG_NAME[proj.trk[trk].par[TP_ENGINE] % NENGINE]);
     }
-    if (is_seqt(trk)) {
+    if (is_seqt(trk))
         e = num_s((uint32_t)cur_pat(trk) + 1u, s_cat(e, ">P"));
-    }
     num_s((uint32_t)cur_scene() + 1u, s_cat(e, ">S"));
 }
 static void page_tag(char *t)
@@ -894,12 +920,17 @@ static void page_tag(char *t)
         break;
     case P_STEPS:
         track_crumb(t);
-        if (ui.lockpg) {                             /* "T3 prism>P2>step 5>Filter locks" */
+        if (ui.lockpg) {
             e = num_s((uint32_t)step_shown(ui.held_first) + 1u, s_cat(t + s_len(t), ">step "));
             s_cat(s_cat(e, ">"), PAGE_NAME[ui.lockpg - 1]);
-        } else if (ui.held)
+        } else if (ui.held || ui.cstep)
             num_s((uint32_t)step_shown(ui.held_first) + 1u, s_cat(t + s_len(t), ">step "));
         else if (is_drum(sel_trk()))
+            s_cat(s_cat(t + s_len(t), ">"), DL_SOUND_NAME[ui.dsound % DL_NSOUND]);
+        break;
+    case P_ENGINE: case P_PLAY: case P_ENGINE3:
+        track_crumb(t);
+        if (is_drum(sel_trk()))
             s_cat(s_cat(t + s_len(t), ">"), DL_SOUND_NAME[ui.dsound % DL_NSOUND]);
         break;
     case P_MASTER: case P_MASTER2: case P_MASTER3: case P_SETUP: case P_STATUS:
@@ -913,11 +944,11 @@ static void page_tag(char *t)
 static void draw_tag(void)
 {
     char t[80], *v = t;
-    int g = page_group(ui.page), n = PAGE_BTN[g].n, d = ui.page - PAGE_BTN[g].first;
+    int g = page_group(ui.page), n = group_n(g), d = ui.page - PAGE_BTN[g].first;
     int32_t r = 232, x, w;
     uint32_t h;
     page_tag(t);
-    h = hash_s(hash_u(2166136261u, ui.page), t);
+    h = hash_s(hash_u(2166136261u, ui.page | (uint32_t)n << 8), t);
     if (h == ui.sig[3])
         return;
     ui.sig[3] = h;
@@ -971,8 +1002,17 @@ static void page_footer(char *t)
         s_cat(t, "WHITE steps|PLAY play|hold a button: help");
         return;
     }
-    if (ui.btn >> B_HOME & 1u) {
-        s_cat(t, "HOME+KEYS punch fx|REC undo|PLAY redo");
+    if (home_held()) {
+        if ((ui.page == P_STEPS || ui.page == P_BAR) && ui.cstep)
+            s_cat(t, "WHITE component|BLACK value");
+        else if (ui.page == P_STEPS || ui.page == P_BAR)
+            s_cat(t, "HOME+WHITE step: component|REC undo|PLAY redo");
+        else if (ui.page == P_ARRANGE)
+            s_cat(t, "HOME+WHITE cue scene|REC undo|PLAY redo");
+        else if (ui.page == P_MIX)
+            s_cat(t, "HOME+BLACK mute|REC undo|PLAY redo");
+        else
+            s_cat(t, "HOME+KEYS punch fx|REC undo|PLAY redo");
         return;
     }
     switch (ui.page) {
@@ -982,57 +1022,59 @@ static void page_footer(char *t)
     case P_SONG:
         s_cat(t, "WHITE add scene|PLAY song");
         break;
-    case P_STEPS: case P_BAR:
+    case P_BAR:
+        s_cat(t, is_seqt(trk) ? "BLACK scale" : "ALGO track: no steps here");
+        break;
+    case P_STEPS:
         if (!is_seqt(trk))
             s_cat(t, "ALGO track: no steps here");
         else if (ui.lockpg)
             s_cat(t, "KNOBS lock|SAVE clear locks|let go: back");
+        else if (ui.held && is_drum(trk))
+            s_cat(t, "BLACK sounds|OCT nudge|EDIT ENV FX LFO lock");
         else if (ui.held)
-            s_cat(t, "BLACK component|WHITE length|EDIT ENV FX LFO lock");
+            s_cat(t, "WHITE length|OCT nudge|EDIT ENV FX LFO lock");
         else if (ui.rec_armed)
             s_cat(t, "KEYS write step|OCT cursor|REC off");
-        else if (trk == AUX_BRAIN)
-            s_cat(t, "WHITE steps|BLACK degree");
         else if (is_drum(trk))
-            s_cat(t, "WHITE steps|BLACK sound|hold: edit");
+            s_cat(t, "WHITE steps|BLACK sound|HOME+WHITE component");
         else
-            s_cat(t, "WHITE steps|BLACK track|hold: edit");
+            s_cat(t, "WHITE steps|BLACK track|HOME+WHITE component");
         break;
     case P_MIX:
-        s_cat(t, "BLACK track");
+        s_cat(t, "BLACK track|hold: solo");
         break;
     case P_MASTER: case P_MASTER2: case P_MASTER3: case P_SETUP: case P_STATUS:
         break;
     default:
         if (trk == AUX_BRAIN)
-            s_cat(t, "KEYS degree");
+            s_cat(t, ui.page == P_PLAY ? "BLACK route track" : "KEYS chord");
         else if (trk == AUX_PUNCH)
             s_cat(t, "KEYS fx|REC record");
         else if (trk == AUX_TAPE)
             s_cat(t, "WHITE segment|REC record");
         else if (is_aux(trk))
-            s_cat(t, "KEYS play T1");
+            s_cat(s_cat(t, "KEYS play "), TRACK_NAME[ui.last_inst % NTRK]);
         else if (ui.maestro_rec)
             s_cat(t, "KEYS the chord|REC cancel");
-        else if (ui.page == P_PLAYERS && proj.trk[trk].par[TP_PLAYER] % NPL == PL_MAESTRO)
+        else if (ui.page == P_PLAYERS && pl_type(trk) == PL_MAESTRO)
             s_cat(t, "KEYS play|REC record chord");
         else if (ui.rec_armed)
             s_cat(t, "KEYS write step|OCT cursor|REC off");
         else
-            s_cat(t, seq.rec ? "KEYS play|REC stop" : "KEYS play|REC record");
+            s_cat(t, seq.rec ? "KEYS play|REC held: record" : "KEYS play|REC held: record");
         break;
     }
 }
-/* the encoders' line: what turning SELECT, ALGORITHM, PRESETS changes here */
 static void enc_line(char *t)
 {
-    int g = page_group(ui.page), n = PAGE_BTN[g].n, p = ui.page, trk = sel_trk();
+    int g = page_group(ui.page), n = group_n(g), p = ui.page, trk = sel_trk();
     char *e = t;
     *t = 0;
     if (ui.ask || (lst.open && lst.n) || ui.card)
         return;
-    if (ui.btn >> B_HOME & 1u) {
-        s_cat(t, "SELECT tempo|PRESET scene");
+    if (home_held()) {
+        s_cat(t, "SELECT tempo|PRESET scene|KNOBS fine");
         return;
     }
     if (n > 1)
@@ -1043,8 +1085,9 @@ static void enc_line(char *t)
         const char *a = p == P_ARRANGE ? "scene" : p == P_SONG ? "slot"
                         : (p == P_STEPS || p == P_BAR) && is_drum(trk) ? "sound"
                         : (p == P_STEPS || p == P_BAR) && is_seqt(trk) ? "pattern"
+                        : (p == P_ENGINE || p == P_PLAY || p == P_ENGINE3) && is_drum(trk) ? "key"
                         : p == P_ENGINE && !is_aux(trk) ? "preset"
-                        : p == P_ENGINE && trk >= AUX_FX1 ? "effect"
+                        : p == P_ENGINE && is_fx(trk) ? "effect"
                         : p == P_MIX ? "track" : 0;
         if (a)
             s_cat(s_cat(e, *t ? "|PRESET " : "PRESET "), a);
@@ -1235,21 +1278,23 @@ static void draw_footer(void)
 #define PG(p) (1u << (p))
 #define PG_ANY 0xFFFFFFFFu
 #define PG_STEPS (PG(P_STEPS) | PG(P_BAR))
-#define PG_SOUND (PG(P_ENGINE) | PG(P_PLAY) | PG(P_ENV) | PG(P_ENV2) | PG(P_FILTER) | PG(P_SENDS) | PG(P_LFO) | PG(P_LFO2))
+#define PG_SOUND (PG(P_ENGINE) | PG(P_PLAY) | PG(P_ENGINE3) | PG(P_ENV) | PG(P_ENV2) | PG(P_FILTER) | PG(P_SENDS) | \
+                  PG(P_LFO) | PG(P_LFO2))
 static const struct { uint8_t btn; uint32_t pages; const char *title, *l1, *l2; } CARD[] = {
     {B_SEQ, PG_ANY, "Steps", "The bar's 16 steps on the white keys. A step toggles the notes.",
-     "Hold a step to see it; a black key adds a component."},
+     "Hold HOME and a step: a white key adds a component."},
     {B_EDIT, PG(P_STEPS), "Lock", "With a step held, EDIT, ENV, FX or LFO show that page's knobs.",
      "Turn one to lock a value on the step. SAVE clears its locks."},
     {B_EDIT, PG_ANY, "Engine", "The track's engine and its four knobs. PRESETS: the next sound.",
      "SEL lists engines, presets, scramble and reset. Page 2: Play."},
-    {B_ENV, PG_ANY, "Envelope", "Attack, decay, sustain and release of the amp.", "Page 2 is the filter's envelope."},
+    {B_ENV, PG_ANY, "Envelope", "Attack, decay, sustain and release of the amp.",
+     "Page 2 is the filter's envelope. Drums: funk, attack, random, length."},
     {B_FX, PG_ANY, "Filter", "Cutoff, resonance, envelope amount and key tracking.",
      "Page 2: the filter type and the sends to FX I, FX II and tape."},
-    {B_LFO, PG_ANY, "LFO", "Type, speed, amount and destination.", "Page 2 has the type's own setting."},
+    {B_LFO, PG_ANY, "LFO", "Type, then its first three knobs.", "Page 2 has the type's fourth and fifth."},
     {B_ARP, PG_ANY, "Players", "Arp, maestro or hold on the track's keys.",
      "With maestro, REC records the chord you hold next. A key plays it."},
-    {B_GLO, PG_ANY, "Mix", "Level, pan and sends of the track. Black keys pick a track.",
+    {B_GLO, PG_ANY, "Mix", "Sends, pan and level of the track. Black keys pick a track, held: solo.",
      "SELECT: Master, Setup and Status. SEL has the projects."},
     {B_HOME, PG_ANY, "Arrange", "Each track's pattern in the scene. White keys: scenes, black: mutes.",
      "Hold HOME + a key: punch-in. HOME + REC undoes, HOME + PLAY redoes."},
@@ -1260,16 +1305,16 @@ static const struct { uint8_t btn; uint32_t pages; const char *title, *l1, *l2; 
     {B_SAVE, PG_SOUND, "Save", "Tap to save the project.",
      "Hold SAVE and press a white key: the sound as that user preset."},
     {B_SAVE, PG_ANY, "Save", "Tap to save the project.", "Hold SAVE and press white key 1 to 4 to save to that slot."},
-    {B_REC, PG(P_PLAYERS) | PG(P_PLAYERS2), "Record", "With maestro, the chord you hold next becomes its chord.",
-     "Else: playing, the keys write steps; stopped, step by step."},
-    {B_REC, PG_ANY, "Record", "Playing: the keys write steps as you play. Stopped: step record.",
-     "A key writes the cursor's step. REC then PLAY counts in."},
+    {B_REC, PG(P_PLAYERS) | PG(P_PLAYERS2) | PG(P_PLAYERS3), "Recording",
+     "With maestro, the chord you hold next becomes its chord.", "Else: hold it and play; stopped, a tap arms step record."},
+    {B_REC, PG_ANY, "Recording", "Playing: hold it and play; with PLAY it stays on.",
+     "Stopped: a tap arms step record; with PLAY it records live."},
     {B_PLAY, PG(P_SONG), "Play", "Plays the song from slot 1. PLAY again stops.", "HOME + PLAY redoes."},
     {B_PLAY, PG_ANY, "Play", "Starts and stops. Twice quickly: from the top.", "HOME + PLAY redoes."},
-    {B_OCTDN, PG_STEPS, "Bar", "Shows the bar before. Step record: the cursor back a step.",
-     "Hold both for 5 seconds for update mode."},
-    {B_OCTUP, PG_STEPS, "Bar", "Shows the next bar. Step record: the cursor on a step.",
-     "Hold both for 5 seconds for update mode."},
+    {B_OCTDN, PG_STEPS, "Bar", "Shows the bar before. A step held: nudges it earlier.",
+     "Step record: the cursor back. Hold both for 5 seconds for update mode."},
+    {B_OCTUP, PG_STEPS, "Bar", "Shows the next bar. A step held: nudges it later.",
+     "Step record: the cursor on. Hold both for 5 seconds for update mode."},
     {B_OCTDN, PG_ANY, "Octave", "The keys an octave down.", "Hold both for 5 seconds for update mode."},
     {B_OCTUP, PG_ANY, "Octave", "The keys an octave up.", "Hold both for 5 seconds for update mode."},
 };
@@ -1284,7 +1329,7 @@ static int card_find(int btn)
 static void draw_card(void)
 {
     int i = card_find(ui.card - 1);
-    uint32_t h = hash_u(2166136261u, 0xCA000u + ui.card + ((uint32_t)ui.page << 8));
+    uint32_t h = hash_u(hash_u(2166136261u, 0xCAu), ui.card + ((uint32_t)ui.page << 8));
     int32_t x, y;
     if (h == ui.sig[1])
         return;
@@ -1330,7 +1375,7 @@ static void list_add(const char *name, const char *val, int kind, int id)
     lst.row[lst.n].id = (uint8_t)id;
     lst.n++;
 }
-static void proj_slot_text(int slot, char *t)        /* "1: Summer", "2: empty" */
+static void proj_slot_text(int slot, char *t)
 {
     char *e = num_s((uint32_t)slot + 1u, t);
     e = s_cat(e, ": ");
@@ -1344,11 +1389,27 @@ static void proj_slot_text(int slot, char *t)        /* "1: Summer", "2: empty" 
 }
 static void list_build(void)
 {
-    int keep = ui.page, g = page_group(keep), f = PAGE_BTN[g].first, n = PAGE_BTN[g].n, trk = sel_trk();
+    int keep = ui.page, g = page_group(keep), f = PAGE_BTN[g].first, n = group_n(g), trk = sel_trk();
     knob_t k[4];
-    static char slot_t[24], fol_t[24];
+    static char slot_t[24], fol_t[24], nm[NTRK][16], rm[SN][12];
     lst.n = 0;
-    if (keep >= P_MIX)                               /* GLO: the list of the page alone (six pages of knobs is too many) */
+    if (keep == P_STEPS && ui.held && is_seqt(trk)) {   /* a step held + SEL: its notes, to remove */
+        const step_t *st = &tpat(trk)->st[step_shown(ui.held_first)];
+        for (int i = 0; i < SN && st->note[i]; i++) {
+            char *e = s_cat(rm[i], "REMOVE ");
+            if (is_drum(trk))
+                s_cat(e, DL_SOUND_NAME[(st->note[i] - 1) % DL_NSOUND]);
+            else if (trk == AUX_PUNCH)
+                s_cat(e, PX_VALID(st->note[i] - 1) ? PUNCH_NAME[(st->note[i] - 1) & 15] : "fx");
+            else if (trk == AUX_TAPE)
+                num_s((uint32_t)st->note[i], s_cat(e, "segment "));
+            else
+                note_name(st->note[i], e);
+            list_add(rm[i], 0, LK_ACTION, A_REMOVE_NOTE);
+        }
+        return;
+    }
+    if (keep >= P_MIX)
         f = keep, n = 1;
     for (int p = f; p < f + n; p++) {
         ui.page = (uint8_t)p;
@@ -1382,13 +1443,14 @@ static void list_build(void)
         list_add(ACTION_NAME[A_DELETE_SLOT], 0, LK_ACTION, A_DELETE_SLOT);
         list_add(ACTION_NAME[A_CLEAR_SONG], 0, LK_ACTION, A_CLEAR_SONG);
         list_add(ACTION_NAME[A_PLAY_SONG], 0, LK_ACTION, A_PLAY_SONG);
-    } else if (keep >= P_ENGINE && keep <= P_PLAYERS2) {
-        if (trk == AUX_BRAIN) {                      /* each track: follows the brain how */
+    } else if (keep >= P_ENGINE && keep <= P_PLAYERS3) {
+        if (trk == AUX_BRAIN) {
             for (int t = 0; t < NTRK; t++) {
-                static char nm[NTRK][16];        /* "T3 FOLLOWS" (ui.c list_follow_trk reads the digit) */
                 s_cat(num_s((uint32_t)t + 1u, s_cat(nm[t], "T")), " FOLLOWS");
                 list_add(nm[t], FOLLOW_NAME[proj.trk[t].par[TP_BRAIN] % 3], LK_PICK, A_FOLLOW);
             }
+        } else if (is_fx(trk)) {
+            list_add(ACTION_NAME[A_EFFECT], FXT_NAME[ui.pick_fx % NFXT], LK_PICK, A_EFFECT);
         } else if (!is_aux(trk)) {
             list_add(ACTION_NAME[A_ENGINE], EG_NAME[ui.pick_engine % NENGINE], LK_PICK, A_ENGINE);
             if (NPRESETS > 0)
@@ -1411,6 +1473,7 @@ static void list_build(void)
         list_add(ACTION_NAME[A_LOAD_PROJ], slot_t, LK_PICK, A_LOAD_PROJ);
         list_add(ACTION_NAME[A_NEW_PROJ], 0, LK_ACTION, A_NEW_PROJ);
         list_add(ACTION_NAME[A_USB_AUDIO], USBA_NAME[proj.usb_full & 1u], LK_PICK, A_USB_AUDIO);
+        list_add(ACTION_NAME[A_COUNT_IN], ONOFF[proj.rsv[0] & 1u], LK_PICK, A_COUNT_IN);   /* (rsv[0]: the count-in) */
     }
     if (lst.sel >= lst.n)
         lst.sel = (uint8_t)(lst.n ? lst.n - 1 : 0);
@@ -1464,7 +1527,7 @@ static void list_paint(int32_t oy)
 }
 static void draw_list(void)
 {
-    uint32_t h = hash_u(2166136261u, 0x4C000u | lst.sel | (uint32_t)lst.top << 8), i;
+    uint32_t h = hash_u(hash_u(2166136261u, 0x4Cu), lst.sel | (uint32_t)lst.top << 8), i;
     list_build();
     h = hash_u(h, lst.n);
     for (i = 0; i < lst.n; i++) {
@@ -1485,7 +1548,6 @@ static void draw_list(void)
 }
 
 /* ------------------------------------------------------- the pages --- */
-/* a band's hash, then its drawing: begin_main() returns 0 when nothing changed */
 static int begin_main(uint32_t h)
 {
     if (h == ui.sig[1])
@@ -1506,7 +1568,8 @@ static uint32_t hash_pat(uint32_t h, const tpat_t *p)
 static void draw_arrange(void)
 {
     int sc = cur_scene(), cue = seq.cue;
-    uint32_t h = hash_u(2166136261u, 0xA0000u | (uint32_t)sc | (uint32_t)cue << 8 | (uint32_t)playing() << 16);
+    uint32_t h = hash_u(hash_u(2166136261u, 0xA0u), (uint32_t)sc | (uint32_t)cue << 8 | (uint32_t)playing() << 16 |
+                                          (uint32_t)sel_trk() << 20);
     char t[16];
     for (int tr = 0; tr < NSEQT; tr++)
         h = hash_u(h, (uint32_t)seq.ppat[tr] | (uint32_t)eng_step[tr] << 8 | (uint32_t)(seq.mute >> tr & 1u) << 16 |
@@ -1518,19 +1581,19 @@ static void draw_arrange(void)
     for (int tr = 0; tr < NSEQT; tr++) {
         int32_t y = 2 + tr * 10 + (tr >= NTRK ? 4 : 0);
         int muted = seq.mute >> tr & 1u, pt = seq.ppat[tr] % NPATT, len = tpat(tr)->len, pos = eng_step[tr];
-        uint16_t ink = muted ? K_FAINT : K_TEXT;
+        uint16_t ink = muted ? K_FAINT : K_DIM;
         char nm[8];
         if (tr < NTRK)
             num_s((uint32_t)tr + 1u, nm);
         else
             s_cat(nm, tr == AUX_BRAIN ? "BR" : tr == AUX_PUNCH ? "PU" : "TP");
-        text_r(22, y - 3, &FONT_XS, nm, tr == sel_trk() ? K_TEXT : muted ? K_FAINT : K_DIM);
+        text_r(22, y - 3, &FONT_XS, nm, tr == sel_trk() ? K_TEXT : ink);
         num_s((uint32_t)pt + 1u, s_cat(t, "P"));
         cv_round(27, y, 20, 8, 3, muted ? K_LINE : K_PANEL2);
-        text_c(37, y - 3, &FONT_XS, t, ink);
-        cv_rect(52, y + 3, 96, 2, muted ? K_LINE : K_PANEL2);   /* the pattern's length, its playhead */
+        text_c(37, y - 3, &FONT_XS, t, muted ? K_FAINT : K_TEXT);
+        cv_rect(52, y + 3, 96, 2, K_PANEL2);
         if (len > 0 && len <= NSTEP)
-            cv_rect(52, y + 3, 96 * len / NSTEP, 2, muted ? K_LINE : K_LINE);
+            cv_rect(52, y + 3, 96 * len / NSTEP, 2, muted ? K_LINE : K_NOW_T);
         if (playing() && !muted && len > 0)
             cv_round(52 + 94 * (pos % len) / (len > 1 ? len - 1 : 1), y + 1, 3, 6, 1, K_NOW);
         if (muted)
@@ -1544,7 +1607,7 @@ static void draw_arrange(void)
         num_s((uint32_t)cue + 1u, t);
         text_c(204, 62, &FONT_B, t, K_TEXT);
     }
-    for (int i = 0; i < NSCENE; i++) {              /* the 16 scenes: used ones filled, the current ringed */
+    for (int i = 0; i < NSCENE; i++) {
         int32_t x = 176 + (i % 8) * 7, y = 92 + (i / 8) * 9;
         cv_round(x, y, 5, 6, 1, pats.scene[i].used ? (i == sc ? K_NOW : K_DIM) : K_LINE);
         if (i == cue && cue != sc)
@@ -1553,12 +1616,11 @@ static void draw_arrange(void)
     cv_blit(0, MAIN_Y);
 }
 
-/* Song: the chain of scene slots, 16 to a screen, the cursor ringed, the slot playing teal */
 static void draw_song(void)
 {
     const song_t *sg = &pats.song;
     int cur = ui.name_slot <= sg->len ? ui.name_slot : sg->len, top = (cur / 16) * 16, pp = seq.song_pos;
-    uint32_t h = hash_u(2166136261u, (5u << 16) | (uint32_t)cur | (uint32_t)sg->len << 8 | (uint32_t)sg->loop << 16 |
+    uint32_t h = hash_u(hash_u(2166136261u, 0x50u), (uint32_t)cur | (uint32_t)sg->len << 8 | (uint32_t)sg->loop << 16 |
                                           (uint32_t)(seq.song_on && playing() ? pp + 1 : 0) << 20);
     char t[16];
     for (int i = top; i < top + 16 && i < sg->len; i++)
@@ -1574,7 +1636,7 @@ static void draw_song(void)
     for (int i = top; i < top + 16 && i <= sg->len; i++) {
         int32_t x = 8 + (i - top) % 4 * 57, y = 6 + (i - top) / 4 * 27;
         int on = seq.song_on && playing() && i == pp;
-        if (i == sg->len) {                          /* the end: an outlined "end" / "loop" cell */
+        if (i == sg->len) {
             cv_frame(x, y, 52, 22, 5, i == cur ? K_SEL : K_LINE, K_BG);
             text_c(x + 26, y + 3, &FONT_XS, sg->loop ? "loop" : "end", K_DIM);
             continue;
@@ -1596,46 +1658,33 @@ static void draw_song(void)
     cv_blit(0, MAIN_Y);
 }
 
-/* Steps: the remembered notes and the bars' dots, then the bar's 16 cells */
+/* Steps: what a press writes and the bars' squares, then the bar's 16 cells */
 #define ST_X 4
 #define ST_CW 29
 #define ST_Y 22
 #define ST_CH 46
-static void cell_notes(const step_t *st, int drum, char *t)
+/* a step's first line of text: the notes (two a line), a drum's sounds (the shown one first), a punch effect, a
+ * tape segment, a brain chord */
+static int step_on(const step_t *st, int trk)       /* the cell is "on" for the sound shown (drums) or any note */
 {
-    char *e = t;
-    *t = 0;
-    if (drum)                                        /* the shown sound first, when the step has it */
-        for (int i = 0; i < SN; i++)
-            if (st->note[i] == ui.dsound + 1) {
-                s_cat(t, DL_SOUND_NAME[ui.dsound % DL_NSOUND]);
-                return;
-            }
-    if (sel_trk() == AUX_BRAIN && st->note[0]) {     /* a brain step: the degree, 60 = 0 */
-        int d = st->note[0] - 60;
-        if (d > 0)
-            e = s_cat(e, "+");
-        num_i(d, e);
-        return;
+    if (is_drum(trk)) {
+        for (int k = 0; k < SN; k++)
+            if (st->note[k] == ui.dsound + 1)
+                return 1;
+        return 0;
     }
-    for (int i = 0; i < SN && st->note[i]; i++) {
-        if (i)
-            e = s_cat(e, " ");
-        if (drum)
-            e = s_cat(e, DL_SOUND_NAME[(st->note[i] - 1) % DL_NSOUND]);
-        else
-            e = note_name(st->note[i], e);
-    }
+    return !step_empty(st);
 }
 static void draw_steps(void)
 {
     int trk = sel_trk(), drum = is_drum(trk), pt = cur_pat(trk), ph = eng_step[trk];
     const tpat_t *tp = tpat(trk);
-    uint32_t h = hash_u(2166136261u, 0x57000u | (uint32_t)trk | (uint32_t)pt << 4 | (uint32_t)ui.bar << 8 |
+    uint32_t h = hash_u(hash_u(2166136261u, 0x57u), (uint32_t)trk | (uint32_t)pt << 4 | (uint32_t)ui.bar << 8 |
                                           (uint32_t)ui.held << 10 | (uint32_t)ui.dsound << 26);
     char t[40];
     h = hash_u(h, (uint32_t)ph | (uint32_t)playing() << 8 | (uint32_t)ui.rec_armed << 9 | (uint32_t)ui.cursor << 16 |
-                      (uint32_t)ui.lockpg << 24);
+                      (uint32_t)ui.lockpg << 24 | (uint32_t)(seq.rec_wait != 0) << 30);
+    h = hash_u(h, ui.cstep | (uint32_t)ui.rem_fx << 16 | (uint32_t)ui.rem_seg << 24 | (uint32_t)(ui.frame / 8 & 1u) << 31);
     h = hash_pat(h, tp);
     for (int i = 0; i < 4; i++)
         h = hash_u(h, ui.rem[i]);
@@ -1653,17 +1702,21 @@ static void draw_steps(void)
         h = hash_u(h, step_has_lock(pats.lane, trk, pt, ui.bar * 16 + i));
     if (!begin_main(h))
         return;
-    /* the top line: what a press writes (the remembered notes, the drum sound), the bars */
     if (drum)
         s_cat(s_cat(t, "sound: "), DL_SOUND_NAME[ui.dsound % DL_NSOUND]);
-    else if (trk == AUX_BRAIN)
-        s_cat(t, "steps: the brain's degree");
-    else if (trk == AUX_PUNCH)
-        s_cat(t, "steps: punch-in fx");
-    else if (trk == AUX_TAPE)
-        s_cat(t, "steps: tape segments");
-    else {
-        char *e = s_cat(t, "notes: ");
+    else if (trk == AUX_PUNCH) {
+        char *e = s_cat(t, "fx: ");
+        if (ui.rem_fx && PX_VALID(ui.rem_fx - 1))
+            s_cat(s_cat(e, PUNCH_NAME[(ui.rem_fx - 1) & 15]), ui.rem_fx - 1 >= PX_MEL ? " (melodic)" : " (drums)");
+        else
+            s_cat(e, "play a key on EDIT first");
+    } else if (trk == AUX_TAPE) {
+        if (ui.rem_seg)
+            num_s((uint32_t)ui.rem_seg, s_cat(t, "segment: "));
+        else
+            s_cat(t, "segment: play a key on EDIT first");
+    } else {
+        char *e = s_cat(t, trk == AUX_BRAIN ? "chord: " : "notes: ");
         for (int i = 0; i < ui.nrem && i < SN; i++) {
             if (i)
                 e = s_cat(e, " ");
@@ -1673,7 +1726,7 @@ static void draw_steps(void)
     cv_text(ST_X + 2, 0, &FONT_XS, t, K_DIM);
     {
         int nb = (tp->len + 15) / 16, pb = ph / 16;
-        for (int b = 0; b < NBAR; b++) {            /* the bars: the one shown ringed, the one playing teal */
+        for (int b = 0; b < NBAR; b++) {
             int32_t x = 176 + b * 14;
             uint16_t c = b < nb ? K_DIM : K_LINE;
             cv_round(x, 3, 10, 8, 2, b == pb && playing() ? K_NOW : c);
@@ -1684,54 +1737,66 @@ static void draw_steps(void)
         }
     }
     for (int i = 0; i < 16; i++) {
-        int s = ui.bar * 16 + i, in = s < tp->len, held = ui.held >> i & 1u, on;
+        int s = ui.bar * 16 + i, in = s < tp->len, held = (ui.held | ui.cstep) >> i & 1u, on;
         const step_t *st = &tp->st[s];
         int32_t x = ST_X + (i % 8) * ST_CW, y = ST_Y + (i / 8) * (ST_CH + 4);
-        uint16_t bg;
-        on = drum ? 0 : !step_empty(st);
-        if (drum)
-            for (int k = 0; k < SN; k++)
-                on |= st->note[k] == ui.dsound + 1;
+        uint16_t bg, fg;
+        on = step_on(st, trk);
         bg = !in ? K_BG : on ? K_PANEL2 : K_PANEL;
         if (playing() && s == ph && in)
             bg = on ? K_NOW : K_NOW_T;
+        fg = bg == K_NOW ? K_BG : K_TEXT;
         cv_round(x, y, ST_CW - 2, ST_CH, 4, bg);
         if (!in)
             cv_frame(x, y, ST_CW - 2, ST_CH, 4, K_LINE, K_BG);
         if (held)
             cv_frame(x, y, ST_CW - 2, ST_CH, 4, K_SEL, bg), cv_frame(x + 1, y + 1, ST_CW - 4, ST_CH - 2, 3, K_SEL, bg);
-        if (ui.rec_armed && s == ui.cursor)
+        if ((ui.rec_armed && s == ui.cursor) || (seq.rec_wait && s == 0 && (ui.frame / 8 & 1u)))
             cv_frame(x, y, ST_CW - 2, ST_CH, 4, K_REC, bg);
         num_s((uint32_t)s + 1u, t);
         cv_text(x + 3, y - 1, &FONT_XS, t, bg == K_NOW ? K_BG : K_DIM);
-        if (drum && !step_empty(st) && !on)           /* another sound on the step: a small mark */
+        if (drum && !step_empty(st) && !on)
             cv_round(x + ST_CW - 9, y + 3, 4, 4, 2, K_FAINT);
         if (on || (drum && !step_empty(st))) {
-            cell_notes(st, drum, t);
-            if (drum) {                              /* the sound's first letters */
+            if (drum) {
+                const char *nm = DL_SOUND_NAME[ui.dsound % DL_NSOUND];
+                if (!on)
+                    nm = DL_SOUND_NAME[(st->note[0] - 1) % DL_NSOUND];
+                s_cat(t, nm);
                 t[3] = 0;
-                text_c(x + (ST_CW - 2) / 2, y + 15, &FONT_XS, t, bg == K_NOW ? K_BG : on ? K_TEXT : K_FAINT);
-            } else if (trk == AUX_BRAIN) {           /* a degree */
-                text_c(x + (ST_CW - 2) / 2, y + 15, &FONT_S, t, bg == K_NOW ? K_BG : K_TEXT);
+                text_c(x + (ST_CW - 2) / 2, y + 15, &FONT_XS, t, on ? fg : K_FAINT);
+            } else if (trk == AUX_PUNCH) {
+                int fx = st->note[0] - 1;
+                text_fit(x + 2, y + 11, &FONT_XS, PX_VALID(fx) ? PUNCH_NAME[fx & 15] : "?", ST_CW - 5, fg);
+                cv_text(x + 3, y + 23, &FONT_XS, PX_VALID(fx) && fx >= PX_MEL ? "mel" : "drum", bg == K_NOW ? K_BG : K_DIM);
+            } else if (trk == AUX_TAPE) {
+                num_s((uint32_t)st->note[0], s_cat(t, "seg "));
+                text_fit(x + 2, y + 15, &FONT_XS, t, ST_CW - 5, fg);
             } else {
                 char l1[12], *e = l1;
-                int n = 0;
-                for (int k = 0; k < SN && st->note[k]; k++) {   /* two notes a line */
+                int n = 0, line = 0;
+                for (int k = 0; k < SN && st->note[k]; k++) {
                     e = note_name(st->note[k], e);
                     n++;
                     if (n == 2 || !st->note[k + 1] || k == SN - 1) {
-                        text_c(x + (ST_CW - 2) / 2, y + (n <= 2 && k < 2 ? 13 : 25), &FONT_XS, l1,
-                               bg == K_NOW ? K_BG : K_TEXT);
+                        text_c(x + (ST_CW - 2) / 2, y + (line ? 25 : 13), &FONT_XS, l1, fg);
                         e = l1;
-                        if (k >= 1)
-                            n = 3;
+                        n = 0;
+                        line++;
                     } else
                         e = s_cat(e, " ");
                 }
             }
         }
-        if (st->comp)
-            text_r(x + ST_CW - 5, y + ST_CH - 14, &FONT_XS, COMP_GLYPH[st->comp % NSC], bg == K_NOW ? K_BG : K_TEXT);
+        if (st->comp || st->comp2) {                 /* the components' letters, bottom right */
+            char g[4] = {0};
+            char *e = g;
+            if (st->comp)
+                e = s_cat(e, COMP_GLYPH[st->comp % NSC]);
+            if (st->comp2)
+                s_cat(e, COMP_GLYPH[st->comp2 % NSC]);
+            text_r(x + ST_CW - 5, y + ST_CH - 14, &FONT_XS, g, fg);
+        }
         if (st->cond)
             cv_text(x + 3, y + ST_CH - 14, &FONT_XS, "%", bg == K_NOW ? K_BG : K_DIM);
         if (step_has_lock(pats.lane, trk, pt, s))
@@ -1740,14 +1805,14 @@ static void draw_steps(void)
     cv_blit(0, MAIN_Y);
 }
 
-/* Bar: the pattern's settings in words, and its bars as blocks */
 static void draw_bar(void)
 {
     int trk = sel_trk();
     const tpat_t *tp = tpat(trk);
-    uint32_t h = hash_u(2166136261u, 0xBA000u | (uint32_t)trk | (uint32_t)cur_pat(trk) << 4 | (uint32_t)tp->len << 8 |
+    uint32_t h = hash_u(hash_u(2166136261u, 0xBAu), (uint32_t)trk | (uint32_t)cur_pat(trk) << 4 | (uint32_t)tp->len << 8 |
                                           (uint32_t)tp->scale << 16 | (uint32_t)eng_step[trk] << 20 | (uint32_t)playing() << 28);
-    char t[40], *e;
+    char t[48], *e;
+    h = hash_u(h, (uint32_t)(tp->groove + 100) | (uint32_t)proj.groove << 8 | (uint32_t)tp->quant << 16);
     if (!begin_main(h))
         return;
     if (!is_seqt(trk)) {
@@ -1775,18 +1840,22 @@ static void draw_bar(void)
             text_c(x + w / 2, 46, &FONT_B, t, b < nb ? K_TEXT : K_FAINT);
         }
     }
-    s_cat(s_cat(t, "Groove "), GROOVE_NAME[tp->groove % NGROOVE]);
-    e = num_s((uint32_t)tp->quant, s_cat(t + s_len(t), ", quantise "));
+    e = s_cat(s_cat(t, "Groove "), GR_NAME[proj.groove % NGROOVE]);
+    e = s_cat(e, " ");
+    if (tp->groove > 0)
+        e = s_cat(e, "+");
+    e = num_i(tp->groove, e);
+    e = num_s((uint32_t)tp->quant, s_cat(e, ", quantise "));
     s_cat(e, "%");
     cv_text(12, 86, &FONT_XS, t, K_DIM);
-    cv_text(12, 100, &FONT_XS, "SEL: clear, copy, paste, rotate, duplicate a bar", K_DIM);
+    cv_text(12, 100, &FONT_XS, "black keys: scale 1 2 3 4 5 6 8 16 1/2", K_DIM);
     cv_blit(0, MAIN_Y);
 }
 
-/* the engines' pictures: one each, simple, animated by the frame and the track's level */
+/* the engines' pictures */
 static void pic_simple(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
 {
-    for (int k = 0; k < 5; k++) {                   /* slinky arcs, bending by shape, sliding by the frame */
+    for (int k = 0; k < 5; k++) {
         int32_t cy = y0 + h / 2, amp = 8 + p[TP_E1] * (h / 2 - 10) / 127;
         for (int32_t x = 0; x < w - 1; x += 2) {
             int32_t ph = (x * 32 / w + f / 2 + k * 6) & 31;
@@ -1802,8 +1871,8 @@ static void pic_prism(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_
     cv_line(cx, top, cx - 36, bot, K_TEXT);
     cv_line(cx, top, cx + 36, bot, K_TEXT);
     cv_line(cx - 36, bot, cx + 36, bot, K_TEXT);
-    cv_line(x0 + 4, y0 + h / 2 + 10, cx - 14, y0 + h / 2 - 4, K_DIM);   /* the ray in */
-    for (int k = -1; k <= 1; k++)                    /* three out, spread by the ratio */
+    cv_line(x0 + 4, y0 + h / 2 + 10, cx - 14, y0 + h / 2 - 4, K_DIM);
+    for (int k = -1; k <= 1; k++)
         cv_line(cx + 14, y0 + h / 2 - 4 + k * 2, x0 + w - 4, y0 + h / 2 + k * spread, k ? K_DIM : K_NOW);
 }
 static void pic_wave(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
@@ -1822,7 +1891,7 @@ static void pic_wave(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t
 static void pic_axis(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
 {
     int32_t cx = x0 + w / 2, cy = y0 + h / 2, r1 = h / 2 - 6, r2 = 6 + p[TP_E2] * 14 / 127;
-    for (uint32_t k = 0; k < 32; k++)                /* the carrier's ring, the modulator running round it */
+    for (uint32_t k = 0; k < 32; k++)
         cv_rect(cx + cos100(k) * r1 / 100, cy + sin100(k) * r1 / 100, 2, 2, K_DIM);
     {
         uint32_t k = f / 2;
@@ -1836,7 +1905,7 @@ static void pic_epiano(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8
 {
     int32_t kw = w / 8;
     (void)f;
-    cv_round(x0 + 4, y0 + 6, w - 8, 10, 3, K_DIM);   /* the tine bar */
+    cv_round(x0 + 4, y0 + 6, w - 8, 10, 3, K_DIM);
     cv_round(x0 + 4 + p[TP_E4] * (w - 20) / 127, y0 + 4, 12, 14, 4, K_NOW);
     for (int k = 0; k < 8; k++)
         cv_round(x0 + k * kw + 1, y0 + 24, kw - 2, h - 28, 2, k % 7 == 1 || k % 7 == 3 || k % 7 == 6 ? K_TEXT : K_PANEL2);
@@ -1844,7 +1913,7 @@ static void pic_epiano(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8
 static void pic_organ(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
 {
     (void)f;
-    for (int k = 0; k < 4; k++) {                    /* four drawbars: type, bass, tremolo, speed */
+    for (int k = 0; k < 4; k++) {
         int32_t x = x0 + 20 + k * (w - 40) / 3 - 6, v = p[TP_E1 + k] * (h - 20) / 127;
         cv_round(x, y0 + 4, 12, h - 8, 3, K_PANEL2);
         cv_round(x, y0 + h - 4 - v - 8, 12, v + 8, 3, k ? K_DIM : K_NOW);
@@ -1854,19 +1923,16 @@ static void pic_hardsync(int32_t x0, int32_t y0, int32_t w, int32_t h, const uin
 {
     int32_t cy = y0 + h / 2, period = 10 + (127 - p[TP_E1]) * 50 / 127, py = cy + h / 2 - 6;
     (void)f;
-    for (int32_t x = 0; x < w; x++) {               /* a saw reset every period: the notch */
+    for (int32_t x = 0; x < w; x++) {
         int32_t y = cy + h / 2 - 6 - (x % period) * (h - 12) / period;
-        if (x % period == 0)
-            cv_line(x0 + x, py, x0 + x, y, K_DIM);
-        else
-            cv_line(x0 + x, py, x0 + x, y, K_NOW);
+        cv_line(x0 + x, py, x0 + x, y, x % period == 0 ? K_DIM : K_NOW);
         py = y;
     }
 }
 static void pic_dissolve(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
 {
     uint32_t r = 0x9E3779B9u ^ (f / 3);
-    for (int k = 0; k < 40 + p[TP_E1] / 4; k++) {   /* a cloud of dots, denser with swarm */
+    for (int k = 0; k < 40 + p[TP_E1] / 4; k++) {
         r = r * 1664525u + 1013904223u;
         {
             int32_t x = (int32_t)((r >> 8) % (uint32_t)w), y = (int32_t)((r >> 20) % (uint32_t)h);
@@ -1876,27 +1942,35 @@ static void pic_dissolve(int32_t x0, int32_t y0, int32_t w, int32_t h, const uin
         }
     }
 }
+/* the drumline: eleven pads, each key's model, the shown one ringed, hits flashing */
 static void pic_drumline(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
 {
     int32_t pw = w / 6, ph = h / 2;
-    (void)p; (void)f;
+    (void)f;
     for (int k = 0; k < DL_NSOUND; k++) {
         int32_t x = x0 + (k % 6) * pw + 2, y = y0 + (k / 6) * ph + 2, hit = eng_drum_hit[k];
+        static const char *const PAD[NDM] = {"kick", "snare", "hat", "clap", "shakr", "tamb", "reso", "conga", "tom", "fm"};
+        const char *nm = PAD[p[TP_DRUM(k, DP_MODEL)] % NDM];
+        char t[4];
         cv_round(x, y, pw - 4, ph - 4, 4, hit > 40 ? K_NOW : k == ui.dsound ? K_PANEL2 : K_PANEL);
         if (k == ui.dsound)
             cv_frame(x, y, pw - 4, ph - 4, 4, K_SEL, hit > 40 ? K_NOW : K_PANEL2);
-        text_c(x + (pw - 4) / 2, y + (ph - 4) / 2 - 7, &FONT_XS, DL_SOUND_NAME[k], hit > 40 ? K_BG : K_TEXT);
+        text_fit(x + 3, y + (ph - 4) / 2 - 6, &FONT_XS, nm, pw - 9, hit > 40 ? K_BG : K_TEXT);
+        num_s((uint32_t)k + 1u, t);
+        cv_text(x + 3, y, &FONT_XS, t, hit > 40 ? K_BG : K_FAINT);
     }
 }
 static void draw_engine(void)
 {
     int trk = sel_trk(), eg = proj.trk[trk].par[TP_ENGINE] % NENGINE;
     const uint8_t *p = proj.trk[trk].par;
-    uint32_t h = hash_u(2166136261u, 0xE0000u | (uint32_t)trk | (uint32_t)eg << 4 | (uint32_t)ui.dsound << 8 |
+    uint32_t h = hash_u(hash_u(2166136261u, 0xE0u), (uint32_t)trk | (uint32_t)eg << 4 | (uint32_t)ui.dsound << 8 |
                                           (ui.frame / 2) << 12);
-    char t[40];
     for (int i = 0; i < 4; i++)
         h = hash_u(h, p[TP_E1 + i]);
+    if (eg == EG_DRUMLINE)
+        for (int k = 0; k < DL_NSOUND; k++)
+            h = hash_u(h, p[TP_DRUM(k, DP_MODEL)] | (uint32_t)eng_drum_hit[k] << 8);
     h = hash_s(h, proj.trk[trk].name);
     if (!begin_main(h))
         return;
@@ -1909,7 +1983,6 @@ static void draw_engine(void)
         if (nm[0])
             text_r(230, 3, &FONT_S, nm, K_DIM);
     }
-    (void)t;
     switch (eg) {
     case EG_SIMPLE: pic_simple(20, 24, 200, 88, p, ui.frame); break;
     case EG_PRISM: pic_prism(20, 24, 200, 88, p, ui.frame); break;
@@ -1928,9 +2001,10 @@ static void draw_engine(void)
 static void draw_brain(void)
 {
     const uint8_t *p = proj.trk[AUX_BRAIN].par;
-    int key = seq.brain_key % 12, sc = seq.brain_scale % NBS, deg = (int8_t)seq.brain_deg;
-    uint32_t h = hash_u(2166136261u, 0xB0000u | (uint32_t)key | (uint32_t)sc << 4 | (uint32_t)(deg + 64) << 8 |
-                                          (uint32_t)seq.brain_auto_ok << 16 | (uint32_t)p[TP_E1] << 17);
+    int key = seq.brain_key % 12, sc = seq.brain_scale % NBS, deg = (int8_t)seq.brain_deg, routing = ui.page != P_ENGINE;
+    uint32_t h = hash_u(hash_u(2166136261u, 0xB0u), (uint32_t)key | (uint32_t)sc << 4 | (uint32_t)(deg + 64) << 8 |
+                                          (uint32_t)seq.brain_auto_ok << 16 | (uint32_t)p[TP_E1] << 17 | (uint32_t)routing << 18 |
+                                          (uint32_t)p[TP_E4] << 20);
     char t[40], *e;
     for (int i = 0; i < NTRK; i++)
         h = hash_u(h, proj.trk[i].par[TP_BRAIN]);
@@ -1941,11 +2015,17 @@ static void draw_brain(void)
     cv_text(12, 4, &FONT_L, t, K_TEXT);
     if (p[TP_E1])
         text_r(230, 6, &FONT_XS, seq.brain_auto_ok ? "auto: sure" : "auto: guessing", K_DIM);
-    e = s_cat(t, "degree ");
-    if (deg > 0)
-        e = s_cat(e, "+");
-    num_i(deg, e);
-    cv_text(12, 44, &FONT_B, t, deg ? K_NOW : K_DIM);
+    if (routing) {
+        cv_text(12, 44, &FONT_XS, "routing: black keys 1 to 8 toggle a track", K_DIM);
+    } else {
+        e = s_cat(t, "degree ");
+        if (deg > 0)
+            e = s_cat(e, "+");
+        num_i(deg, e);
+        cv_text(12, 44, &FONT_B, t, deg ? K_NOW : K_DIM);
+        if (p[TP_E4])
+            text_r(230, 48, &FONT_XS, LINK_NAME[p[TP_E4] % 9], K_DIM), text_r(230 - text_w(&FONT_XS, LINK_NAME[p[TP_E4] % 9]) - 4, 48, &FONT_XS, "link", K_FAINT);
+    }
     cv_text(12, 70, &FONT_XS, "tracks that follow", K_DIM);
     for (int i = 0; i < NTRK; i++) {
         int32_t x = 12 + i * 27;
@@ -1964,48 +2044,52 @@ static void draw_brain(void)
 static void draw_punch(void)
 {
     uint32_t dm = eng_punch_drum, mm = eng_punch_mel;
-    uint32_t h = hash_u(2166136261u, 0xD0000u ^ dm ^ (mm << 5) ^ (ui.keys << 3) ^ (ui.punch_latched << 7));
+    uint32_t h = hash_u(hash_u(2166136261u, 0xD0u), dm ^ (mm << 12) ^ (ui.keys << 3) ^ (ui.punch_latched << 7));
     char t[64], *e;
     int n = 0;
     if (!begin_main(h))
         return;
     e = t;
     *t = 0;
-    for (int fx = 0; fx < NPUNCH_FX; fx++) {        /* the FX in effect, named */
-        int on = fx < 16 ? (dm >> fx & 1u) : (mm >> (fx - 16) & 1u);
-        if (!on || !PUNCH_NAME[fx][0])
+    for (int fx = 0; fx < NPUNCH_FX; fx++) {
+        int on = fx < PX_MEL ? (dm >> fx & 1u) : (mm >> (fx - PX_MEL) & 1u);
+        if (!on || !PX_VALID(fx))
             continue;
         if (n++)
             e = s_cat(e, ", ");
         if (s_len(t) < 40)
-            e = s_cat(e, PUNCH_NAME[fx]);
+            e = s_cat(e, PUNCH_NAME[fx & 15]);
     }
     if (!n)
-        s_cat(t, "hold a key for an effect");
+        s_cat(t, "hold a key: duck, loops, echo, fills, filter...");
     text_fit(10, 4, n ? &FONT_B : &FONT_S, t, 220, n ? K_NOW : K_DIM);
     cv_text(10, 24, &FONT_XS, "drums", K_DIM);
     text_r(230, 24, &FONT_XS, "melodic", K_DIM);
-    for (int k = 0; k < 16; k++) {                   /* the keys: a small keyboard, the held ones teal */
+    for (int k = 0; k < 16; k++) {                   /* the keys: two octaves, the ones in effect lit */
         int32_t x = 8 + k * 14;
-        int key = WHITE_K[k], fx = key < NPUNCH_D ? key : 16 + key - NPUNCH_D;
-        int on = fx < 16 ? (dm >> fx & 1u) : (mm >> (fx - 16) & 1u);
-        cv_round(x, 40, 13, 60, 2, on ? K_NOW : K_PANEL2);
+        int fx = punch_of_key(WHITE_K[k]);
+        int on = fx >= 0 && (fx < PX_MEL ? (dm >> fx & 1u) : (mm >> (fx - PX_MEL) & 1u));
+        cv_round(x, 40, 13, 60, 2, on ? K_NOW : fx < 0 ? K_PANEL : K_PANEL2);
+        if (fx >= 0 && k < 7) {                      /* the drum octave's initials: d l l e f f r */
+            char ini[2] = {PUNCH_NAME[fx & 15][0], 0};
+            text_c(x + 6, 102, &FONT_XS, ini, K_DIM);
+        }
     }
     for (int k = 0; k < 11; k++) {
-        int key = BLACK_K[k], fx = key < NPUNCH_D ? key : 16 + key - NPUNCH_D;
-        int on = fx < 16 ? (dm >> fx & 1u) : (mm >> (fx - 16) & 1u);
+        int key = BLACK_K[k], fx = punch_of_key(key);
+        int on = fx >= 0 && (fx < PX_MEL ? (dm >> fx & 1u) : (mm >> (fx - PX_MEL) & 1u));
         int32_t wi = 0;
         while (WHITE_K[wi] < key)
             wi++;
-        cv_frame(8 + wi * 14 - 5, 40, 10, 34, 2, K_DIM, on ? K_NOW : K_BG);
+        cv_frame(8 + wi * 14 - 5, 40, 10, 34, 2, fx < 0 ? K_LINE : K_DIM, on ? K_NOW : K_BG);
     }
-    cv_rect(8 + 7 * 14 - 1, 36, 2, 70, K_DIM);   /* the split: F3..E4 drums, F4..G5 melodic */
-    cv_text(10, 104, &FONT_XS, proj.trk[AUX_PUNCH].par[TP_E1] ? "latch on: a key toggles" : "momentary: while held", K_DIM);
+    cv_rect(8 + 7 * 14 - 1, 36, 2, 70, K_DIM);
+    cv_text(120, 104, &FONT_XS, proj.trk[AUX_PUNCH].par[TP_E1] ? "latch on" : "while held", K_DIM);
     cv_blit(0, MAIN_Y);
 }
 static void draw_tape(void)
 {
-    uint32_t h = hash_u(2166136261u, 0x7A000u ^ ui.keys ^ (uint32_t)playing() << 30 ^ (ui.frame / 4) << 8);
+    uint32_t h = hash_u(hash_u(2166136261u, 0x7Au), ui.keys ^ (uint32_t)playing() << 30 ^ (ui.frame / 4) << 8);
     int32_t cx = 70, cy = 58, r = 44;
     uint32_t held = 0;
     char t[24];
@@ -2015,13 +2099,11 @@ static void draw_tape(void)
     h = hash_u(h, held);
     if (!begin_main(h))
         return;
-    for (int k = 0; k < 16; k++) {                   /* the ring: 16 segments, the held ones lit, the head turning */
+    for (int k = 0; k < 16; k++) {
         uint32_t a = (uint32_t)k * 2u;
         int32_t x = cx + cos100(a) * r / 100, y = cy + sin100(a) * r / 100;
         int on = held >> k & 1u;
         cv_round(x - 5, y - 5, 11, 11, 4, on ? K_NOW : K_PANEL2);
-        if (on)
-            cv_frame(x - 6, y - 6, 13, 13, 5, K_NOW, K_NOW);
     }
     if (playing()) {
         uint32_t a = (ui.frame / 4) & 31u;
@@ -2044,14 +2126,15 @@ static void draw_tape(void)
 static void draw_fxtrack(void)
 {
     int trk = sel_trk(), type = proj.trk[trk].par[TP_ENGINE] % NFXT;
-    uint32_t h = hash_u(2166136261u, 0xF0000u | (uint32_t)trk | (uint32_t)type << 4 | (ui.frame / 3) << 8);
-    char t[24];
+    uint32_t h = hash_u(hash_u(2166136261u, 0xF0u), (uint32_t)trk | (uint32_t)type << 4 | (ui.frame / 3) << 8 |
+                                          (uint32_t)ui.last_inst << 24);
+    char t[32];
     if (!begin_main(h))
         return;
     cv_text(12, 4, &FONT_L, FXT_NAME[type], K_TEXT);
-    s_cat(t, trk == AUX_FX1 ? "send effect I" : "send effect II");
-    cv_text(12, 40, &FONT_S, t, K_DIM);
-    {                                                /* a glyph per effect */
+    s_cat(s_cat(t, trk == AUX_FX1 ? "send effect I, keys play " : "send effect II, keys play "), TRACK_NAME[ui.last_inst % NTRK]);
+    cv_text(12, 40, &FONT_XS, t, K_DIM);
+    {
         int32_t x0 = 130, y0 = 60, w = 100;
         uint32_t f = ui.frame;
         switch (type) {
@@ -2094,73 +2177,87 @@ static void draw_fxtrack(void)
     cv_blit(0, MAIN_Y);
 }
 
-/* Play: voice mode, portamento, bend, volume: words */
 static void draw_play(void)
 {
     int trk = sel_trk();
     const uint8_t *p = proj.trk[trk].par;
-    uint32_t h = hash_u(2166136261u, 0x9A000u | (uint32_t)trk | (uint32_t)p[TP_VMODE] << 4 | (uint32_t)p[TP_PORTA] << 8 |
-                                          (uint32_t)p[TP_BEND] << 16 | (uint32_t)eng_voices << 24);
+    uint32_t h = hash_u(hash_u(2166136261u, 0x9Au), (uint32_t)trk | (uint32_t)p[TP_VMODE] << 4 | (uint32_t)eng_voices << 24);
     char t[40];
     if (!begin_main(h))
         return;
-    cv_text(12, 6, &FONT_B, VM_NAME[p[TP_VMODE] % 3], K_TEXT);
+    cv_text(12, 6, &FONT_B, tp_info_par(TP_VMODE, p)->names[p[TP_VMODE] % 3], K_TEXT);
     cv_text(12, 26, &FONT_XS, p[TP_VMODE] % 3 == VM_POLY ? "up to 6 voices on the track"
                               : p[TP_VMODE] % 3 == VM_MONO ? "one voice, every key restarts it"
                                                             : "one voice, held keys glide", K_DIM);
-    for (int v = 0; v < NVOICE; v++)                 /* the voices sounding, all tracks */
+    for (int v = 0; v < NVOICE; v++)
         cv_round(12 + v * 13, 50, 10, 10, 3, v < eng_voices ? K_NOW : K_LINE);
     num_s((uint32_t)eng_voices, s_cat(t, "voices sounding "));
     cv_text(12, 66, &FONT_XS, t, K_DIM);
     cv_blit(0, MAIN_Y);
 }
-
-/* Envelope: the curve */
 static void draw_env(int filter)
 {
-    int trk = sel_trk(), b = filter ? TP_FA : TP_A;
+    int trk = sel_trk(), b = filter ? TP_FA : TP_A, drum = is_drum(trk) && !filter;
     const uint8_t *p = proj.trk[trk].par;
-    uint32_t h = hash_u(2166136261u, 0xE7000u | (uint32_t)trk | (uint32_t)filter << 4 | (uint32_t)p[b] << 8 |
+    uint32_t h = hash_u(hash_u(2166136261u, 0xE7u), (uint32_t)trk | (uint32_t)filter << 4 | (uint32_t)p[b] << 8 |
                                           (uint32_t)p[b + 1] << 16 | (uint32_t)p[b + 2] << 24);
     int32_t a, d, s, r, x0 = 16, y0 = 16, w = 208, hh = 84, x;
-    h = hash_u(h, p[b + 3]);
+    h = hash_u(h, p[b + 3] | (uint32_t)drum << 8);
     if (!begin_main(h))
         return;
-    a = 4 + p[b] * 60 / 127;
-    d = 4 + p[b + 1] * 60 / 127;
-    r = 4 + p[b + 3] * 60 / 127;
-    s = p[b + 2] * hh / 127;
     x = x0;
     cv_rect(x0, y0 + hh, w, 1, K_LINE);
-    cv_line(x, y0 + hh, x + a, y0, K_NOW);
-    x += a;
-    cv_line(x, y0, x + d, y0 + hh - s, K_NOW);
-    x += d;
-    cv_rect(x, y0 + hh - s, w - a - d - r, 2, K_NOW);
-    x += w - a - d - r;
-    cv_line(x, y0 + hh - s, x + r, y0 + hh, K_NOW);
-    cv_text(x0, y0 + hh + 6, &FONT_XS, filter ? "filter envelope" : "amp envelope", K_DIM);
+    if (drum) {                                      /* funk (a delay), attack, then the hit's length */
+        a = 2 + p[TP_A] * 40 / 127;
+        d = 4 + p[TP_D] * 40 / 127;
+        r = 20 + p[TP_R] * 100 / 127;
+        cv_rect(x, y0 + hh - 1, a, 2, K_DIM);
+        x += a;
+        cv_line(x, y0 + hh, x + d, y0, K_NOW);
+        x += d;
+        cv_line(x, y0, x + r, y0 + hh, K_NOW);
+        cv_text(x0, y0 + hh + 6, &FONT_XS, "drum envelope: funk, attack, random, length", K_DIM);
+    } else {
+        a = 4 + p[b] * 60 / 127;
+        d = 4 + p[b + 1] * 60 / 127;
+        r = 4 + p[b + 3] * 60 / 127;
+        s = p[b + 2] * hh / 127;
+        cv_line(x, y0 + hh, x + a, y0, K_NOW);
+        x += a;
+        cv_line(x, y0, x + d, y0 + hh - s, K_NOW);
+        x += d;
+        cv_rect(x, y0 + hh - s, w - a - d - r, 2, K_NOW);
+        x += w - a - d - r;
+        cv_line(x, y0 + hh - s, x + r, y0 + hh, K_NOW);
+        cv_text(x0, y0 + hh + 6, &FONT_XS, filter ? "filter envelope" : "amp envelope", K_DIM);
+    }
     cv_blit(0, MAIN_Y);
 }
-
-/* Filter: the response curve */
 static void draw_filter(void)
 {
     int trk = sel_trk();
     const uint8_t *p = proj.trk[trk].par;
-    int ft = p[TP_FTYPE] % NFT, cut = p[TP_CUT], res = p[TP_RES];
-    uint32_t h = hash_u(2166136261u, 0xF1000u | (uint32_t)trk | (uint32_t)ft << 4 | (uint32_t)cut << 8 | (uint32_t)res << 16);
+    int ft = p[TP_FTYPE] % NFT, cut = p[TP_CUT], res = p[TP_RES], dyn = ft == FT_DYNAMIC;
+    uint32_t h = hash_u(hash_u(2166136261u, 0xF1u), (uint32_t)trk | (uint32_t)ft << 4 | (uint32_t)cut << 8 | (uint32_t)res << 16 |
+                                          (uint32_t)p[TP_KTRK] << 24);
     int32_t x0 = 16, y0 = 12, w = 208, hh = 84, fc = x0 + 10 + cut * (w - 20) / 127, py = -1;
     if (!begin_main(h))
         return;
     cv_rect(x0, y0 + hh, w, 1, K_LINE);
+    if (dyn) {                                       /* low cut .. hi cut: the band that passes */
+        int32_t lo = x0 + p[TP_CUT] * (w - 20) / 127, hi = x0 + 20 + p[TP_KTRK] * (w - 20) / 127;
+        cv_round(lo, y0 + 10, hi > lo ? hi - lo : 2, hh - 10, 4, K_NOW_T);
+        cv_rect(lo, y0 + 10, 2, hh - 10, K_NOW);
+        cv_rect(hi, y0 + 10, 2, hh - 10, K_NOW);
+        cv_text(x0, y0 + hh + 6, &FONT_XS, "dynamic: low cut, compression, drive, hi cut", K_DIM);
+        cv_blit(0, MAIN_Y);
+        return;
+    }
     for (int32_t x = x0; x < x0 + w; x++) {
         int32_t dist = x - fc, y, g;
-        g = dist < 0 ? 0 : dist * (ft == FT_LP24 ? 2 : 1);   /* the roll-off past the cutoff */
-        if (ft == FT_HP)
+        g = dist < 0 ? 0 : dist * (ft == FT_SVF || ft == FT_LADDER ? 2 : 1);
+        if (ft == FT_ZHP)
             g = dist > 0 ? 0 : -dist;
-        if (ft == FT_BP)
-            g = dist < 0 ? -dist : dist;
         g = g > hh - 8 ? hh - 8 : g;
         {
             int32_t bump = dist > -8 && dist < 8 ? (8 - (dist < 0 ? -dist : dist)) * res / 30 : 0;
@@ -2173,7 +2270,7 @@ static void draw_filter(void)
         py = y;
     }
     cv_rect(fc, y0, 1, hh, K_FAINT);
-    cv_text(x0, y0 + hh + 6, &FONT_XS, FT_NAME[ft], K_DIM);
+    cv_text(x0, y0 + hh + 6, &FONT_XS, tp_info_par(TP_FTYPE, p)->names[ft], K_DIM);
     text_r(x0 + w, y0 + hh + 6, &FONT_XS, p[TP_KTRK] ? "key tracking on" : "", K_DIM);
     cv_blit(0, MAIN_Y);
 }
@@ -2181,13 +2278,13 @@ static void draw_sends(void)
 {
     int trk = sel_trk();
     const uint8_t *p = proj.trk[trk].par;
-    uint32_t h = hash_u(2166136261u, 0x5E000u | (uint32_t)trk | (uint32_t)p[TP_SEND1] << 4 | (uint32_t)p[TP_SEND2] << 12 |
+    uint32_t h = hash_u(hash_u(2166136261u, 0x5Eu), (uint32_t)trk | (uint32_t)p[TP_SEND1] << 4 | (uint32_t)p[TP_SEND2] << 12 |
                                           (uint32_t)p[TP_SENDT] << 20 | (uint32_t)p[TP_FTYPE] << 28);
     static const char *const NM[3] = {"FX I", "FX II", "tape"};
     if (!begin_main(h))
         return;
-    cv_text(12, 4, &FONT_B, FT_NAME[p[TP_FTYPE] % NFT], K_TEXT);
-    cv_text(12, 24, &FONT_XS, "the track's sends", K_DIM);
+    cv_text(12, 4, &FONT_B, tp_info_par(TP_FTYPE, p)->names[p[TP_FTYPE] % NFT], K_TEXT);
+    cv_text(12, 24, &FONT_XS, "the filter type, and the track's sends", K_DIM);
     for (int i = 0; i < 3; i++) {
         int32_t y = 44 + i * 22, v = p[TP_SEND1 + i] * 160 / 127;
         cv_text(12, y - 2, &FONT_S, NM[i], K_TEXT);
@@ -2197,14 +2294,12 @@ static void draw_sends(void)
     }
     cv_blit(0, MAIN_Y);
 }
-
-/* LFO: its shape scrolling */
 static void draw_lfo(void)
 {
     int trk = sel_trk();
     const uint8_t *p = proj.trk[trk].par;
     int lt = p[TP_LTYPE] % NLT;
-    uint32_t h = hash_u(2166136261u, 0x1F000u | (uint32_t)trk | (uint32_t)lt << 4 | (uint32_t)p[TP_LAMT] << 8 |
+    uint32_t h = hash_u(hash_u(2166136261u, 0x1Fu), (uint32_t)trk | (uint32_t)lt << 4 | (uint32_t)p[TP_LAMT] << 8 |
                                           (lt ? ui.frame / 2 : 0u) << 16);
     int32_t x0 = 16, y0 = 12, w = 208, hh = 84, cy = y0 + hh / 2, amp = 6 + p[TP_LAMT] * (hh / 2 - 8) / 127;
     uint32_t r = 12345u;
@@ -2226,20 +2321,22 @@ static void draw_lfo(void)
             y = cy + amp - (x % 48 < 6 ? 2 * amp : 2 * amp * (48 - x % 48) / 48);
         cv_rect(x0 + x, y, 2, 2, K_NOW);
     }
-    {
-        char t[40], *e = s_cat(t, "to ");
-        s_cat(e, lt ? tp_info(p[TP_LDEST] % NTP, p[TP_ENGINE])->name : "-");
+    if (lt == LT_VALUE || lt == LT_RANDOM) {
+        char t[40], num[12], unit[6], *e = s_cat(t, "to ");
+        tp_text_par(TP_LDEST, p[TP_LDEST], p, num, unit);
+        e = s_cat(s_cat(e, num), " ");
+        tp_text_par(TP_LX, p[TP_LX], p, num, unit);
+        s_cat(e, num);
         cv_text(x0, y0 + hh + 6, &FONT_XS, t, K_DIM);
-    }
+    } else if (lt)
+        cv_text(x0, y0 + hh + 6, &FONT_XS, tp_info_par(TP_LTYPE, p)->names[lt], K_DIM);
     cv_blit(0, MAIN_Y);
 }
-
-/* Players: the notes held and what the player makes of them */
 static void draw_players(void)
 {
-    int trk = sel_trk(), pl = proj.trk[trk].par[TP_PLAYER] % NPL;
+    int trk = sel_trk(), pl = pl_type(trk);
     const player_t *pr = &seq.player[trk < NTRK ? trk : 0];
-    uint32_t h = hash_u(2166136261u, 0x9C000u | (uint32_t)trk | (uint32_t)pl << 4 | (uint32_t)pr->nheld << 8 |
+    uint32_t h = hash_u(hash_u(2166136261u, 0x9Cu), (uint32_t)trk | (uint32_t)pl << 4 | (uint32_t)pr->nheld << 8 |
                                           (uint32_t)pr->nchord << 12 | (uint32_t)pr->arp_note << 16 | (uint32_t)ui.maestro_rec << 24);
     char t[48], *e;
     for (int i = 0; i < 16; i++)
@@ -2248,13 +2345,13 @@ static void draw_players(void)
         h = hash_u(h, pr->chord[i]);
     if (!begin_main(h))
         return;
-    cv_text(12, 4, &FONT_B, PL_NAME[pl], K_TEXT);
+    cv_text(12, 4, &FONT_B, tp_info_par(TP_PLAYER, proj.trk[trk].par)->names[pl], K_TEXT);
     if (pl == PL_OFF)
         cv_text(12, 24, &FONT_XS, "the keys play as they are", K_DIM);
     else if (pl == PL_ARP)
         cv_text(12, 24, &FONT_XS, "held notes play one after another", K_DIM);
     else if (pl == PL_MAESTRO)
-        cv_text(12, 24, &FONT_XS, ui.maestro_rec ? "hold the chord to record" : "one key plays the chord, moved", K_DIM);
+        cv_text(12, 24, &FONT_XS, ui.maestro_rec ? "hold the chord to record (up to 8)" : "one key plays the chord, moved", K_DIM);
     else
         cv_text(12, 24, &FONT_XS, "notes stay until the next", K_DIM);
     e = s_cat(t, pl == PL_MAESTRO ? "chord: " : "held: ");
@@ -2276,7 +2373,7 @@ static void draw_players(void)
             e = s_cat(e, "-");
     }
     text_fit(12, 48, &FONT_S, t, 216, K_TEXT);
-    for (int k = 0; k < 24; k++) {                   /* two octaves of keys: the held ones teal, the arp's note coral */
+    for (int k = 0; k < 24; k++) {
         int32_t x = 12 + k * 9;
         int n = 48 + k, held = 0;
         for (int i = 0; i < pr->nheld && i < 16; i++)
@@ -2286,12 +2383,10 @@ static void draw_players(void)
     }
     cv_blit(0, MAIN_Y);
 }
-
-/* Mix: thirteen meter strips, the selected one ringed, muted ones dim */
 static void draw_mix(void)
 {
     int sel = sel_trk();
-    uint32_t h = hash_u(2166136261u, 0x3C000u | (uint32_t)sel | (uint32_t)seq.mute << 4);
+    uint32_t h = hash_u(hash_u(2166136261u, 0x3Cu), (uint32_t)sel | (uint32_t)seq.mute << 4 | (uint32_t)ui.solo << 20);
     static const char *const SHORT_NM[NALLTRK] = {"1", "2", "3", "4", "5", "6", "7", "8", "BR", "PU", "TP", "F1", "F2"};
     for (int t = 0; t < NALLTRK; t++)
         h = hash_u(h, eng_peak[t] >> 9);
@@ -2303,7 +2398,7 @@ static void draw_mix(void)
         cv_round(x, 6, 14, 84, 3, K_PANEL);
         if (lvl > 0)
             cv_round(x, 90 - lvl, 14, lvl, 3, muted ? K_LINE : K_NOW);
-        if (t == sel) {                              /* the selected strip: a coral ring around it */
+        if (t == sel) {
             cv_frame(x - 1, 5, 16, 86, 4, K_SEL, K_PANEL);
             if (lvl > 0)
                 cv_round(x + 1, 90 - lvl, 12, lvl - 1, 2, muted ? K_LINE : K_NOW);
@@ -2312,29 +2407,29 @@ static void draw_mix(void)
         if (muted)
             cv_rect(x + 2, 108, 10, 2, K_FAINT);
     }
+    if (ui.solo)
+        text_r(236, 108, &FONT_XS, "solo", K_TEXT);
     cv_blit(0, MAIN_Y);
 }
-
-/* Master: the EQ's curve, the saturator's curve, the groups' levels */
 static void draw_master(void)
 {
     int pg = ui.page - P_MASTER;
     const uint8_t *m = proj.master;
-    uint32_t h = hash_u(2166136261u, 0x3A000u | (uint32_t)pg);
+    uint32_t h = hash_u(hash_u(2166136261u, 0x3Au), (uint32_t)pg);
     int32_t x0 = 16, y0 = 12, w = 208, hh = 84, cy = y0 + hh / 2;
     for (int i = 0; i < NMS; i++)
         h = hash_u(h, m[i]);
     if (!begin_main(h))
         return;
     cv_rect(x0, cy, w, 1, K_LINE);
-    if (pg == 0) {                                   /* lo, mid, hi: three humps, scaled by blend */
+    if (pg == 0) {
         for (int32_t x = 0; x < w; x += 2) {
             int32_t b = x < w / 3 ? m[MS_EQ_LO] : x < 2 * w / 3 ? m[MS_EQ_MID] : m[MS_EQ_HI];
             int32_t y = cy - (b - 64) * (hh / 2 - 6) * (int32_t)m[MS_EQ_BLEND] / (64 * 127);
             cv_rect(x0 + x, y, 2, 2, K_NOW);
         }
         cv_text(x0, y0 + hh + 6, &FONT_XS, "low  mid  high, by the blend", K_DIM);
-    } else if (pg == 1) {                            /* the saturator: a bent line */
+    } else if (pg == 1) {
         int32_t py = -1;
         for (int32_t x = 0; x < w; x++) {
             int32_t in = (x - w / 2) * 100 / (w / 2), g = 100 + (int32_t)m[MS_SAT_GAIN] * 3, clip = 30 + (127 - m[MS_SAT_CLIP]) * 70 / 127;
@@ -2359,7 +2454,6 @@ static void draw_master(void)
     }
     cv_blit(0, MAIN_Y);
 }
-
 static void setup_row(int32_t y, const char *name, const char *val)
 {
     cv_text(12, y, &FONT_S, name, K_DIM);
@@ -2368,7 +2462,8 @@ static void setup_row(int32_t y, const char *name, const char *val)
 static void draw_setup(void)
 {
     char t[24], nm[NAME_LEN + 1];
-    uint32_t h = hash_u(2166136261u, 0x5E700u | (uint32_t)proj_slot | (uint32_t)proj.usb_full << 4 | (uint32_t)seq.ext << 8);
+    uint32_t h = hash_u(2166136261u, 0x5E700u | (uint32_t)proj_slot | (uint32_t)proj.usb_full << 4 | (uint32_t)seq.ext << 8 |
+                                          (uint32_t)proj.rsv[0] << 12 | (uint32_t)proj.send_clock << 16 | (uint32_t)proj.send_notes << 17);
     h = hash_s(h, proj.name);
     if (!begin_main(h))
         return;
@@ -2381,7 +2476,7 @@ static void draw_setup(void)
     setup_row(40, "clock", seq.ext ? "MIDI in" : "internal");
     setup_row(58, "MIDI out", proj.send_clock || proj.send_notes ? (proj.send_clock && proj.send_notes ? "clock, notes"
                                                                   : proj.send_clock ? "clock" : "notes") : "off");
-    setup_row(76, "USB audio", USBA_NAME[proj.usb_full & 1u]);
+    setup_row(76, "count-in", ONOFF[proj.rsv[0] & 1u]);
     setup_row(94, "version", XY_VERSION);
     cv_blit(0, MAIN_Y);
 }
@@ -2427,8 +2522,8 @@ static void draw_page(void)
     case P_SONG: draw_song(); break;
     case P_STEPS: draw_steps(); break;
     case P_BAR: draw_bar(); break;
-    case P_ENGINE: case P_PLAY: case P_ENV: case P_ENV2: case P_FILTER: case P_SENDS: case P_LFO: case P_LFO2:
-    case P_PLAYERS: case P_PLAYERS2:
+    case P_ENGINE: case P_PLAY: case P_ENGINE3: case P_ENV: case P_ENV2: case P_FILTER: case P_SENDS: case P_LFO:
+    case P_LFO2: case P_PLAYERS: case P_PLAYERS2: case P_PLAYERS3:
         if (trk == AUX_BRAIN)
             draw_brain();
         else if (trk == AUX_PUNCH)
@@ -2437,10 +2532,12 @@ static void draw_page(void)
             draw_tape();
         else if (is_aux(trk))
             draw_fxtrack();
-        else if (ui.page == P_ENGINE)
+        else if (ui.page == P_ENGINE || (is_drum(trk) && (ui.page == P_PLAY || ui.page == P_ENGINE3)))
             draw_engine();
         else if (ui.page == P_PLAY)
             draw_play();
+        else if (ui.page == P_ENGINE3)
+            draw_engine();
         else if (ui.page == P_ENV || ui.page == P_ENV2)
             draw_env(ui.page == P_ENV2);
         else if (ui.page == P_FILTER)

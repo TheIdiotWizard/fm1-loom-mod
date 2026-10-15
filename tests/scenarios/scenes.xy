@@ -1,4 +1,4 @@
-# scenes on the Arrange page: a second scene cloned, a mute, a cue while playing, the song
+# scenes on the Arrange page: a second scene cloned, a mute, a cue with HOME while playing, the song
 wait 200
 tap HOME
 expect page Arrange
@@ -12,10 +12,13 @@ wait 40
 shot scene2_mute.png
 tap PLAY
 wait 300
+press HOME
 tapkey w0
+release HOME
 wait 40
 shot scene_cue.png
 wait 2500
+expect scene 1
 tap PLAY
 turn SELECT 1
 expect page Song
@@ -32,3 +35,14 @@ tap PLAY
 wait 1500
 shot song_playing.png
 tap PLAY
+# Mix: a black key held solos, HOME + black key mutes
+tap GLO
+key b2 down
+wait 100
+shot mix_solo.png
+key b2 up
+press HOME
+tapkey b1
+release HOME
+wait 40
+shot mix_mute.png

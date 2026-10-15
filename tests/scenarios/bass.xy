@@ -1,4 +1,4 @@
-# a bass line on track 3 with components: notes remembered from the keys, then steps, a ramp and a chance
+# a bass line on track 3 with components: a note from the keys, steps, a ramp, a chance, a lock, undo
 wait 200
 spin ALGO 2
 expect trk 3
@@ -9,7 +9,6 @@ shot bass_engine.png
 turn PRESET 1
 wait 40
 shot bass_preset.png
-# play a note (remembered), then write it on four steps
 tapkey 0
 tap SEQ
 tapkey w0
@@ -24,15 +23,20 @@ key w0 down
 wait 100
 tapkey w2
 key w0 up
-# a ramp up on step 4, chance on step 7
+# a ramp up on step 4 (HOME + step, white key 5), its value black key 4
+press HOME
 key w3 down
-wait 100
-tapkey b4
+wait 60
+tapkey w4
+tapkey b3
 key w3 up
+release HOME
 expect comp 3 4 5
+# a chance on step 7, a nudge with OCT+
 key w6 down
 wait 100
 spin K3 50
+tap OCT+
 wait 40
 shot bass_chance.png
 key w6 up
@@ -49,7 +53,6 @@ shot bass_done.png
 tap PLAY
 wait 2500
 tap PLAY
-# undo the last edit, redo it
 press HOME
 tap REC
 release HOME
