@@ -1,0 +1,58 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* XY-1 effects: the two send-effect tracks (fx I, fx II: one of chorus, delay, distortion, lofi,
+ * phaser, reverb each, four knobs as the OP-XY names them), the tape loop and the master section
+ * (3-band EQ with blend, saturator, compressor, limiter, group levels).
+ *
+ * All run in the audio interrupt. Buffers for the delay, the reverb and the tape live in the pool;
+ * the caller passes them in (their sizes are the memory plan's). Float, fastmath.h. */
+#pragma once
+#include <stdint.h>
+
+enum { FXT_CHORUS, FXT_DELAY, FXT_DIST, FXT_LOFI, FXT_PHASER, FXT_REVERB, NFXT };
+extern const char *const FXT_NAME[NFXT];
+extern const char *const FXT_KNOB[NFXT][4];
+/* chorus: rate, depth, feedback, stereo; delay: size (1..8 steps), amount (feedback), fine, dry;
+ * distortion: drive, amount, low cut, high cut; lofi: rate, bits, quality, drift;
+ * phaser: frequency, depth, rate, feedback; reverb: size, modulation, rate, feedback (wet) */
+
+#define FX_DLY_LEN 33075              /* int16 samples a side: 0.75 s */
+#define FX_RV_LEN 12000               /* int16 samples: the reverb's combs and allpasses */
+typedef struct fxslot fxslot_t;
+#define FXSLOT_BYTES 9216             /* the chorus line (float) and the states */
+
+void fx_init(fxslot_t *f, int16_t *dly_l, int16_t *dly_r, int16_t *rv);   /* a slot gets the lines it may use;
+                                                                            * fx II gets no reverb line (0) if the
+                                                                            * memory plan says so: it then has no reverb */
+void fx_set(fxslot_t *f, int type, const uint8_t knob[4]);  /* the slot's effect and its four knobs (0..127) */
+void fx_tempo(fxslot_t *f, float bpm);
+void fx_filter(fxslot_t *f, int hp, int lp);                /* the slot's filter page: high-pass, low-pass 0..127 */
+/* process n frames of the send (mono in) into out L/R (added) */
+void fx_process(fxslot_t *f, const float *in, float *out_l, float *out_r, uint32_t n);
+int fx_has(const fxslot_t *f, int type);                    /* the slot can do this effect (reverb needs its line) */
+
+/* ---- tape: a quarter-rate mono ring of the last 16 steps; the keys loop a segment while held ---- */
+#define TAPE_RATE 4                   /* 44100 / 4 */
+#define TAPE_LEN 32768                /* int16 samples: 2.97 s, 16 steps down to 90 BPM at scale 1 */
+typedef struct tape tape_t;
+#define TAPE_BYTES 512
+void tape_init(tape_t *t, int16_t *buf);
+void tape_set(tape_t *t, int pitch, int speed, int length, int mix);   /* the TAPE track's four knobs, 0..127 */
+void tape_bar(tape_t *t, uint32_t samples_per_step);        /* the sequencer tells it a step's length (16 = a loop) */
+void tape_segment(tape_t *t, int seg, int on);              /* a key / a step: segment 0..15 looping while on */
+/* in: the routed tracks' send (mono), recorded unless a segment loops; out L/R: the loop, added;
+ * returns the dry gain (1 - mix while looping) the caller applies to the routed tracks */
+float tape_process(tape_t *t, const float *in, float *out_l, float *out_r, uint32_t n);
+int tape_active(const tape_t *t);
+
+/* ---- master ---- */
+enum { MS_EQ_LO, MS_EQ_MID, MS_EQ_HI, MS_EQ_BLEND, MS_SAT_GAIN, MS_SAT_CLIP, MS_SAT_TONE, MS_SAT_BLEND,
+       MS_PERC, MS_MEL, MS_COMP, MS_LEVEL, NMS };
+extern const char *const MS_NAME[NMS];
+typedef struct master master_t;
+#define MASTER_BYTES 1024
+void master_init(master_t *m);
+void master_set(master_t *m, int p, int v);                 /* 0..127 (blends 0 = neutral) */
+/* perc and mel: the two groups (stereo, in place), summed with the fx returns (added into mel) */
+void master_process(master_t *m, float *perc_l, float *perc_r, float *mel_l, float *mel_r, float *out_l, float *out_r,
+                    uint32_t n);
+float master_gr_db(const master_t *m);                      /* the compressor's gain reduction (UI) */
