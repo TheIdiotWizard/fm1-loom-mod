@@ -65,14 +65,13 @@ def inline(s):
     return s
 
 
-IMG = re.compile(r'!\[([^\]]*)\]\(([^ )]+)(?: "([^"]*)")?\)')
+IMG = re.compile(r'<img src="([^"]+)"[^>]*?alt="([^"]*)"[^>]*?title="([^"]*)"[^>]*>')   # the manual's images
 
 
 def figures(md_text):
     """the text without its images, and the images as one row of captioned figures (or "")"""
-    figs = [f'<figure><img src="{m.group(2)}" alt="{html.escape(m.group(3) or m.group(1))}" width="240" '
-            f'height="240" loading="lazy"><figcaption>{html.escape(m.group(1))}</figcaption></figure>'
-            for m in IMG.finditer(md_text)]
+    figs = [f'<figure><img src="{m.group(1)}" alt="{m.group(2)}" width="240" height="240" loading="lazy">'
+            f'<figcaption>{m.group(3)}</figcaption></figure>' for m in IMG.finditer(md_text)]
     text = IMG.sub("", md_text).strip()
     return text, ('<div class="shots">' + "".join(figs) + "</div>") if figs else ""
 
@@ -133,6 +132,9 @@ def render(md):
                 elif lines[i].startswith("  ") and items and lines[i].strip():
                     items[-1] += " " + lines[i].strip()
                     i += 1
+                elif (not lines[i].strip() and items and i + 1 < len(lines) and lines[i + 1].startswith("   ")
+                      and lines[i + 1].strip()):
+                    i += 1                    # a blank line, then an indented paragraph: still this item
                 else:
                     break
             toc = all(re.match(r"\[.*\]\(#.*\)", it) for it in items)
