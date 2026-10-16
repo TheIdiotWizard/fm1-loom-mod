@@ -1,0 +1,223 @@
+# The manual's screenshots (tools/gen_screens.sh): a small project built the way the quick start says,
+# each page shot at a moment that shows what it is for. Shots are named for docs/img/screen-NAME.png.
+wait 300
+# ---- the beat on T1
+tapkey w0
+tapkey w4
+tapkey w8
+tapkey w12
+tapkey b1
+tapkey w4
+tapkey w12
+tapkey b2
+tapkey w2
+tapkey w6
+tapkey w10
+tapkey w14
+tapkey b0
+wait 1600
+shot beat.png
+tap PLAY
+wait 1600
+shot beat_playing.png
+tap PLAY
+# a component: multiply on step 7 (hats)
+press HOME
+key w6 down
+wait 60
+tapkey w2
+tapkey b2
+wait 1600
+shot component.png
+key w6 up
+release HOME
+# a held step
+key w12 down
+wait 1600
+shot step_held.png
+key w12 up
+# ---- T2: a bass line with SEQ held
+turn ALGO 1
+wait 60
+press SEQ
+key 2 down
+wait 1600
+shot seq_held.png
+key 2 up
+release SEQ
+tapkey w0
+tapkey w3
+tapkey w6
+press SEQ
+tapkey 5
+release SEQ
+tapkey w10
+press SEQ
+tapkey 0
+release SEQ
+tapkey w13
+# step record: REC, three notes from the cursor
+tap REC
+wait 1600
+shot step_record.png
+tapkey 7
+tapkey 9
+wait 1600
+shot step_record2.png
+tap REC
+# a lock on step 1: hold it and press FX? (the filter is on ENV): hold step + ENV, page 2 filter
+key w0 down
+wait 60
+tap ENV
+wait 60
+turn SELECT 1
+wait 60
+turn K1 -8
+wait 1600
+shot lock.png
+key w0 up
+wait 200
+# ---- T3: chords
+turn ALGO 1
+tap EDIT
+turn PRESET 2
+wait 1500
+tap SEQ
+press SEQ
+key 7 down
+key 11 down
+key 14 down
+wait 60
+key 7 up
+key 11 up
+key 14 up
+release SEQ
+tapkey w0
+key w0 down
+wait 60
+tapkey w7
+key w0 up
+press SEQ
+key 9 down
+key 12 down
+key 16 down
+wait 60
+key 9 up
+key 12 up
+key 16 up
+release SEQ
+tapkey w8
+key w8 down
+wait 60
+tapkey w15
+key w8 up
+wait 1600
+shot chords.png
+# ---- sound pages, on T2
+turn ALGO -1
+tap EDIT
+wait 1600
+shot engine.png
+turn SELECT 1
+wait 1600
+shot play.png
+tap ENV
+wait 1600
+shot envelope.png
+turn SELECT 1
+wait 1600
+shot filter.png
+tap LFO
+turn K1 1
+turn K3 8
+wait 1600
+shot lfo.png
+tap FX
+wait 1600
+shot sends.png
+turn SELECT 1
+wait 1600
+shot fx1.png
+tap ARP
+turn K1 1
+wait 1600
+key 7 down
+key 11 down
+key 14 down
+wait 300
+shot players.png
+key 7 up
+key 11 up
+key 14 up
+turn K1 -1
+# ---- the drum track's pages
+turn ALGO -1
+tap EDIT
+tapkey b1
+wait 1600
+shot drum_engine.png
+turn SELECT 1
+wait 1600
+shot drum_key.png
+tap ENV
+wait 1600
+shot drum_envelope.png
+# ---- the brain
+turn ALGO 8
+tap EDIT
+wait 1600
+shot brain.png
+# ---- punch-in
+turn ALGO 1
+tap EDIT
+tap PLAY
+wait 400
+key 1 down
+wait 1600
+shot punch.png
+key 1 up
+# ---- tape
+turn ALGO 1
+tap EDIT
+wait 1600
+shot tape.png
+tap PLAY
+# ---- arrange, song, mix, master
+tap HOME
+wait 60
+tapkey w1
+wait 60
+tap PLAY
+wait 1600
+shot arrange.png
+tap PLAY
+turn SELECT 1
+tapkey w0
+tapkey w0
+tapkey w1
+wait 1600
+shot song.png
+tap GLO
+tap PLAY
+wait 1600
+shot mix.png
+tap PLAY
+turn SELECT 1
+wait 1600
+shot master.png
+turn SELECT 4
+wait 1600
+shot status.png
+# ---- a help card and a list
+turn ALGO -9
+tap SEQ
+wait 1600
+press SEQ
+wait 1100
+shot card.png
+release SEQ
+wait 60
+tap SEL
+wait 1600
+shot list.png
+tap HOME

@@ -30,31 +30,38 @@ to 16 from the left, black keys 1 to 11.
 1. **A beat.** Turn **ALGORITHM** until the tag line says T1 drumline. Press **SEQ**. Black key 1 is the
    kick: press it, then white keys 1, 5, 9 and 13. Press black key 2 for the snare and press white keys 5 and
    13. Press black key 3 for the hat and press every other white key. Press **PLAY**.
+   ![The beat playing](img/screen-beat-playing.png "Steps on T1 drumline, playing: kick on 1, 5, 9 and 13, snare on 5 and 13, hats between; a tick for every sound on a step, the playhead lit")
 2. **A bass line.** Turn **ALGORITHM** to T2 prism. On the Steps page, hold **SEQ** and play a low note:
    the keys are a keyboard while **SEQ** is down, and the note is remembered. Let go and press white keys 1, 4,
    7 and 11. Hold **SEQ**, play another note, let go and press white key 14. Or tap **REC** and play the
    notes one after another: each one goes on the next step. Press **EDIT** and turn **KNOB 1** while it plays
    to hear the shape change.
+   ![SEQ held on Steps](img/screen-seq-held.png "Steps on T2 prism with SEQ held: the keys play notes, and the line above the grid says the notes a step will write") ![Step record](img/screen-step-record2.png "Step record on T2: the red cursor on the next step after the notes written so far; the footer says KEYS write, OCT+ rest, OCT- back, REC done")
 3. **Components.** Still on T2's Steps page, hold **HOME**, hold white key 7, and press white key 3: multiply.
    Press black key 3 for three hits. Let go. Hold **HOME**, hold white key 14, press white key 11: jump, and
    black key 7 for "forward or back": the pattern starts to wander. Hold **HOME**, hold white key 1 and press
    white key 14: skip trigger, so step 1 plays every other pass.
+   ![A component on step 7](img/screen-component.png "HOME and step 7 held: multiply 3 on the step; the knob strip shows its two component slots and their values")
 4. **A chord track.** Turn **ALGORITHM** to T3. Press **EDIT** and turn **PRESETS** until a pad you like
    comes up. Press **SEQ**, hold **SEQ** and hold three keys together, let go and press white key 1. Hold white
    key 1 and press white key 8 so the chord lasts half the bar: a bar under the cells shows how far it
    reaches. Hold **SEQ** and three keys a little higher, let go and press white key 9. The cells name the
    chords.
+   ![Two chords](img/screen-chords.png "Steps on T3: a C chord on step 1 and a D minor on step 9, each named in its cell, with a bar under the steps they last")
 5. **The brain.** Turn **ALGORITHM** to BRAIN. Press **EDIT**: the key is C major and T2 and T3 follow.
    Play an F, then a G, then a C while it plays: everything moves with you, in the scale. Press **SEQ**, turn
    **SELECT** for the Bar page and press black key 4 so a step is a beat. Back on Steps, hold **SEQ** and play
    a chord, let go and press a step, and so on: four steps are a bar of progression.
+   ![The brain](img/screen-brain.png "BRAIN's Engine page: C major, degree 0, the tracks that follow lit; knobs mode, key, scale, link")
 6. **Punch-in effects.** Go to any track's **EDIT** page. Hold **HOME** and press a low key: F3 ducks the
    drums, G3 loops them, B3 echoes, C4 and D4 play fills, E4 a random fill. Hold **HOME** and press a high
    key for the same on the melodic tracks. Let go and the pattern comes back.
+   ![Punch-in effects](img/screen-punch.png "PUNCH's page: the two octaves of the keyboard, drums below and melodic above, with the effect held lit")
 7. **A scene.** Press **HOME**. White key 1 is the scene playing. Press white key 2: a copy. Now change
    something: mute the drums with black key 1 on Arrange, or go to T2's Steps and turn **KNOB 1** to
    P2 for a new pattern. Press white key 1 and 2 in turn to switch between them at once, or hold **HOME** and
    press one to switch at the bar.
+   ![Arrange](img/screen-arrange.png "Arrange: each track's pattern with its playhead, scene 2 playing; knobs tempo, groove, amount, click")
 8. **Save.** Press **SAVE**.
 
 From here: hold a step to see its velocity, length, chance and nudge; hold a step and press **EDIT** to lock a
@@ -156,6 +163,8 @@ what each control does on the page you're on.
 
 From top to bottom, the screen has five parts.
 
+![The Steps page](img/screen-beat.png "The Steps page stopped: the header with the page and tempo, the line of what a step press writes and the bars, the 16 cells, the tag line, the knob strip and the two hint lines")
+
 - **The header** shows the page's button and name, the tempo, a red dot while recording, and "unsaved".
   Messages and questions cover it for a moment.
 - **The middle** is the page itself.
@@ -174,6 +183,8 @@ recording and for locks.
 Short messages cover the header for a moment. **i** is news, **✓** is something done, an arrow is an undo
 or redo, **?** on red is a question that waits for **SEL** or **HOME**, and **!** means XY-1 could not do it
 and says why.
+
+![A help card](img/screen-card.png "SEQ held alone for a second: a card explaining the Steps page; let go and nothing changes")
 
 ### The tracks
 
@@ -197,6 +208,8 @@ cells. The top line says what a press writes: on a drum track, the sound shown; 
 remembered notes, which are the last keys you held together on a play page; on the PUNCH track, the last
 effect you played; on the TAPE track, the last segment. The four squares at the right are the bars.
 **OCT−** and **OCT+** show the bar before or after.
+
+![A step held](img/screen-step-held.png "Step 13 held on T1: its velocity, length, chance and nudge on the knobs; the footer offers its length, its sounds, the nudge and the lock pages")
 
 - **Hold SEQ and play keys** to choose what a step writes: the keys play the track, and the ones you hold
   together become the remembered notes (a chord). On a drum track, the key you play becomes the sound shown.
@@ -251,10 +264,14 @@ a value on the step. Let go of the step to go back. Hold a step and press **SAVE
 recording, a knob you turn writes locks on the steps as they play. The Bar page's SHAPE knob smooths between
 locks.
 
+![A lock](img/screen-lock.png "Step 1 held with ENV's filter page: the cutoff locked at 481 Hz in red; the other knobs show a dash, unlocked")
+
 ### The Steps knobs and the Bar page
 
 With no step held, **KNOB 1** picks the pattern (P1 to P8), **KNOB 2** the length in steps, **KNOB 3** the
 track scale (how many sixteenths a step takes, from 1/2 to 16) and **KNOB 4** the track's groove amount.
+
+![The Steps list](img/screen-list.png "SEL on Steps: quantise, note length and shape, then clear notes, clear locks, copy, rotate and duplicate")
 
 Turn **SELECT** for the Bar page: quantise for live recording, the note length of new steps as a percentage
 of a step, the groove amount and the shape. The black keys set the track scale: 1, 2, 3, 4, 5, 6, 8, 16
@@ -277,6 +294,8 @@ duplicate the bar into the next.
 - **Count-in**: Setup's list has COUNT-IN. On, live recording starts with a bar of clicks instead of waiting
   for the first key.
 
+![Step record armed](img/screen-step-record.png "REC tapped on Steps: the red cursor waits on the step after the last note")
+
 Hold **HOME** and press **REC** to undo the last change to the pattern. Hold **HOME** and press **PLAY** to
 redo it. One stage, the selected track's pattern; locks stay as they are.
 
@@ -287,6 +306,8 @@ four knobs with their values from 00 to 99 as the OP-XY prints them. Turn **PRES
 sound: its factory presets, then the user presets saved from it; the message says where you are, as in
 "PRESET 3/8". Press **SEL** for the list: ENGINE changes the engine and loads its first sound, then a preset,
 SCRAMBLE for a random sound, SAVE AS PRESET, RESET SOUND, and whether the track FOLLOWS BRAIN.
+
+![The Engine page](img/screen-engine.png "Engine on T2: prism, its picture, the preset name, and its four knobs shape, ratio, detune, stereo from 00 to 99") ![The Play page](img/screen-play.png "Play: voice mode, portamento, bend range and volume")
 
 | Engine | Knobs |
 | --- | --- |
@@ -305,6 +326,8 @@ SCRAMBLE for a random sound, SAVE AS PRESET, RESET SOUND, and whether the track 
 A drum track has eleven keys on the black keys, each with a drum model: kick, snare, hi-hat, clap, shaker,
 tambourine, resonator, congas, tom or fm. Press a black key, or turn **PRESETS**, to pick the key the
 knobs edit. The Engine page's four knobs are the model's own:
+
+![A drum key's knobs](img/screen-drum-engine.png "Engine on T1 drumline: the eleven keys as pads, the snare picked; its knobs pitch, length, snare, punch") ![The Key page](img/screen-drum-key.png "The Key page: the snare's model, random, pan and volume") ![The drum envelope](img/screen-drum-envelope.png "ENV on a drum track: funk, attack, random and length for the whole kit")
 
 | Model | Knobs |
 | --- | --- |
@@ -330,6 +353,8 @@ compression, drive and hi cut.
 Turn **SELECT** on Engine for Play: poly, mono or legato, portamento, the bend range (off, 1 to 7
 semitones, an octave) and the track's volume.
 
+![The Envelope page](img/screen-envelope.png "ENV: the amp envelope's attack, decay, sustain and release, drawn") ![The Filter page](img/screen-filter.png "ENV's Filter page: a ladder filter at 702 Hz, its curve drawn; PRESETS turns the type") ![The LFO page](img/screen-lfo.png "LFO: a value LFO at 1/4 moving the filter cutoff, its shape drawn")
+
 **ENV** has the amp envelope, then the filter: cutoff in Hz, resonance, envelope amount and key tracking,
 with **PRESETS** turning the type (svf, ladder, z lowpass, z hipass, dynamic); then the filter's envelope.
 **FX** has the track's sends to FX I, FX II and the tape, and its level, then the two effects. **LFO** has the
@@ -349,6 +374,8 @@ The speed knob is synced from 2/1 to 1/64 turned left, and free in Hz turned rig
 
 Press **ARP**. **KNOB 1** picks the player: off, arp, maestro or hold.
 
+![The arp](img/screen-players.png "Players: the arp at 1/16, up, one octave, with C4 E4 G4 held")
+
 - **arp** plays the held notes one after another: speed (1/4 to 1/64, with triplets), pattern (up, down, up
   down 1, up down 2, as played, random) and range on page 1; page 2 has the note length, a style, glide and
   stereo; page 3 is hold.
@@ -365,6 +392,8 @@ becomes a copy of the scene playing. Hold a white key for a second to clear that
 mute: 1 to 8 the tracks, 9 to 11 brain, punch and tape. Hold **HOME** and turn **PRESETS** to change scenes
 from any page.
 
+![The song](img/screen-song.png "The Song page: S1, S1 and S2 in a row, looping")
+
 **KNOB 1** is the tempo (hold **HOME** for tenths), **KNOB 2** the groove type (shuffle, half shuffle,
 danish, bombora, wobbly, gaussian, accents, island nod, disfunk, rollover, prophetic), **KNOB 3** the
 selected track's groove amount from −99 to 99, and **KNOB 4** the click: off, while recording, or on.
@@ -377,6 +406,8 @@ scene playing, deletes a slot or clears the song.
 ## The aux tracks
 
 Turn **ALGORITHM** past T8. Each aux track has its own page under **EDIT** and its own steps under **SEQ**.
+
+![The tape](img/screen-tape.png "TAPE's page: the sixteen segments in a ring; pitch, speed, length and mix") ![An effect](img/screen-fx1.png "FX's FX I page: the delay with size, fine, feedback and dry")
 
 - **BRAIN**: mode (manual, or auto: the key is detected from the tracks that follow), key, scale and link,
   an instrument track that also plays the brain's keys. Play a chord on its keys: the tracks that follow
@@ -422,6 +453,8 @@ clip, tone, blend), and Master out (the drums' level, the melodic tracks' level,
 output level). Setup has the lights, MIDI clock and notes out, and one or two cores; its **SEL** list loads
 a project, starts a new one, and sets the USB audio level and the count-in. Status shows the audio load, the
 voices and the second core.
+
+![The mixer](img/screen-mix.png "Mix: a meter for each track while playing; knobs fx I, fx II, pan and level") ![The sends](img/screen-sends.png "FX's Sends page: the track's sends to FX I (delay), FX II (reverb) and the tape, and its level") ![Master EQ](img/screen-master.png "Master EQ: low, mid, high and the blend from flat to the EQ") ![Status](img/screen-status.png "Status: audio load, peak, voices, the second core, guard trips and dropouts")
 
 ## Saving
 

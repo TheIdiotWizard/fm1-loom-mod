@@ -44,6 +44,10 @@ ul { padding-left: 20px; }
 .toc a:hover { color: var(--red); }
 .lede { color: var(--dim); font-size: 17px; }
 .rec { color: var(--red); }
+img { width: 240px; height: auto; max-width: calc(50% - 6px); border-radius: 6px; margin: 6px 8px 2px 0;
+      vertical-align: top; background: #000; }
+li img { margin-top: 10px; }
+@media (max-width: 300px) { img { max-width: 100%; } }
 @media (max-width: 480px) { h1 { font-size: 32px; } h2 { font-size: 22px; } }
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@600;700&display=swap">
@@ -55,6 +59,9 @@ def inline(s):
     s = re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
     s = re.sub(r"\*\*([A-Z0-9−+–\- ]{2,12})\*\*", r"<kbd>\1</kbd>", s)        # a button or knob name
     s = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", s)
+    s = re.sub(r'!\[([^\]]*)\]\(([^ )]+)(?: &quot;([^&]*)&quot;| "([^"]*)")?\)',
+               lambda m: f'<img src="{m.group(2)}" alt="{m.group(3) or m.group(4) or m.group(1)}" '
+                         f'title="{m.group(1)}" width="240" height="240" loading="lazy">', s)
     s = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', s)
     return s
 
