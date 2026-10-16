@@ -33,7 +33,8 @@
  *                                playing, step T, scene, voices, dirty, store_writes, midi_out, clocks_out,
  *                                tempo, trk, page NAME, comp T S (prints both components; checks the first),
  *                                note T PAT S, cores, guard, parT.P, peak_db_max / peak_db_min,
- *                                punch_drum / punch_mel (the masks in effect, PX_* bits)
+ *                                punch_drum / punch_mel (the masks in effect, PX_* bits), mem (the last save's
+ *                                share of a project slot, %)
  *   reboot                       re-run boot from the simulated flash (persistence test)
  *   listen                       a screen reader starts listening (HELLO, again every 2 s): each SAY is printed
  *   where                        the reader asks for everything on the screen
@@ -513,6 +514,8 @@ static int expect(const char *what, const char *val, const char *b, const char *
         got = ui_dirty();
     else if (!strcmp(what, "store_writes"))
         got = (int)store_writes;
+    else if (!strcmp(what, "mem"))                       /* the last save's share of a project slot, % */
+        got = project_mem_pct();
     else if (!strcmp(what, "clocks_out"))
         got = (int)clock_out_count;
     else if (!strcmp(what, "midi_out"))
