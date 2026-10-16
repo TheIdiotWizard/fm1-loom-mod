@@ -44,10 +44,12 @@ ul { padding-left: 20px; }
 .toc a:hover { color: var(--red); }
 .lede { color: var(--dim); font-size: 17px; }
 .rec { color: var(--red); }
-img { width: 240px; height: auto; max-width: calc(50% - 6px); border-radius: 6px; margin: 6px 8px 2px 0;
-      vertical-align: top; background: #000; }
-li img { margin-top: 10px; }
-@media (max-width: 300px) { img { max-width: 100%; } }
+.shots { display: flex; flex-wrap: wrap; gap: 14px 12px; margin: 14px 0 22px; }
+figure { margin: 0; width: 240px; max-width: calc(50% - 6px); }
+figure img { display: block; width: 100%; height: auto; border-radius: 6px; background: #000;
+             outline: 1px solid var(--line); }
+figcaption { margin-top: 6px; font-size: 13px; line-height: 1.3; color: var(--dim); }
+@media (max-width: 340px) { figure { max-width: 100%; } }
 @media (max-width: 480px) { h1 { font-size: 32px; } h2 { font-size: 22px; } }
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@600;700&display=swap">
@@ -59,11 +61,26 @@ def inline(s):
     s = re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
     s = re.sub(r"\*\*([A-Z0-9−+–\- ]{2,12})\*\*", r"<kbd>\1</kbd>", s)        # a button or knob name
     s = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", s)
-    s = re.sub(r'!\[([^\]]*)\]\(([^ )]+)(?: &quot;([^&]*)&quot;| "([^"]*)")?\)',
-               lambda m: f'<img src="{m.group(2)}" alt="{m.group(3) or m.group(4) or m.group(1)}" '
-                         f'title="{m.group(1)}" width="240" height="240" loading="lazy">', s)
     s = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', s)
     return s
+
+
+IMG = re.compile(r'!\[([^\]]*)\]\(([^ )]+)(?: "([^"]*)")?\)')
+
+
+def figures(md_text):
+    """the text without its images, and the images as one row of captioned figures (or "")"""
+    figs = [f'<figure><img src="{m.group(2)}" alt="{html.escape(m.group(3) or m.group(1))}" width="240" '
+            f'height="240" loading="lazy"><figcaption>{html.escape(m.group(1))}</figcaption></figure>'
+            for m in IMG.finditer(md_text)]
+    text = IMG.sub("", md_text).strip()
+    return text, ('<div class="shots">' + "".join(figs) + "</div>") if figs else ""
+
+
+def block(md_text, tag="p", cls=""):
+    text, shots = figures(md_text)
+    out = f"<{tag}{cls}>{inline(text)}</{tag}>" if text else ""
+    return out + shots
 
 
 def slug(t):
@@ -76,7 +93,7 @@ def render(md):
 
     def flush():
         if para:
-            out.append("<p>" + inline(" ".join(para)) + "</p>")
+            out.append(block(" ".join(para)))
             para.clear()
 
     first_p = True
@@ -121,7 +138,11 @@ def render(md):
             toc = all(re.match(r"\[.*\]\(#.*\)", it) for it in items)
             cls = ' class="toc"' if toc else (' class="steps"' if ordered else "")
             tag = "ol" if ordered else "ul"
-            out.append(f"<{tag}{cls}>" + "".join(f"<li>{inline(it)}</li>" for it in items) + f"</{tag}>")
+            lis = []
+            for it in items:
+                text, shots = figures(it)
+                lis.append(f"<li>{inline(text)}{shots}</li>")
+            out.append(f"<{tag}{cls}>" + "".join(lis) + f"</{tag}>")
             continue
         if not ln.strip():
             flush()
