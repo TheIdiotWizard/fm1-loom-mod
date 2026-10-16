@@ -7,6 +7,7 @@ song, a tape track, two send-effect tracks, a mixer with EQ, saturator and compr
 song. Built on Felucca's platform layer with X0X's sequencer discipline, NuSaw's second core and
 Polly's menu paradigm.
 
+- **Read the manual**: [docs/MANUAL.md](docs/MANUAL.md), with a ten-minute quick start, every page and gesture, and screenshots
 - **Try it in your browser** (no FM-1 needed): <https://charlesvestal.github.io/fm1-xy/emu/>
 - **Install it** (Chrome or Edge, with the FM-1 plugged in): <https://charlesvestal.github.io/fm1-xy/install/>
 - **Download the firmware file**: [releases](https://github.com/charlesvestal/fm1-xy/releases)
@@ -14,7 +15,7 @@ Polly's menu paradigm.
 Installing is at your own risk, though it's hard to get stuck: the web installer can put M-VAVE's
 firmware back, and an FM-1 that keeps crashing starts in a safe mode.
 
-The design is in `docs/superpowers/specs/2026-10-15-xy1-design.md`; the manual follows.
+The design is in `docs/superpowers/specs/2026-10-15-xy1-design.md`.
 
 ## Building and testing
 
