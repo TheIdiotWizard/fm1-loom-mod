@@ -1,0 +1,44 @@
+# UX flow C: two chords on T3, the first held half the bar, all on the Steps page
+wait 300
+turn ALGO 2
+tap EDIT
+turn PRESET 3
+expect par3.0 0
+wait 60
+shot c02_preset.png
+tap SEQ
+press SEQ
+key 7 down
+key 11 down
+key 14 down
+wait 100
+key 7 up
+key 11 up
+key 14 up
+release SEQ
+tapkey w0
+key w0 down
+wait 200
+shot c05_step_held.png
+tapkey w7
+key w0 up
+press SEQ
+key 9 down
+key 12 down
+key 16 down
+wait 100
+key 9 up
+key 12 up
+key 16 up
+release SEQ
+tapkey w8
+wait 60
+shot c07_two_chords.png
+expect note 3 1 1 60
+expect note 3 1 9 62
+expect page Steps
+tap PLAY
+wait 1200
+shot c08_playing.png
+tap PLAY
+steps 3 1

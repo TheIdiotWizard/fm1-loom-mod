@@ -110,3 +110,8 @@ lowcut	low cut
 hicut	high cut
 z hipass	z high pass
 z lowpass	z low pass
+keytrk	key tracking
+fdbk	feedback
+PRESET #/#	preset # of #
+REST #	rest, step #
+BACK #	back to step #

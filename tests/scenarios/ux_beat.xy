@@ -1,0 +1,29 @@
+# UX flow A: a beat on T1 from a fresh boot, every sound visible at once (12 presses)
+wait 300
+tapkey w0
+tapkey w4
+tapkey w8
+tapkey w12
+tap PLAY
+wait 400
+tapkey b1
+tapkey w4
+tapkey w12
+tapkey b2
+tapkey w2
+tapkey w6
+tapkey w10
+tapkey w14
+wait 300
+shot a06_hats.png
+expect note 1 1 1 1
+expect note 1 1 5 1
+expect note 1 1 3 3
+# hold SEQ and play a black key: the sound shown is the one it plays
+press SEQ
+tapkey b0
+release SEQ
+expect page Steps
+wait 60
+shot a07_kick_shown.png
+tap PLAY

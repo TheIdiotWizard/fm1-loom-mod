@@ -1,0 +1,70 @@
+# UX flow B: a melody on T2 without leaving the Steps page
+wait 300
+turn ALGO 1
+expect trk 2
+wait 60
+shot b01_t2_steps.png
+# hold SEQ and play a key: it is the note a step writes; SEQ let go after a key turns no page
+press SEQ
+tapkey 7
+wait 60
+shot b02_seq_held.png
+release SEQ
+expect page Steps
+tapkey w0
+press SEQ
+tapkey 9
+release SEQ
+tapkey w2
+press SEQ
+tapkey 11
+release SEQ
+tapkey w4
+press SEQ
+tapkey 14
+release SEQ
+tapkey w6
+wait 60
+shot b03_four_notes.png
+expect note 2 1 1 60
+expect note 2 1 3 62
+expect note 2 1 5 64
+expect note 2 1 7 67
+# step record on Steps: the cursor starts after the last note (step 8); keys write and move on
+tap REC
+wait 60
+shot b04_rec_armed.png
+tapkey 12
+tapkey 14
+tap OCT+
+tapkey 16
+wait 60
+shot b05_three_written.png
+expect note 2 1 8 65
+expect note 2 1 9 67
+expect note 2 1 10 0
+expect note 2 1 11 69
+# a chord: keys held together write one step
+key 0 down
+key 4 down
+key 7 down
+wait 60
+key 0 up
+key 4 up
+key 7 up
+tap OCT-
+tap OCT+
+tap REC
+wait 60
+shot b06_chord_step.png
+expect note 2 1 12 53
+# step record on EDIT: the strip shows the cursor
+tap EDIT
+tap REC
+wait 60
+shot b07_rec_on_edit.png
+tapkey 12
+wait 60
+shot b08_rec_on_edit_written.png
+tap REC
+steps 2 1

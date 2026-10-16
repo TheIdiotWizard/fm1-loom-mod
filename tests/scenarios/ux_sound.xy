@@ -1,0 +1,50 @@
+# UX flow D: editing sounds: PRESETS stays in the engine, the LFO type resets, FX opens the sends, a drum key
+wait 300
+turn ALGO 1
+tap EDIT
+turn PRESET 1
+expect par2.0 1
+wait 60
+shot d02_next_preset.png
+turn PRESET 9
+expect par2.0 1
+tap ENV
+turn SELECT 1
+expect page Filter
+wait 60
+shot d05_filter.png
+turn PRESET 1
+wait 60
+shot d06_filter_type.png
+tap LFO
+spin K1 2
+spin K4 -30
+spin K1 1
+expect par2.28 2
+expect par2.27 64
+wait 60
+shot d09_lfo_random.png
+tap FX
+expect page Sends
+wait 60
+shot d10_sends.png
+turn SELECT 1
+turn PRESET 1
+wait 60
+shot d11_fx1.png
+# a drum key: its black key on the Engine page picks it, the knobs follow
+turn ALGO -1
+tap EDIT
+tapkey b1
+wait 60
+shot d12_snare_selected.png
+spin K1 6
+expect par1.54 106
+expect par1.45 100
+wait 60
+shot d13_snare_pitch.png
+turn SELECT 1
+tap SEL
+wait 60
+shot d14_key_list.png
+tap HOME

@@ -30,21 +30,24 @@ to 16 from the left, black keys 1 to 11.
 1. **A beat.** Turn **ALGORITHM** until the tag line says T1 drumline. Press **SEQ**. Black key 1 is the
    kick: press it, then white keys 1, 5, 9 and 13. Press black key 2 for the snare and press white keys 5 and
    13. Press black key 3 for the hat and press every other white key. Press **PLAY**.
-2. **A bass line.** Turn **ALGORITHM** to T2 prism. Press **EDIT** and play a low note: it is remembered.
-   Press **SEQ** and press white keys 1, 4, 7 and 11. Go back to **EDIT**, play another note, and put it on
-   white key 14. Turn **KNOB 1** on the Engine page while it plays to hear the shape change.
+2. **A bass line.** Turn **ALGORITHM** to T2 prism. On the Steps page, hold **SEQ** and play a low note:
+   the keys are a keyboard while **SEQ** is down, and the note is remembered. Let go and press white keys 1, 4,
+   7 and 11. Hold **SEQ**, play another note, let go and press white key 14. Or tap **REC** and play the
+   notes one after another: each one goes on the next step. Press **EDIT** and turn **KNOB 1** while it plays
+   to hear the shape change.
 3. **Components.** Still on T2's Steps page, hold **HOME**, hold white key 7, and press white key 3: multiply.
    Press black key 3 for three hits. Let go. Hold **HOME**, hold white key 14, press white key 11: jump, and
    black key 7 for "forward or back": the pattern starts to wander. Hold **HOME**, hold white key 1 and press
    white key 14: skip trigger, so step 1 plays every other pass.
-4. **A chord track.** Turn **ALGORITHM** to T3. Press **EDIT**, turn **PRESETS** until a pad you like comes
-   up, and hold three keys together. Press **SEQ**, press white key 1, then hold white key 1 and press white
-   key 8 so the chord lasts half the bar. Hold the same three keys on **EDIT** a few keys higher and put them
-   on white key 9.
+4. **A chord track.** Turn **ALGORITHM** to T3. Press **EDIT** and turn **PRESETS** until a pad you like
+   comes up. Press **SEQ**, hold **SEQ** and hold three keys together, let go and press white key 1. Hold white
+   key 1 and press white key 8 so the chord lasts half the bar: a bar under the cells shows how far it
+   reaches. Hold **SEQ** and three keys a little higher, let go and press white key 9. The cells name the
+   chords.
 5. **The brain.** Turn **ALGORITHM** to BRAIN. Press **EDIT**: the key is C major and T2 and T3 follow.
    Play an F, then a G, then a C while it plays: everything moves with you, in the scale. Press **SEQ**, turn
-   **SELECT** for the Bar page and press black key 4 so a step is a beat. Back on Steps, play a chord on
-   **EDIT**, press a step, and so on: four steps are a bar of progression.
+   **SELECT** for the Bar page and press black key 4 so a step is a beat. Back on Steps, hold **SEQ** and play
+   a chord, let go and press a step, and so on: four steps are a bar of progression.
 6. **Punch-in effects.** Go to any track's **EDIT** page. Hold **HOME** and press a low key: F3 ducks the
    drums, G3 loops them, B3 echoes, C4 and D4 play fills, E4 a random fill. Hold **HOME** and press a high
    key for the same on the melodic tracks. Let go and the pattern comes back.
@@ -85,12 +88,13 @@ press…" means keep **HOME** down while you press the next thing.
 
 | How do I… | Do this |
 | --- | --- |
-| pick a track | Turn **ALGORITHM** on any page. On Steps, press black key 1 to 8. |
+| pick a track | Turn **ALGORITHM** on any page. |
 | write a beat | Press **SEQ**. On a drum track, black key 1 is the kick: press it, then white keys 1, 5, 9 and 13. Black key 2 is the snare. |
-| write a bass note | Press **EDIT** and play the note. Press **SEQ** and press a white key: the note goes on that step. |
-| write a chord | Hold the notes together on a play page, then on Steps press a step. |
+| write a note | On Steps, hold **SEQ** and play the note, let go, and press a white key: the note goes on that step. |
+| write a chord | On Steps, hold **SEQ** and hold the notes together, let go, and press a step. |
+| pick a drum sound | On a drum track's Steps page, press its black key, or hold **SEQ** and press any key. |
 | see a step | On Steps, hold its white key. The knobs show its velocity, length, chance and nudge. |
-| make a note longer | Hold its step and press a later white key. |
+| make a note longer | Hold its step and press a later white key. A bar under the cells shows how far a note reaches. |
 | nudge a step | Hold its step and press **OCT−** or **OCT+**. |
 | put a second sound on a drum step | Hold the step and press the sound's black key. |
 | take one note off a step | Hold the step, press **SEL**, pick the note and press **SEL**. |
@@ -101,12 +105,14 @@ press…" means keep **HOME** down while you press the next thing.
 | see the next bar | Press **OCT+** on Steps. |
 | set the track scale | On the Bar page, press a black key: 1, 2, 3, 4, 5, 6, 8, 16 sixteenths a step, or black key 9 for half a sixteenth. |
 | change the pattern | On Steps, turn **KNOB 1**. |
-| change the sound | Press **EDIT** and turn **PRESETS**. **SEL** lists the engines, scramble and reset. |
-| edit a drum sound | On a drum track, press **EDIT** and press the sound's black key. The knobs are the model's own four. Turn **SELECT** for the model, random, pan and volume, and again for the play mode. |
+| change the sound | Press **EDIT** and turn **PRESETS**: the engine's own sounds, "PRESET 3/8". **SEL** changes the engine. |
+| edit a drum sound | On a drum track, press **EDIT** and press the sound's black key. The knobs are the model's own four. Turn **SELECT** for the model, random, pan and volume; its **SEL** list has the play mode. |
+| change the filter | Press **ENV** and turn **SELECT** to Filter. **PRESETS** turns the filter type. |
+| use the effects | Press **FX**: the track's sends. Turn **SELECT** for FX I and FX II; **PRESETS** picks the effect. |
 | play | Press **PLAY**. Press it twice quickly to start from the top. |
 | record live | Hold **REC** and press **PLAY**. Step 1 blinks red until you play the first key. |
 | record while playing | Hold **REC** and play: it records while you hold it. Hold **REC** and press **PLAY** to keep it on. |
-| record step by step | Stopped, tap **REC**. Each key you play writes the cursor's step and moves on. |
+| record step by step | Stopped, on Steps, tap **REC**. The red cursor starts after the last note; each key (or chord) you play writes it and moves on. **OCT+** leaves a rest, **OCT−** goes back. **REC** again ends. |
 | undo | Hold **HOME** and press **REC**. Hold **HOME** and press **PLAY** to redo. |
 | set the tempo | Press **HOME** and turn **KNOB 1**. Hold **HOME** and turn it for tenths. On any page, hold **HOME** and turn **SELECT**. |
 | use a punch-in effect | Hold **HOME** and press a key. The lower octave works on the track you are on, the upper octave on its whole group. |
@@ -127,10 +133,10 @@ press…" means keep **HOME** down while you press the next thing.
 | **REC** | Held while playing: records while held. Stopped: a tap arms step record. On Players with maestro, it records the chord. |
 | **SEL** | Opens a list of this page's settings and actions. With a step held, its notes. When XY-1 asks a question, **SEL** means yes. |
 | **HOME** | Opens Arrange. On Arrange, it opens the Song page. Held, it is the shift key: components, punch-in effects, undo and redo, the fine tempo, scenes, mutes on Mix. When XY-1 asks a question, **HOME** means no. |
-| **SEQ** | Opens Steps. Its page 2 is Bar. |
-| **EDIT** | Opens Engine. Its page 2 is Play. On a drum track, pages 2 and 3 are the sound's key and its play mode. |
-| **ENV** | Opens Envelope. Its page 2 is the filter envelope. On a drum track: funk, attack, random, length. |
-| **FX** | Opens Filter. Its page 2 is Sends. |
+| **SEQ** | Opens Steps. Its page 2 is Bar. Hold it on Steps and the keys play the track and set what a step writes. |
+| **EDIT** | Opens Engine. Its page 2 is Play; on a drum track, the key's model, random, pan and volume. |
+| **ENV** | Opens Envelope (a drum track: funk, attack, random, length), then Filter, then the filter's envelope. |
+| **FX** | Opens Sends, the track's sends to FX I, FX II and the tape. Then FX I and FX II, the two effects. |
 | **LFO** | Opens LFO. Its page 2 has the type's fourth and fifth knobs. |
 | **ARP** | Opens Players. With the arp, page 2 is its second set of knobs and page 3 is hold. |
 | **GLO** | Opens Mix. Turn **SELECT** for Master EQ, Master drive, Master out, Setup and Status. |
@@ -192,6 +198,9 @@ remembered notes, which are the last keys you held together on a play page; on t
 effect you played; on the TAPE track, the last segment. The four squares at the right are the bars.
 **OCT−** and **OCT+** show the bar before or after.
 
+- **Hold SEQ and play keys** to choose what a step writes: the keys play the track, and the ones you hold
+  together become the remembered notes (a chord). On a drum track, the key you play becomes the sound shown.
+  Let go of **SEQ** and nothing else changes.
 - **Press a white key** to put the remembered notes on that step, or to clear the step.
 - **Hold a white key** to see the step. **KNOB 1** is its velocity, **KNOB 2** its length in steps, **KNOB 3**
   its chance (always, a percentage, then the A:B cycles: on the A-th of every B passes) and **KNOB 4** its
@@ -228,13 +237,16 @@ For the three skips, black key 11 cycles which pass of the cycle plays: the last
 the first. A new component starts at the OP-XY's default: pulse and hold 4, multiply 2, velocity 64, the
 ramps and random 4, portamento 40 %, bend down-up, tonality fifth up, jump forward, the skips a cycle of 2.
 
-The cell shows the notes, the components' letters at the bottom right, a percent sign when the step has a
-chance, and a red dot when it has locks.
+A cell shows its notes, or a chord's name with its bass note under it. On a drum track, every sound on the
+step has a tick, the shown sound's bright, so the whole beat is visible while you edit one sound. A bar along
+the foot of the cells shows how far a long note reaches; an arrow at the bar's end means it goes on. The
+components' letters sit at the bottom right, a percent sign marks a chance, and a red dot marks locks.
 
 ### Locks
 
-Hold a step and press **EDIT**, **ENV**, **FX** or **LFO**. The knob strip becomes that page's four knobs
-for the held step, showing "–" where the step has no lock and the locked values in red. Turn a knob to lock
+Hold a step and press **EDIT**, **ENV**, **FX** or **LFO**. The knob strip becomes that module's four knobs
+for the held step (turn **SELECT** for its other pages: **ENV** has the envelope, the filter and the filter's
+envelope; **FX** the sends), showing "–" where the step has no lock and the locked values in red. Turn a knob to lock
 a value on the step. Let go of the step to go back. Hold a step and press **SAVE** to clear its locks. While
 recording, a knob you turn writes locks on the steps as they play. The Bar page's SHAPE knob smooths between
 locks.
@@ -256,8 +268,11 @@ duplicate the bar into the next.
   you play, and the keys write steps as you play, quantised by the Bar page. Press **PLAY** to stop.
 - **While playing**: hold **REC** and play. It records only while you hold **REC**. Hold **REC** and press
   **PLAY** to keep it on; press **REC** again to turn it off.
-- **Step by step**: stopped, tap **REC**. The cursor is on step 1, and every key you play on a play page
-  writes that step and moves the cursor on. **OCT−** and **OCT+** move the cursor. Tap **REC** again to stop.
+- **Step by step**: stopped, tap **REC**. On Steps the keys become a keyboard and a red cursor marks the
+  step they write, starting after the pattern's last note. A key, or keys held together, writes the step and
+  the cursor moves on when you let go. **OCT+** leaves a rest, **OCT−** goes back a step. On a drum track the
+  sound is added to the step. Tap **REC** again to stop. It works on the sound pages too, with a strip of the
+  bar along the foot of the screen.
 - **Punch-in effects** you hold while recording are written into the PUNCH track's pattern.
 - **Count-in**: Setup's list has COUNT-IN. On, live recording starts with a bar of clicks instead of waiting
   for the first key.
@@ -267,10 +282,11 @@ redo it. One stage, the selected track's pattern; locks stay as they are.
 
 ## Sounds
 
-Press **EDIT**. The Engine page shows the track's engine, a picture of it, and its four knobs with their
-values from 00 to 99 as the OP-XY prints them. Turn **PRESETS** for the next sound: the factory presets,
-then your user presets. Press **SEL** for the list: pick an engine, pick a preset, SCRAMBLE for a random
-sound, SAVE AS PRESET, RESET SOUND, and whether the track FOLLOWS BRAIN.
+Press **EDIT**. The Engine page shows the track's engine, a picture of it that moves with the knobs, and its
+four knobs with their values from 00 to 99 as the OP-XY prints them. Turn **PRESETS** for the engine's next
+sound: its factory presets, then the user presets saved from it; the message says where you are, as in
+"PRESET 3/8". Press **SEL** for the list: ENGINE changes the engine and loads its first sound, then a preset,
+SCRAMBLE for a random sound, SAVE AS PRESET, RESET SOUND, and whether the track FOLLOWS BRAIN.
 
 | Engine | Knobs |
 | --- | --- |
@@ -303,20 +319,21 @@ knobs edit. The Engine page's four knobs are the model's own:
 | tom | pitch, length, sweep, rate |
 | fm | pitch, length, mod, feedback |
 
-Turn **SELECT** for the key's page: the model, random (a variation on every hit), pan and volume in dB.
-Turn it again for the play mode: one-shot, gated, loop, or choke groups 1 to 3. **ENV** on a drum track is
-the drumline envelope: funk (a delay before the hit), attack, random and length. **FX** with the dynamic
-type is low cut, compression, drive and hi cut.
+On every sound page of a drum track, a black key picks the key the knobs edit. Turn **SELECT** for the
+key's page: the model, random (a variation on every hit), pan and volume in dB; its **SEL** list has the play
+mode: one-shot, gated, loop, or choke groups 1 to 3. **ENV** on a drum track is the drumline envelope: funk
+(a delay before the hit), attack, random and length. Its Filter page with the dynamic type is low cut,
+compression, drive and hi cut.
 
 ### The synth pages
 
 Turn **SELECT** on Engine for Play: poly, mono or legato, portamento, the bend range (off, 1 to 7
 semitones, an octave) and the track's volume.
 
-**ENV** has the amp envelope, and on page 2 the filter envelope. **FX** has the filter: cutoff in Hz,
-resonance, envelope amount and key tracking; page 2 has the filter type (svf, ladder, z lowpass, z hipass,
-dynamic) and the sends to FX I, FX II and the tape. **LFO** has the type and its first three knobs; page 2
-its fourth and fifth:
+**ENV** has the amp envelope, then the filter: cutoff in Hz, resonance, envelope amount and key tracking,
+with **PRESETS** turning the type (svf, ladder, z lowpass, z hipass, dynamic); then the filter's envelope.
+**FX** has the track's sends to FX I, FX II and the tape, and its level, then the two effects. **LFO** has the
+type and its first three knobs; page 2 its fourth and fifth. A new type starts from its own defaults:
 
 | Type | Page 1 | Page 2 |
 | --- | --- | --- |
@@ -391,9 +408,10 @@ Turn **ALGORITHM** past T8. Each aux track has its own page under **EDIT** and i
 - **TAPE**: a loop of the last 16 steps of the tracks that send to it. A white key loops that segment while
   held, and the last one you played is the one a step writes. Pitch in octaves, speed from 50 % to 200 %,
   length in steps and mix on the knobs.
-- **FX I** and **FX II**: a send effect each, picked with **PRESETS** or **SEL**: chorus, delay, distortion,
-  lofi, phaser or reverb, with its four knobs. Page 2 has a high-pass, a low-pass and, on FX I, the send into
-  FX II.
+- **FX I** and **FX II**: a send effect each: chorus, delay, distortion, lofi, phaser or reverb, with its
+  four knobs. Press **FX** and turn **SELECT** to reach them from any track: **PRESETS** picks the effect, and
+  **SEL** has its high-pass, low-pass and, on FX I, the send into FX II. The keys play the track you were on.
+  Turned to with **ALGORITHM**, they have the same knobs on **EDIT**.
 
 ## Mix and master
 
@@ -419,17 +437,18 @@ On a sound page, hold **SAVE** and press white key 1 to 16 to keep the track's s
 | --- | --- | --- | --- | --- | --- | --- |
 | HOME | Arrange | tempo | groove | amount | click | white: scenes, black: mutes |
 | HOME, SELECT | Song | slot | scene | repeat | at end | white: add a scene |
-| SEQ | Steps | pattern | length | scale | groove | white: steps, black: sound or track |
+| SEQ | Steps | pattern | length | scale | groove | white: steps, black: sound (drums); SEQ held: a keyboard |
 | SEQ, a step held | Steps | velocity | length | chance | nudge | white: length, black: sounds |
 | SEQ, HOME + a step | Steps | the components and values shown | | | | white: component, black: value |
 | SEQ, SELECT | Bar | quant | note | groove | shape | black: scale |
 | EDIT | Engine | the engine's four | | | | play |
 | EDIT, SELECT | Play | mode | porta | bend | volume | play |
-| EDIT, drum track | Engine, Key, Mode | the key's knobs; model, random, pan, volume; play mode | | | | black: the key |
+| EDIT, drum track | Engine, Key | the key's knobs; model, random, pan, volume | | | | black: the key |
 | ENV | Envelope | attack | decay | sustain | release | play |
-| ENV, SELECT | Filter env | attack | decay | sustain | release | play |
-| FX | Filter | cutoff | reso | env | keytrack | play |
-| FX, SELECT | Sends | type | fx I | fx II | tape | play |
+| ENV, SELECT | Filter | cutoff | reso | env | keytrack | play; PRESETS: the type |
+| ENV, SELECT twice | Filter env | attack | decay | sustain | release | play |
+| FX | Sends | fx I | fx II | tape | level | play |
+| FX, SELECT | FX I, FX II | the effect's four | | | | play; PRESETS: the effect |
 | LFO | LFO | type | the type's three | | | play |
 | LFO, SELECT | LFO 2 | the type's fourth and fifth | | | | play |
 | ARP | Players | player | its first | its second | its third | play, through the player |

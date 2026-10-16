@@ -16,6 +16,7 @@
  *   SELECT the button's pages     ALGORITHM the track      PRESETS the page's item     K1-K4 the page's four */
 
 static void speak(void);
+static void step_rec_start(void);
 static void sp_msg(const char *a, const char *b, uint32_t flags);
 static uint8_t sp_said;
 static uint32_t sp_in_t;
@@ -159,6 +160,16 @@ static void set_tp(int trk, int p, int v)
     if (par[p] == v)
         return;
     par[p] = (uint8_t)v;
+    if (p == TP_LTYPE && !is_aux(trk)) {         /* another LFO type: its own knobs start from their defaults */
+        static const uint8_t LQ[5] = {TP_LSPEED, TP_LAMT, TP_LDEST, TP_LX, TP_LX2};
+        engine_set(trk, p, v);
+        for (int i = 0; i < 5; i++) {
+            par[LQ[i]] = tp_info_par(LQ[i], par)->def;
+            engine_set(trk, LQ[i], par[LQ[i]]);
+        }
+        mark_dirty();
+        return;
+    }
     if (p == TP_ENGINE && !is_aux(trk)) {
         sound_default(par, v);
         memset(proj.trk[trk].name, 0, NAME_LEN);
@@ -220,6 +231,51 @@ static const char *preset_name(int i, char *t)
         }
         return t;
     }
+}
+static int preset_engine(int i)                  /* a preset's engine (a user slot never saved: -1) */
+{
+    if (i < NPRESETS)
+        return PRESETS[i].par[TP_ENGINE];
+    i -= NPRESETS;
+    return user_presets[i].name[0] ? user_presets[i].engine : -1;
+}
+static int name_is(const char *a, const char *b) /* two preset names (NAME_LEN, maybe unterminated) */
+{
+    for (int i = 0; i < NAME_LEN; i++) {
+        if (a[i] != b[i])
+            return 0;
+        if (!a[i])
+            return 1;
+    }
+    return 1;
+}
+static int preset_apply(int trk, int i);
+/* PRESETS: the next sound of the track's own engine (its factory presets, then the user presets saved from it);
+ * the message says where: "PRESET 3/8 WIDE PAD" */
+static void preset_step(int trk, int d)
+{
+    int eng = proj.trk[trk].par[TP_ENGINE], n = 0, at = -1, i, to, all;
+    char a[16], b[24];
+    for (i = 0; i < presets_all(); i++)
+        if (preset_engine(i) == eng) {
+            if (at < 0 && ((i < NPRESETS && name_is(PRESETS[i].name, proj.trk[trk].name)) || i == ui.preset_i))
+                at = n;
+            n++;
+        }
+    if (!n) {
+        say_no("NO PRESETS", "for this engine");
+        return;
+    }
+    all = n;
+    to = at < 0 ? (d > 0 ? 0 : n - 1) : ((at + d) % n + n) % n;
+    for (i = 0, n = 0; i < presets_all(); i++)
+        if (preset_engine(i) == eng && n++ == to)
+            break;
+    preset_apply(trk, i);
+    ui.preset_i = (uint8_t)i;
+    ui.pick_preset = (uint8_t)(i < NPRESETS ? i : 0);
+    num_s((uint32_t)all, s_cat(num_s((uint32_t)to + 1u, s_cat(a, "PRESET ")), "/"));
+    say(a, preset_name(i, b));
 }
 static int preset_apply(int trk, int i)
 {
@@ -358,7 +414,7 @@ static void rec_tap(void)                        /* REC released, unused, while 
         return;
     ui.rec_armed = (uint8_t)!ui.rec_armed;
     if (ui.rec_armed) {
-        ui.cursor = 0;
+        step_rec_start();
         say("STEP RECORD", "keys write steps");
     } else
         say("RECORD OFF", 0);
@@ -601,31 +657,73 @@ static void step_clear_locks_held(void)
     say("LOCKS CLEARED", 0);
     mark_dirty();
 }
-static void step_rec_write(void)                 /* step record: the keys held write the cursor's step */
+/* step record: the cursor starts after the pattern's last written step (step 1 if it is empty or full) */
+static void step_rec_start(void)
+{
+    int trk = sel_trk(), last = -1;
+    const tpat_t *tp;
+    ui.cursor = 0;
+    ui.srec_down = 0;
+    if (!is_seqt(trk))
+        return;
+    tp = tpat(trk);
+    for (int i = 0; i < tp->len; i++)
+        if (!step_empty(&tp->st[i]))
+            last = i;
+    if (last >= 0 && last < tp->len - 1)
+        ui.cursor = (uint8_t)(last + 1);
+    ui.bar = (uint8_t)(ui.cursor / 16);
+}
+/* a key while step record is armed: the first of a chord replaces the cursor step (a drum track adds its sound),
+ * the others held with it join the same step; v is what the step holds (a note, a sound, an effect + 1, a
+ * segment + 1) */
+static void step_rec_key(int v)
 {
     int trk = sel_trk();
     step_t *st;
-    if (!is_seqt(trk) || trk == AUX_PUNCH || trk == AUX_TAPE)
+    if (!is_seqt(trk) || v <= 0 || v > 255)
         return;
     if (ui.cursor >= tpat(trk)->len)
         ui.cursor = 0;
     st = &tpat(trk)->st[ui.cursor];
     undo_keep();
-    step_set_notes(st, ui.chord, ui.nchord > SN ? SN : ui.nchord, 100);
+    if (!ui.srec_down && !is_drum(trk)) {
+        memset(st, 0, sizeof *st);                    /* (the step's components and locks go with it: a new note) */
+        st->vel = 100;
+    }
+    {
+        int has = 0, k;
+        for (k = 0; k < SN; k++)
+            has |= st->note[k] == v;
+        for (k = 0; !has && k < SN; k++)
+            if (!st->note[k]) {
+                st->note[k] = (uint8_t)v;
+                break;
+            }
+        if (!st->vel)
+            st->vel = 100;
+    }
+    ui.srec_down++;
     mark_dirty();
 }
-static void step_rec_advance(void)
+static void step_rec_move(int d)                  /* the cursor a step on (a rest, or the chord written) or back */
 {
-    int trk = sel_trk();
+    int trk = sel_trk(), len;
     char t[16];
     if (!is_seqt(trk))
         return;
-    ui.cursor = (uint8_t)((ui.cursor + 1) % (tpat(trk)->len ? tpat(trk)->len : 1));
+    len = tpat(trk)->len ? tpat(trk)->len : 1;
+    ui.cursor = (uint8_t)((ui.cursor + d + len) % len);
     ui.bar = (uint8_t)(ui.cursor / 16);
     if (ann_on()) {
         num_s((uint32_t)ui.cursor + 1u, s_cat(t, "step "));
         ann_later(t, 0, 150u, plat_ms());
     }
+}
+static void step_rec_key_up(void)
+{
+    if (ui.srec_down && !--ui.srec_down)
+        step_rec_move(1);
 }
 
 /* ------------------------------------------------------------- keys --- */
@@ -711,7 +809,7 @@ static void track_select(int t)
     }
     ui.touched = -1;
     if (ui.rec_armed)
-        ui.cursor = 0;
+        step_rec_start();
     if (ui.dsound >= DL_NSOUND)
         ui.dsound = 0;
 }
@@ -727,6 +825,69 @@ static void solo_end(void)
         return;
     seq.mute = ui.solo_mute;
     ui.solo = 0;
+}
+/* the keys as a keyboard for the selected track (the play pages; Steps with SEQ held or while recording): they
+ * play it and set what a step press writes; step record writes the cursor step */
+static void keyboard_down(int k)
+{
+    int trk = sel_trk(), w = ordinal(WHITE_K, 16, k), b = ordinal(BLACK_K, 11, k), srec = ui.rec_armed && !playing();
+    if (trk == AUX_BRAIN) {
+        ui.kmode[k] = KM_BRAIN;
+        ui.knote[k] = (uint8_t)key_note(k);
+        engine_brain_key(key_note(k), 1);
+        chord_add(key_note(k));
+        for (int i = 0; i < SN && i < ui.nchord; i++)
+            ui.rem[i] = ui.chord[i];
+        ui.nrem = (uint8_t)(ui.nchord > SN ? SN : ui.nchord);
+        if (srec)
+            step_rec_key(key_note(k));
+        return;
+    }
+    if (trk == AUX_PUNCH) {
+        ui.kmode[k] = KM_PUNCH;
+        punch_key(k, 1);
+        if (srec && punch_of_key(k) >= 0)
+            step_rec_key(punch_of_key(k) + 1);
+        return;
+    }
+    if (trk == AUX_TAPE) {
+        if (w >= 0) {
+            ui.kmode[k] = KM_TAPE;
+            ui.knote[k] = (uint8_t)w;
+            ui.rem_seg = (uint8_t)(w + 1);
+            engine_tape_key(w, 1);
+            if (srec)
+                step_rec_key(w + 1);
+        }
+        return;
+    }
+    if (is_aux(trk))
+        trk = inst_trk();                        /* FX tracks: the keys audition the instrument selected last */
+    {
+        int note = is_drum(trk) ? key_sound(k) : key_note(k);
+        ui.kmode[k] = KM_PLAY;
+        ui.knote[k] = (uint8_t)note;
+        engine_key(trk, note, 1, 127);
+        chord_add(note);
+        if (ui.nchord > ui.nchord_max || ui.nchord == 1) {
+            memcpy(ui.chord_max, ui.chord, 8);
+            ui.nchord_max = ui.nchord;
+        }
+        if (is_drum(trk)) {                      /* a drum key: its sound is the one shown (Steps with SEQ held; a
+                                                  * black key on the sound pages picks the key the knobs edit) */
+            if ((ui.page == P_STEPS || b >= 0) && ui.dsound != note - 1) {
+                ui.dsound = (uint8_t)(note - 1);
+                if (ui.page != P_STEPS || !playing())
+                    say("KEY", DL_SOUND_NAME[ui.dsound]);
+            }
+        } else if (!is_aux(sel_trk())) {
+            for (int i = 0; i < SN && i < ui.nchord; i++)
+                ui.rem[i] = ui.chord[i];
+            ui.nrem = (uint8_t)(ui.nchord > SN ? SN : ui.nchord);
+        }
+        if (srec && !is_aux(sel_trk()))
+            step_rec_key(note);
+    }
 }
 static void key_down(int k)
 {
@@ -744,22 +905,22 @@ static void key_down(int k)
         return;
     if (home_held()) {                           /* the shift layer */
         if ((p == P_STEPS || p == P_BAR) && is_seqt(trk)) {
-            if (w >= 0 && !ui.cstep) {           /* HOME + a step: the step for a component */
+            if (w >= 0 && !ui.cstep) {
                 ui.kmode[k] = KM_CSTEP;
                 ui.cstep = (uint16_t)(1u << w);
                 ui.held_first = (uint8_t)w;
                 ui.ccomp = 0;
                 ui.touched = -1;
-            } else if (w >= 0 && w < NSC - 1) {  /* a white key: the component */
+            } else if (w >= 0 && w < NSC - 1) {
                 ui.kmode[k] = KM_COMP;
                 comp_toggle(w + 1);
-            } else if (b >= 0 && ui.cstep) {     /* a black key: its value */
+            } else if (b >= 0 && ui.cstep) {
                 ui.kmode[k] = KM_COMP;
                 comp_value(b);
             }
             return;
         }
-        if (p == P_ARRANGE && w >= 0) {          /* HOME + a scene: cued at the bar */
+        if (p == P_ARRANGE && w >= 0) {
             ui.kmode[k] = KM_SCENE;
             ui.knote[k] = (uint8_t)w;
             scene_go(w, 1);
@@ -771,7 +932,7 @@ static void key_down(int k)
             say(seq.mute >> b & 1u ? "MUTED" : "UNMUTED", TRACK_NAME[b]);
             return;
         }
-        if (k < 24 && !(p == P_SONG)) {          /* HOME + a key: a punch-in effect */
+        if (k < 24 && p != P_SONG) {
             ui.kmode[k] = KM_PUNCH;
             punch_key(k, 1);
         }
@@ -811,7 +972,7 @@ static void key_down(int k)
         return;
     }
     if (p == P_BAR) {
-        if (b >= 0 && b < 9 && is_seqt(trk)) {   /* the track scale */
+        if (b >= 0 && b < 9 && is_seqt(trk)) {
             undo_keep();
             tpat(trk)->scale = BAR_SCALE_KEY[b];
             ui.kmode[k] = KM_SCALE;
@@ -823,6 +984,10 @@ static void key_down(int k)
     if (p == P_STEPS) {
         if (!is_seqt(trk))
             return;
+        if ((ui.btn >> B_SEQ & 1u) || ui.rec_armed || seq.rec || seq.rec_wait) {   /* a keyboard: SEQ held, recording */
+            keyboard_down(k);
+            return;
+        }
         if (w >= 0) {
             if (ui.held) {
                 ui.kmode[k] = KM_LENGTH;
@@ -836,7 +1001,7 @@ static void key_down(int k)
             ui.touched = -1;
             return;
         }
-        if (b >= 0 && ui.held && is_drum(trk)) {   /* a step held + a black key: that sound on the step */
+        if (b >= 0 && ui.held && is_drum(trk)) {
             int s = step_shown(ui.held_first), on = 0;
             step_t *st = &tpat(trk)->st[s];
             undo_keep();
@@ -851,20 +1016,14 @@ static void key_down(int k)
             mark_dirty();
             return;
         }
-        if (b >= 0 && ui.held)
-            return;
-        if (b >= 0 && is_drum(trk)) {
+        if (b >= 0 && is_drum(trk) && !ui.held) {   /* a drum track: pick (and hear) the sound */
             ui.kmode[k] = KM_SOUND;
             ui.dsound = (uint8_t)b;
             engine_key(trk, b + 1, 1, 127);
             ui.knote[k] = (uint8_t)(b + 1);
             return;
         }
-        if (b >= 0 && b < NSEQT) {
-            ui.kmode[k] = KM_TRACK;
-            track_select(b);
-            say(TRACK_NAME[b], 0);
-        }
+        ui.kmode[k] = KM_IDLE;                   /* (the other tracks' black keys: nothing, ALGORITHM picks a track) */
         return;
     }
     if (p == P_MIX) {
@@ -879,59 +1038,15 @@ static void key_down(int k)
     }
     if (p >= P_MASTER)
         return;
-    /* the play pages: the track's keys */
-    if (trk == AUX_BRAIN) {
-        if (p == P_PLAY) {                       /* the routing page: black keys toggle the followers */
-            if (b >= 0 && b < NTRK) {
-                ui.kmode[k] = KM_ROUTE;
-                set_tp(b, TP_BRAIN, proj.trk[b].par[TP_BRAIN] ? 0 : 1);
-                say(TRACK_NAME[b], proj.trk[b].par[TP_BRAIN] ? "follows" : "on its own");
-            }
-            return;
-        }
-        ui.kmode[k] = KM_BRAIN;
-        ui.knote[k] = (uint8_t)key_note(k);
-        engine_brain_key(key_note(k), 1);
-        chord_add(key_note(k));
-        for (int i = 0; i < SN && i < ui.nchord; i++)
-            ui.rem[i] = ui.chord[i];
-        ui.nrem = (uint8_t)(ui.nchord > SN ? SN : ui.nchord);
-        return;
-    }
-    if (trk == AUX_PUNCH) {
-        ui.kmode[k] = KM_PUNCH;
-        punch_key(k, 1);
-        return;
-    }
-    if (trk == AUX_TAPE) {
-        if (w >= 0) {
-            ui.kmode[k] = KM_TAPE;
-            ui.knote[k] = (uint8_t)w;
-            ui.rem_seg = (uint8_t)(w + 1);
-            engine_tape_key(w, 1);
+    if (trk == AUX_BRAIN && p == P_PLAY) {       /* the brain's routing page: black keys toggle the followers */
+        if (b >= 0 && b < NTRK) {
+            ui.kmode[k] = KM_ROUTE;
+            set_tp(b, TP_BRAIN, proj.trk[b].par[TP_BRAIN] ? 0 : 1);
+            say(TRACK_NAME[b], proj.trk[b].par[TP_BRAIN] ? "follows" : "on its own");
         }
         return;
     }
-    if (is_aux(trk))
-        trk = ui.last_inst % NTRK;               /* FX tracks: the keys audition the instrument selected last */
-    {
-        int note = is_drum(trk) ? key_sound(k) : key_note(k);
-        ui.kmode[k] = KM_PLAY;
-        ui.knote[k] = (uint8_t)note;
-        engine_key(trk, note, 1, 127);
-        chord_add(note);
-        if (ui.nchord > ui.nchord_max || ui.nchord == 1) {   /* the largest set held together */
-            memcpy(ui.chord_max, ui.chord, 8);
-            ui.nchord_max = ui.nchord;
-        }
-        if (!is_aux(sel_trk())) {
-            for (int i = 0; i < SN && i < ui.nchord; i++)
-                ui.rem[i] = ui.chord[i];
-            ui.nrem = (uint8_t)(ui.nchord > SN ? SN : ui.nchord);
-        }
-        if (ui.rec_armed && !playing() && !is_aux(sel_trk()))
-            step_rec_write();
-    }
+    keyboard_down(k);
 }
 static void key_up(int k)
 {
@@ -939,11 +1054,11 @@ static void key_up(int k)
     ui.kmode[k] = KM_NONE;
     switch (m) {
     case KM_PLAY:
-        engine_key(is_aux(trk) ? ui.last_inst % NTRK : trk, ui.knote[k], 0, 0);
+        engine_key(is_aux(trk) ? inst_trk() : trk, ui.knote[k], 0, 0);
         chord_del(ui.knote[k]);
+        if (ui.rec_armed && !playing())
+            step_rec_key_up();
         if (!ui.nchord) {
-            if (ui.rec_armed && !playing() && !is_aux(trk))
-                step_rec_advance();
             if (ui.maestro_rec && !is_aux(trk)) {   /* the chord as it was at its largest (up to 8 keys) */
                 seq_maestro_record(&seq, trk, ui.chord_max, ui.nchord_max);
                 ui.maestro_rec = 0;
@@ -978,13 +1093,19 @@ static void key_up(int k)
     }
     case KM_PUNCH:
         punch_key(k, 0);
+        if (ui.rec_armed && !playing() && trk == AUX_PUNCH && !home_held())
+            step_rec_key_up();
         break;
     case KM_BRAIN:
         engine_brain_key(ui.knote[k], 0);
         chord_del(ui.knote[k]);
+        if (ui.rec_armed && !playing())
+            step_rec_key_up();
         break;
     case KM_TAPE:
         engine_tape_key(ui.knote[k], 0);
+        if (ui.rec_armed && !playing())
+            step_rec_key_up();
         break;
     case KM_SOUND:
         engine_key(trk, ui.knote[k], 0, 0);
@@ -1013,7 +1134,7 @@ static void page_button(int b)
 {
     for (uint32_t i = 0; i < NPAGE_BTN; i++)
         if (PAGE_BTN[i].btn == b) {
-            if (is_aux(sel_trk()) && (b == B_ENV || b == B_FX || b == B_LFO || b == B_ARP)) {
+            if (is_aux(sel_trk()) && (b == B_ENV || b == B_LFO || b == B_ARP)) {
                 say_no(TRACK_NAME[sel_trk()], "EDIT has its page");
                 return;
             }
@@ -1080,12 +1201,10 @@ static void button_up(int b)
             step_nudge(d);
             break;
         }
-        if (ui.rec_armed && !playing() && is_seqt(sel_trk())) {
-            int len = tpat(sel_trk())->len ? tpat(sel_trk())->len : 1;
-            ui.cursor = (uint8_t)((ui.cursor + d + len) % len);
-            ui.bar = (uint8_t)(ui.cursor / 16);
+        if (ui.rec_armed && !playing() && is_seqt(sel_trk())) {   /* OCT+ a rest, OCT- back a step */
+            step_rec_move(d);
             num_s((uint32_t)ui.cursor + 1u, t);
-            say("CURSOR", t);
+            say(d > 0 ? "REST" : "BACK", t);
             break;
         }
         if (ui.page == P_STEPS || ui.page == P_BAR) {
@@ -1298,6 +1417,18 @@ static void knob(int k, int32_t e)
     case P_STATUS: return;
     default: break;
     }
+    if (fx_page(ui.page)) {                      /* an effect's knobs: the effect track's own */
+        int ft = ui.page == P_FX1 ? AUX_FX1 : AUX_FX2;
+        set_tp(ft, TP_E1 + k, proj.trk[ft].par[TP_E1 + k] + (int)e);
+        return;
+    }
+    if (ui.page == P_SENDS) {
+        trk = inst_trk();
+        p = tp_page_param(P_SENDS, k, trk);
+        if (p >= 0)
+            set_tp(trk, p, proj.trk[trk].par[p] + (int)e);
+        return;
+    }
     if (is_aux(trk) && ui.page != P_MIX) {
         aux_knob(trk, k, e);
         return;
@@ -1334,23 +1465,25 @@ static void presets(int32_t e)
     case P_MIX:
         track_select(trk + d);
         break;
+    case P_FX1: case P_FX2:
+        fx_pick(ui.page == P_FX1 ? AUX_FX1 : AUX_FX2, d);
+        break;
+    case P_FILTER:                               /* the filter type */
+        if (!is_aux(trk)) {
+            const uint8_t *par = proj.trk[trk].par;
+            set_tp(trk, TP_FTYPE, (par[TP_FTYPE] + d + NFT) % NFT);
+            say("FILTER", tp_info_par(TP_FTYPE, par)->names[par[TP_FTYPE] % NFT]);
+        }
+        break;
     default:
         if (is_fx(trk))
             fx_pick(trk, d);
-        else if (is_drum(trk) && (ui.page == P_ENGINE || ui.page == P_PLAY || ui.page == P_ENGINE3)) {
+        else if (is_drum(trk) && (ui.page == P_ENGINE || ui.page == P_PLAY)) {
             ui.dsound = (uint8_t)((ui.dsound + d + DL_NSOUND) % DL_NSOUND);
             say("KEY", DL_SOUND_NAME[ui.dsound]);
-        } else if (!is_aux(trk) && ui.page >= P_ENGINE && ui.page <= P_PLAYERS3) {
-            int n = presets_all(), i = ui.preset_i;
-            for (int tries = 0; tries < n; tries++) {
-                i = ((i + d) % n + n) % n;
-                if (preset_apply(trk, i))
-                    break;
-            }
-            ui.preset_i = (uint8_t)i;
-            ui.pick_preset = (uint8_t)(i < NPRESETS ? i : 0);
-            say("PRESET", preset_name(i, t));
-        }
+        } else if (!is_aux(trk) && ui.page >= P_ENGINE && ui.page <= P_PLAYERS3)
+            preset_step(trk, d);
+        (void)t;
         break;
     }
 }
@@ -1388,6 +1521,8 @@ static void list_open(void)
     ui.pick_engine = proj.trk[sel_trk()].par[TP_ENGINE] % NENGINE;
     if (is_fx(sel_trk()))
         ui.pick_fx = proj.trk[sel_trk()].par[TP_ENGINE] % NFXT;
+    if (fx_page(ui.page))
+        ui.pick_fx = proj.trk[ui.page == P_FX1 ? AUX_FX1 : AUX_FX2].par[TP_ENGINE] % NFXT;
     list_build();
     if (!lst.n) {
         lst.open = 0;
@@ -1438,7 +1573,7 @@ static void list_change(int32_t e)
         switch (lst.row[lst.sel].id) {
         case A_ENGINE: ui.pick_engine = (uint8_t)clampi(ui.pick_engine + d, 0, NENGINE - 1); break;
         case A_EFFECT: {
-            int t = ui.pick_fx, trk = sel_trk();
+            int t = ui.pick_fx, trk = fx_page(ui.page) ? (ui.page == P_FX1 ? AUX_FX1 : AUX_FX2) : sel_trk();
             for (int tries = 0; tries < NFXT; tries++) {
                 t = clampi(t + d, 0, NFXT - 1);
                 if (engine_fx_has(trk - AUX_FX1, t))
@@ -1461,6 +1596,20 @@ static void list_change(int32_t e)
             proj.rsv[0] = (uint8_t)(d > 0);
             mark_dirty();
             break;
+        case A_PLAYMODE: {
+            int t = sel_trk(), q = TP_DRUM(ui.dsound % DL_NSOUND, DP_MODE);
+            set_tp(t, q, clampi(proj.trk[t].par[q] + d, 0, NPM - 1));
+            break;
+        }
+        case A_FTYPE:
+            set_tp(sel_trk(), TP_FTYPE, clampi(proj.trk[sel_trk()].par[TP_FTYPE] + d, 0, NFT - 1));
+            break;
+        case A_FX_HP: case A_FX_LP: case A_FX_SEND: {
+            int ft = ui.page == P_FX2 ? AUX_FX2 : AUX_FX1, id = lst.row[lst.sel].id;
+            int q = id == A_FX_HP ? TP_FENV : id == A_FX_LP ? TP_CUT : TP_SEND2;
+            set_tp(ft, q, proj.trk[ft].par[q] + (int)accel(EN_ALGO, e));
+            break;
+        }
         case A_FOLLOW: {
             int t = list_follow_trk();
             set_tp(t, TP_BRAIN, (proj.trk[t].par[TP_BRAIN] % 3 + d + 3) % 3);
@@ -1730,14 +1879,22 @@ static void action_run(int a)
     case A_ROT_FWD: act_rotate(1); say("ROTATED", "forward"); break;
     case A_ROT_BACK: act_rotate(-1); say("ROTATED", "back"); break;
     case A_DUP_BAR: act_dup_bar(); break;
-    case A_ENGINE:
+    case A_ENGINE: {                             /* another engine: its first sound */
+        int f = preset_first(ui.pick_engine);
         set_tp(sel_trk(), TP_ENGINE, ui.pick_engine);
+        if (f >= 0) {
+            preset_apply(sel_trk(), f);
+            ui.preset_i = (uint8_t)f;
+        }
         say("ENGINE", EG_NAME[ui.pick_engine % NENGINE]);
         break;
-    case A_EFFECT:
-        set_tp(sel_trk(), TP_ENGINE, ui.pick_fx % NFXT);
+    }
+    case A_EFFECT: {
+        int ft = fx_page(ui.page) ? (ui.page == P_FX1 ? AUX_FX1 : AUX_FX2) : sel_trk();
+        set_tp(ft, TP_ENGINE, ui.pick_fx % NFXT);
         say("EFFECT", FXT_NAME[ui.pick_fx % NFXT]);
         break;
+    }
     case A_PRESET:
         if (NPRESETS) {
             load_preset(sel_trk(), &PRESETS[ui.pick_preset % NPRESETS]);
@@ -1754,7 +1911,8 @@ static void action_run(int a)
         mark_dirty();
         say("RESET", EG_NAME[proj.trk[sel_trk()].par[TP_ENGINE] % NENGINE]);
         break;
-    case A_FOLLOW: case A_USB_AUDIO: case A_COUNT_IN: return;
+    case A_FOLLOW: case A_USB_AUDIO: case A_COUNT_IN: case A_PLAYMODE: case A_FTYPE: case A_FX_HP: case A_FX_LP:
+    case A_FX_SEND: return;                      /* (ALGORITHM sets them; SEL leaves the list) */
     case A_REMOVE_NOTE: act_remove_note(lst.sel); break;
     case A_INSERT_SLOT:
         if (sg->len >= NSONG) {
@@ -1862,7 +2020,7 @@ static void input(void)
             }
             if (ui.held && ui.page == P_STEPS && (i == B_EDIT || i == B_ENV || i == B_FX || i == B_LFO) &&
                 !is_aux(sel_trk())) {
-                ui.lockpg = (uint8_t)(1 + (i == B_EDIT ? P_ENGINE : i == B_ENV ? P_ENV : i == B_FX ? P_FILTER : P_LFO));
+                ui.lockpg = (uint8_t)(1 + (i == B_EDIT ? P_ENGINE : i == B_ENV ? P_ENV : i == B_FX ? P_SENDS : P_LFO));
                 ui.held_used = 1;
                 ui.touched = -1;
                 ui.btn_used |= m;
@@ -1918,7 +2076,14 @@ static void input(void)
         ui.act_t = plat_ms();
     if (ui.ask)
         return;
-    if ((e = ev[EN_SELECT]) != 0) {
+    if ((e = ev[EN_SELECT]) != 0 && ui.lockpg) {  /* the lock editor: the module's other pages (the track's own) */
+        int g = page_group(ui.lockpg - 1), f = PAGE_BTN[g].first, n = group_n(g), pg = ui.lockpg - 1 - f;
+        n = PAGE_BTN[g].btn == B_FX ? 1 : n;
+        pg = ((pg + (e > 0 ? 1 : -1)) % n + n) % n;
+        ui.lockpg = (uint8_t)(f + pg + 1);
+        e = 0;
+    }
+    if (e) {
         if (home_held())
             set_tempo_x10((int)proj.tempo_x10 + accel(EN_SELECT, e) * 10);
         else if (lst.open)
@@ -2125,7 +2290,7 @@ static void sp_parts(const char *s)
             colon |= s[j] == ':';
         if (c) {
             for (uint32_t a = 0, j = 0; j <= c; j++)
-                if (j == c || s[j] == '+') {
+                if (j == c || (s[j] == '+' && !(j == 3 && s[0] == 'O'))) {
                     char w[8];
                     uint32_t m = j - a < 7u ? j - a : 7u;
                     for (uint32_t q = 0; q < m; q++)
@@ -2596,6 +2761,7 @@ void ui_frame(void)
     }
     draw_header();
     draw_page();
+    draw_rec_strip();
     if (!(lst.open && !ui.card)) {
         draw_tag();
         draw_knobs();
