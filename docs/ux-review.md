@@ -1,7 +1,7 @@
 # XY-1: a UX review (2026-10-16)
 
 Four flows walked as a new player who reads only the screen, on the simulator: `build/ux/*.xy` run with
-`build/host/xy_host SCRIPT build/ux/X` (screenshots in `build/ux/a..d/`, contact sheets `build/ux/*_sheet.png`;
+`app/build/host/loom_host SCRIPT build/ux/X` (then `build/host/xy_host`) (screenshots in `build/ux/a..d/`, contact sheets `build/ux/*_sheet.png`;
 not committed). Priorities as in Polly's pass: **must** (blocks or misleads), **should** (friction), **could**.
 
 ## The flows, presses

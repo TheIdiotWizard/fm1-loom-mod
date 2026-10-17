@@ -145,7 +145,7 @@ press…" means keep **HOME** down while you press the next thing.
 | mute a track | On Arrange, press its black key. On Mix, hold **HOME** and press its black key. |
 | solo a track | On Mix, hold its black key. Let go, and the mutes come back. |
 | play a progression | Turn **ALGORITHM** to COND (the conductor). Press **EDIT** and play a chord: it moves the tracks that follow. Press **SEQ** and press a step: the chord goes on it. Set the scale to 4 on the Bar page so a step is a beat. |
-| save | Press **SAVE**. Hold **SAVE** and press white key 1 to 4 to save to that slot. |
+| save | Press **SAVE**. Hold **SAVE** and press white key 1 to 3 to save to that slot. |
 | keep a sound | On a sound page, hold **SAVE** and press a white key. The sound becomes that user preset. |
 | load a project | Press **GLO**, turn **SELECT** to Setup, press **SEL** and pick LOAD PROJECT. |
 
@@ -661,9 +661,16 @@ it takes back at its output.
 
 ## Saving
 
-Press **SAVE** to save the project to its slot. Hold **SAVE** and press white key 1 to 4 to save it to that
+Press **SAVE** to save the project to its slot. Hold **SAVE** and press white key 1 to 3 to save it to that
 slot; LOOM-8 asks first if the slot holds another project. The header says "unsaved" and **SAVE** lights
 while there are changes to save. LOOM-8 does not save by itself.
+
+**Backup.** To keep the three projects and the user presets on a computer, and put them back later, open
+<https://charlesvestal.github.io/fm1-loom/backup/> in Chrome or Edge with the FM-1 connected by USB (or run
+`python3 base/tools/fm1_backup.py backup FILE --magic LM8B` from the firmware's folder; `restore FILE` puts it back). A backup holds them as saved: save first what you
+want in it. Putting one back replaces all three projects and the presets; LOOM-8 asks first, on its screen
+(**SEL** yes, **HOME** no), and only while stopped. Your own samples are not in a backup: keep their WAV files,
+and load them again with `tools/loom_samples.py`.
 
 On a sound page, hold **SAVE** and press white key 1 to 16 to keep the track's sound as that user preset.
 
@@ -714,5 +721,5 @@ it uses are published with this site, so every version reads its own screen corr
 ## Credits
 
 LOOM-8's way of working owes a great deal to teenage engineering's OP-XY; LOOM-8 is not affiliated with
-teenage engineering. Built on Felucca (Hügelton Instruments, GPL-3.0-only), with
-Polly's menus, X0X's sequencer discipline and NuSaw's second core.
+teenage engineering. Built on fm1-base and felucca-bsp, from Felucca by Leo Kuroshita (Hügelton Instruments),
+with Polly's menus, X0X's sequencer discipline and NuSaw's second core.

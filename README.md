@@ -6,7 +6,9 @@ strum, hold); weave, which crosses two patterns (bar by bar, step by step, or on
 notes); throws (momentary effects); a conductor track that moves the song through a progression; two
 send-effect tracks (the reverb with the PlayStation's reverbs among its modes), a mixer with EQ, a tape
 (TapeScam) and a compressor on the master, scenes and a song. Built on
-Felucca's platform layer with X0X's sequencer discipline, NuSaw's second core and Polly's menu paradigm.
+[fm1-base](https://github.com/charlesvestal/fm1-base) and [felucca-bsp](https://github.com/hugelton/felucca-bsp),
+from [Felucca](https://github.com/hugelton/Felucca) by Leo Kuroshita (Hügelton Instruments), with X0X's sequencer
+discipline, NuSaw's second core and Polly's menu paradigm.
 
 - **Read the manual**: [docs/MANUAL.md](docs/MANUAL.md), with a ten-minute quick start, every page and gesture, and screenshots
 - **Try it in your browser** (no FM-1 needed): <https://charlesvestal.github.io/fm1-loom/emu/>
@@ -18,10 +20,21 @@ firmware back, and an FM-1 that keeps crashing starts in a safe mode.
 
 The design is in `docs/superpowers/specs/2026-10-15-xy1-design.md`.
 
+Your projects and presets can be backed up to a computer and put back (the site's Backup page); your own
+samples load from their WAV files with `tools/loom_samples.py` (see the manual).
+
 ## Building and testing
 
-See `BUILDING.md`. `tests/run_tests.sh` runs everything on the host, silently (the audio goes to
-WAV files). `LICENSING.md` says where the code comes from.
+LOOM-8 is an app (`app/`) on fm1-base, a git submodule (`base/`): clone with `--recursive`. See `BUILDING.md`.
+`tests/run_tests.sh` runs everything on the host, silently (the audio goes to WAV files). `LICENSING.md` says
+where the code comes from.
+
+## Credits
+
+The platform: fm1-base and felucca-bsp (MPL-2.0), from Felucca by Leo Kuroshita (Hügelton Instruments), with his
+permission (felucca-bsp#4). The master's tape: TapeScam; the reverb's PlayStation modes: PSXVerb (both MIT). The
+fonts: Barlow and Terminus (SIL OFL 1.1). The second core's lessons: Melodee (keremimo) and Jangada (zednaked).
+The idea of a browser emulator: Groove OS.
 
 LOOM-8's way of working owes a great deal to teenage engineering's OP-XY; LOOM-8 is not affiliated with
 teenage engineering.
