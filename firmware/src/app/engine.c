@@ -647,10 +647,10 @@ __attribute__((noinline)) static void zerof(float *b, uint32_t n)
         b[i] = 0.0f;
 }
 
-/* the second core's job (or the first's, after its own part, with one core): the lower half of the
- * voice pool into its own buffers; arg bit 8: not timed (the cycle counter is the first core's).
- * Nothing here is mixed: the first core does that afterwards, in one core's order. The synth wants
- * every range rendered each stretch after its prepare (synth.h), sounding or not */
+/* the second core's job (or the first's, after its own part, with one core): the voices [0, k) of the
+ * pool into its own buffers (k: arg bits 16..20, split_at); arg bit 8: not timed (the cycle counter is
+ * the first core's). Nothing here is mixed: the first core does that afterwards, in one core's order.
+ * The synth wants every range rendered each stretch after its prepare (synth.h), sounding or not */
 static void core2_job(uint32_t arg)
 {
     uint32_t n = arg & 0xFFu ? arg & 0xFFu : 256u, timed = !(arg & 0x100u), pt = timed ? plat_cycles() : 0;
@@ -658,9 +658,39 @@ static void core2_job(uint32_t arg)
     zerof(c2_r, n);
     zerof(c2_s1, n);
     zerof(c2_s2, n);
-    synth_render(SY, 0, NVOICE / 2, c2_l, c2_r, c2_s1, c2_s2, n);
+    synth_render(SY, 0, (int)(arg >> 16 & 31u), c2_l, c2_r, c2_s1, c2_s2, n);
     if (timed)
         PROF_ADD(PR_SYNTH1, pt);
+}
+
+/* where the pool splits between the cores: the second renders voices [0, k), the first [k, NVOICE) and
+ * the drum tracks, so k evens the two out. A free voice is the lowest one (synth.c find_voice): with a
+ * fixed half, eight voices or fewer all landed on the second core while the first waited (and the
+ * overload guard's eight did too). The cost in rough units: a synth voice 4, a drum voice 2, a drum
+ * track's own filter and mix 1 (tests/host: ~180, ~95 and ~50 instructions a sample). Of the k that
+ * do best, the one nearest the middle (the old fixed split). The same k with one core or two: the
+ * samples stay the same either way (only the order of the halves' sum depends on k). */
+static uint32_t split_at(void)
+{
+    int pre[NVOICE + 1], i, k, t, drum = 0, best = NVOICE / 2, cost = 1 << 30;
+    for (t = 0; t < NTRK; t++)
+        if (eng_drum[t]) {
+            int nv = drumline_voices(DL(t));
+            if (nv)
+                drum += 1 + 2 * nv;
+        }
+    pre[0] = 0;
+    for (i = 0; i < NVOICE; i++)
+        pre[i + 1] = pre[i] + 4 * synth_sounding(SY, i, i + 1);
+    for (k = 0; k <= NVOICE; k++) {
+        int a = pre[k], b = pre[NVOICE] - pre[k] + drum, c = a > b ? a : b;
+        int dk = k > NVOICE / 2 ? k - NVOICE / 2 : NVOICE / 2 - k, db = best > NVOICE / 2 ? best - NVOICE / 2 : NVOICE / 2 - best;
+        if (c < cost || (c == cost && dk < db)) {
+            cost = c;
+            best = k;
+        }
+    }
+    return (uint32_t)best;
 }
 
 __attribute__((noinline)) static void add_in(float *dst, const float *src, uint32_t n)
@@ -689,7 +719,7 @@ static void metro_tick(uint32_t n)
  * lower half; then the halves are summed in the order one core always used, the FX tracks, the master */
 static void render_sub(uint32_t n)
 {
-    uint32_t arg = n & 0xFFu, pt;
+    uint32_t arg = n & 0xFFu, pt, split;
     int on2, t, k;
     zerof(perc_l, n);
     zerof(perc_r, n);
@@ -699,10 +729,12 @@ static void render_sub(uint32_t n)
     zerof(s2, n);
     perf_tick(n);
     synth_prepare(SY, n);                                 /* the shared per-chunk values, before either core renders */
+    split = split_at();
+    arg |= split << 16;
     on2 = c2_run ? c2_run(core2_job, arg | 0x100u) : 0;
     {
         PROF_T(ps);
-        synth_render(SY, NVOICE / 2, NVOICE, mel_l, mel_r, s1, s2, n);
+        synth_render(SY, (int)split, NVOICE, mel_l, mel_r, s1, s2, n);
         PROF_ADD(PR_SYNTH0, ps);
     }
     {
