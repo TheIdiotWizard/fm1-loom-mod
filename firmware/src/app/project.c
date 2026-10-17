@@ -128,9 +128,10 @@ void project_defaults(void)
     static const uint8_t ORDER[NTRK] = {EG_DRUMLINE, EG_STACK, EG_SIMPLE, EG_WAVETABLE, EG_ORBIT, EG_EPIANO,
                                         EG_ORGAN, EG_SYNC};
     int t, k;
-    uint8_t *z = (uint8_t *)&proj;
+    uint8_t *z = (uint8_t *)&proj, theme = proj.rsv[1];   /* a new project keeps the theme */
     for (k = 0; k < (int)sizeof proj; k++)
         z[k] = 0;
+    proj.rsv[1] = theme;
     proj.magic = PROJ_MAGIC;
     proj.format = PROJ_FORMAT;
     proj.name[0] = 'N';

@@ -17,50 +17,20 @@ typedef struct {
     uint16_t ink[NTRK];
     uint8_t tint, mid;                                /* the ink's share over the background, of 16 */
 } theme_t;
+/* the themes (Setup: THEME; the project keeps it in rsv[1]); the first is the default */
 static const theme_t THEMES[] = {
-    {"night market", RGB(12, 14, 32), RGB(26, 30, 58), RGB(44, 50, 90), RGB(50, 56, 96), RGB(90, 96, 140),
-     RGB(150, 156, 196), RGB(240, 240, 255), RGB(120, 126, 170), RGB(255, 60, 80), RGB(220, 224, 255),
-     {RGB(255, 64, 160), RGB(0, 230, 210), RGB(255, 226, 64), RGB(80, 140, 255), RGB(255, 120, 40), RGB(120, 255, 120),
-      RGB(190, 110, 255), RGB(255, 200, 140)}, 6, 9},
+    {"blueprint", RGB(16, 48, 104), RGB(24, 62, 128), RGB(40, 84, 156), RGB(60, 100, 170), RGB(110, 140, 200),
+     RGB(170, 195, 235), RGB(240, 246, 255), RGB(130, 160, 215), RGB(255, 110, 90), RGB(255, 255, 255),
+     {RGB(255, 150, 190), RGB(120, 240, 230), RGB(255, 200, 80), RGB(180, 240, 120), RGB(255, 170, 110),
+      RGB(210, 180, 255), RGB(240, 120, 120), RGB(200, 230, 200)}, 7, 11},
     {"tape deck", RGB(24, 18, 14), RGB(44, 34, 26), RGB(70, 56, 42), RGB(74, 60, 46), RGB(120, 100, 80),
      RGB(190, 170, 140), RGB(244, 230, 200), RGB(150, 130, 104), RGB(230, 70, 40), RGB(240, 220, 180),
      {RGB(230, 180, 50), RGB(214, 96, 48), RGB(160, 170, 70), RGB(70, 170, 160), RGB(110, 150, 200), RGB(180, 110, 150),
       RGB(210, 170, 120), RGB(150, 190, 150)}, 6, 9},
-    {"chalkboard", RGB(30, 42, 38), RGB(40, 56, 50), RGB(58, 78, 70), RGB(64, 84, 76), RGB(100, 122, 112),
-     RGB(170, 186, 176), RGB(236, 240, 230), RGB(130, 150, 140), RGB(240, 110, 100), RGB(230, 236, 226),
-     {RGB(250, 170, 200), RGB(150, 210, 250), RGB(250, 236, 140), RGB(160, 240, 190), RGB(250, 190, 140),
-      RGB(200, 180, 250), RGB(130, 230, 230), RGB(230, 210, 170)}, 5, 9},
-    {"blueprint", RGB(16, 48, 104), RGB(24, 62, 128), RGB(40, 84, 156), RGB(60, 100, 170), RGB(110, 140, 200),
-     RGB(170, 195, 235), RGB(240, 246, 255), RGB(130, 160, 215), RGB(255, 110, 90), RGB(255, 255, 255),
-     {RGB(255, 200, 80), RGB(120, 240, 230), RGB(255, 150, 190), RGB(180, 240, 120), RGB(255, 170, 110),
-      RGB(210, 180, 255), RGB(240, 120, 120), RGB(200, 230, 200)}, 5, 9},
-    {"vapor", RGB(28, 16, 40), RGB(44, 28, 62), RGB(68, 46, 92), RGB(72, 50, 98), RGB(120, 96, 150),
-     RGB(196, 176, 220), RGB(250, 240, 255), RGB(150, 130, 180), RGB(255, 70, 100), RGB(240, 230, 255),
-     {RGB(255, 113, 206), RGB(1, 205, 254), RGB(5, 255, 161), RGB(185, 103, 255), RGB(255, 251, 150), RGB(255, 160, 120),
-      RGB(120, 160, 255), RGB(255, 200, 240)}, 6, 9},
-    {"bauhaus", RGB(226, 224, 218), RGB(210, 208, 200), RGB(190, 188, 180), RGB(180, 178, 170), RGB(140, 138, 132),
-     RGB(90, 90, 90), RGB(20, 20, 20), RGB(110, 110, 110), RGB(220, 40, 30), RGB(20, 20, 20),
-     {RGB(30, 70, 170), RGB(190, 130, 0), RGB(0, 120, 110), RGB(230, 90, 20), RGB(30, 120, 60), RGB(100, 60, 150),
-      RGB(60, 130, 200), RGB(120, 80, 50)}, 5, 10},
-    {"ice", RGB(238, 242, 246), RGB(222, 228, 236), RGB(200, 210, 222), RGB(192, 202, 214), RGB(150, 160, 175),
-     RGB(90, 100, 118), RGB(18, 26, 44), RGB(120, 130, 148), RGB(220, 40, 60), RGB(18, 26, 44),
-     {RGB(200, 20, 110), RGB(0, 120, 150), RGB(170, 110, 0), RGB(40, 80, 210), RGB(220, 80, 10), RGB(10, 140, 80),
-      RGB(110, 50, 190), RGB(60, 70, 90)}, 4, 10},
-    {"terminal", RGB(0, 0, 0), RGB(0, 22, 10), RGB(0, 44, 20), RGB(0, 50, 24), RGB(0, 110, 50), RGB(60, 200, 110),
-     RGB(120, 255, 160), RGB(40, 140, 80), RGB(255, 80, 60), RGB(180, 255, 200),
-     {RGB(255, 170, 40), RGB(60, 220, 255), RGB(255, 80, 180), RGB(255, 240, 80), RGB(100, 140, 255), RGB(255, 130, 90),
-      RGB(190, 120, 255), RGB(220, 220, 220)}, 6, 9},
-    {"lacquer", RGB(8, 8, 10), RGB(24, 22, 20), RGB(48, 42, 34), RGB(56, 48, 38), RGB(110, 96, 70), RGB(190, 170, 120),
-     RGB(240, 220, 160), RGB(150, 130, 90), RGB(230, 50, 50), RGB(240, 220, 160),
-     {RGB(40, 200, 130), RGB(70, 130, 255), RGB(180, 100, 240), RGB(255, 190, 60), RGB(255, 140, 180), RGB(80, 220, 220),
-      RGB(230, 230, 90), RGB(255, 130, 90)}, 6, 9},
-    {"candy", RGB(252, 236, 240), RGB(244, 220, 228), RGB(232, 198, 210), RGB(226, 192, 204), RGB(190, 150, 165),
-     RGB(130, 90, 110), RGB(60, 20, 50), RGB(150, 110, 130), RGB(220, 30, 60), RGB(60, 20, 50),
-     {RGB(230, 0, 120), RGB(0, 150, 170), RGB(210, 110, 0), RGB(60, 90, 230), RGB(130, 60, 200), RGB(0, 150, 80),
-      RGB(230, 70, 40), RGB(90, 60, 40)}, 4, 10},
 };
 #define NTHEMES (sizeof THEMES / sizeof THEMES[0])
 static const theme_t *theme = &THEMES[0];
+#define THEME_OF_PROJ() (&THEMES[proj.rsv[1] % NTHEMES])
 #define K_BG theme->bg
 #define K_PANEL theme->panel
 #define K_PANEL2 theme->panel2
@@ -210,13 +180,13 @@ enum { LK_KNOB, LK_MORE, LK_ACTION, LK_PICK };
 enum { A_CLEAR_NOTES, A_CLEAR_LOCKS, A_CLEAR_BOTH, A_COPY_PAT, A_PASTE_PAT, A_ROT_FWD, A_ROT_BACK, A_DUP_BAR,
        A_ENGINE, A_PRESET, A_SCRAMBLE, A_SAVE_PRESET, A_INIT, A_FOLLOW, A_INSERT_SLOT, A_DELETE_SLOT, A_CLEAR_SONG,
        A_PLAY_SONG, A_LOAD_PROJ, A_NEW_PROJ, A_USB_AUDIO, A_CLEAR_SCENE, A_PANIC, A_EFFECT, A_REMOVE_NOTE,
-       A_COUNT_IN, A_PLAYMODE, A_FTYPE, A_FX_HP, A_FX_LP, A_FX_SEND, A_WEAVE, NACTIONS };
+       A_COUNT_IN, A_PLAYMODE, A_FTYPE, A_FX_HP, A_FX_LP, A_FX_SEND, A_WEAVE, A_THEME, NACTIONS };
 static const char *const ACTION_NAME[NACTIONS] = {
     "CLEAR NOTES", "CLEAR LOCKS", "CLEAR NOTES AND LOCKS", "COPY PATTERN", "PASTE PATTERN", "ROTATE FORWARD",
     "ROTATE BACK", "DUPLICATE BAR", "ENGINE", "PRESET", "SCRAMBLE", "SAVE AS PRESET", "RESET SOUND", "FOLLOWS CONDUCTOR",
     "INSERT SCENE", "DELETE SLOT", "CLEAR SONG", "PLAY SONG", "LOAD PROJECT", "NEW PROJECT", "USB AUDIO", "CLEAR SCENE",
     "ALL NOTES OFF", "EFFECT", "REMOVE", "COUNT-IN", "PLAY MODE", "FILTER TYPE", "HIGH-PASS", "LOW-PASS",
-    "TO FX II", "WEAVE WITH COPIED"};
+    "TO FX II", "WEAVE WITH COPIED", "THEME"};
 /* the weave's ways (pattern.h WV_*): what this pattern keeps of itself */
 static const char *const WEAVE_NAME[NWV] = {"bars", "steps", "rhythm", "notes"};
 #define LIST_ROWS 28
@@ -1634,6 +1604,7 @@ static void list_build(void)
         list_add(ACTION_NAME[A_NEW_PROJ], 0, LK_ACTION, A_NEW_PROJ);
         list_add(ACTION_NAME[A_USB_AUDIO], USBA_NAME[proj.usb_full & 1u], LK_PICK, A_USB_AUDIO);
         list_add(ACTION_NAME[A_COUNT_IN], ONOFF[proj.rsv[0] & 1u], LK_PICK, A_COUNT_IN);   /* (rsv[0]: the count-in) */
+        list_add(ACTION_NAME[A_THEME], THEME_OF_PROJ()->name, LK_PICK, A_THEME);   /* (rsv[1]: the theme) */
     }
     if (lst.sel >= lst.n)
         lst.sel = (uint8_t)(lst.n ? lst.n - 1 : 0);
@@ -2736,7 +2707,8 @@ static void draw_setup(void)
 {
     char t[24], nm[NAME_LEN + 1];
     uint32_t h = hash_u(2166136261u, 0x5E700u | (uint32_t)proj_slot | (uint32_t)proj.usb_full << 4 | (uint32_t)seq.ext << 8 |
-                                          (uint32_t)proj.rsv[0] << 12 | (uint32_t)proj.send_clock << 16 | (uint32_t)proj.send_notes << 17);
+                                          (uint32_t)proj.rsv[0] << 12 | (uint32_t)proj.send_clock << 16 | (uint32_t)proj.send_notes << 17 |
+                                          (uint32_t)proj.rsv[1] << 20);
     h = hash_s(h, proj.name);
     if (!begin_main(h))
         return;
@@ -2750,7 +2722,8 @@ static void draw_setup(void)
     setup_row(58, "MIDI out", proj.send_clock || proj.send_notes ? (proj.send_clock && proj.send_notes ? "clock, notes"
                                                                   : proj.send_clock ? "clock" : "notes") : "off");
     setup_row(76, "count-in", ONOFF[proj.rsv[0] & 1u]);
-    setup_row(94, "version", XY_VERSION);
+    setup_row(94, "theme", THEME_OF_PROJ()->name);
+    setup_row(112, "version", XY_VERSION);
     cv_blit(0, MAIN_Y);
 }
 static void draw_status(void)
@@ -2810,8 +2783,11 @@ static void draw_rec_strip(void)
 static void ink_follow(void)                         /* another track: its ink, every band drawn again */
 {
     int trk = sel_trk();
+    theme = THEME_OF_PROJ();
     if (k_th == theme && k_now == trk_ink(trk))
         return;
+    if (k_th != theme)                               /* another theme: the whole screen, the gaps between the bands too */
+        lcd_fill(0, 0, 240, 240, K_BG);
     k_th = theme;
     k_now = trk_ink(trk);
     k_tint = trk_tint(trk);

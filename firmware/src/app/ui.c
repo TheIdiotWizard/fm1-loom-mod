@@ -1597,6 +1597,10 @@ static void list_change(int32_t e)
             proj.rsv[0] = (uint8_t)(d > 0);
             mark_dirty();
             break;
+        case A_THEME:
+            proj.rsv[1] = (uint8_t)((proj.rsv[1] + NTHEMES + (uint32_t)d) % NTHEMES);
+            mark_dirty();
+            break;
         case A_PLAYMODE: {
             int t = sel_trk(), q = TP_DRUM(ui.dsound % DL_NSOUND, DP_MODE);
             set_tp(t, q, clampi(proj.trk[t].par[q] + d, 0, NPM - 1));
@@ -1928,7 +1932,7 @@ static void action_run(int a)
         mark_dirty();
         say("RESET", EG_NAME[proj.trk[sel_trk()].par[TP_ENGINE] % NENGINE]);
         break;
-    case A_FOLLOW: case A_USB_AUDIO: case A_COUNT_IN: case A_PLAYMODE: case A_FTYPE: case A_FX_HP: case A_FX_LP:
+    case A_FOLLOW: case A_USB_AUDIO: case A_COUNT_IN: case A_THEME: case A_PLAYMODE: case A_FTYPE: case A_FX_HP: case A_FX_LP:
     case A_FX_SEND: return;                      /* (ALGORITHM sets them; SEL leaves the list) */
     case A_REMOVE_NOTE: act_remove_note(lst.sel); break;
     case A_INSERT_SLOT:
@@ -2760,7 +2764,8 @@ void ui_init(void)
     engine_groove(proj.groove);
 #if defined(XY_HOST) && !defined(XY_WEB)
     if (getenv("LOOM_THEME"))                        /* the host's screenshots in another theme */
-        theme = &THEMES[(uint32_t)atoi(getenv("LOOM_THEME")) % NTHEMES];
+        proj.rsv[1] = (uint8_t)((uint32_t)atoi(getenv("LOOM_THEME")) % NTHEMES);
+    theme = THEME_OF_PROJ();
 #endif
     lcd_fill(0, 0, 240, 240, K_BG);
 }
