@@ -1,0 +1,286 @@
+# LOOM-8 demo: hip hop, boom bap, 90 BPM swung, C minor (Cm9 Fm9 Bb9 Ebmaj9). (tools/demos/render.sh renders it; its
+# bank is build/demos/hiphop.bin: a bar of the funky drummer and a horn stab made by tools/demos/make_banks.py,
+# private.)
+#   T1 slice: the funky drummer in 16, mono, re-chopped and swung, its pitch two semitones down (heavier)
+#   T2 kit: a hard kick and a long snare under the break (the boom and the bap)
+#   T3 tines "felt bass": the bass       T4 tines "soft felt": the Rhodes, its tremolo on, chords held
+#   T5 sample: the horn stab (user 2, a Bb7, its root Bb3), moved to each chord's root on the hook
+#   T6 sample: the factory "ah" scratched: short notes with the bend trick, the portamento trick
+# Master tape: drive, color, wobble and hiss for the dust. Song: intro 2, verse 8, hook 4, verse 2 4, hook 4,
+# outro 2 (the break filtered out).
+master 4096
+samples build/demos/hiphop.bin
+bpm 90
+groove swing
+
+# ---- the sounds
+knob 1 engine slice
+preset 1 chop slice
+knob 1 e1 u1
+knob 1 e3 62
+knob 1 e4 127
+knob 1 cut 118
+knob 1 ctype drive
+knob 1 camt 55
+knob 1 ctone 100
+knob 1 brain no
+knob 1 level 112
+knob 1 send2 10
+
+knob 2 engine kit
+knob 2 d1.k1 74
+knob 2 d1.k2 70
+knob 2 d1.k3 100
+knob 2 d1.k4 30
+knob 2 d2.k2 76
+knob 2 d2.k3 60
+knob 2 d2.k4 90
+knob 2 d2.volume 80
+knob 2 d3.volume 50
+knob 2 res 60
+knob 2 fenv 50
+knob 2 level 71
+
+preset 3 felt_bass tines
+knob 3 brain no
+knob 3 level 106
+
+preset 4 soft_felt tines
+knob 4 brain no
+knob 4 ltype wobble
+knob 4 lspeed 76
+knob 4 lamt 64
+knob 4 ldest 100
+knob 4 level 64
+knob 4 send2 40
+
+knob 5 engine sample
+knob 5 e1 u2
+knob 5 e4 one-shot
+knob 5 vmode poly
+knob 5 a 0
+knob 5 s 127
+knob 5 r 50
+knob 5 cut 100
+knob 5 ctype drive
+knob 5 camt 50
+knob 5 brain no
+knob 5 level 71
+knob 5 send2 40
+
+knob 6 engine sample
+knob 6 e1 ah
+knob 6 e2 20
+knob 6 e3 50
+knob 6 e4 one-shot
+knob 6 vmode mono
+knob 6 porta 20
+knob 6 bend octave
+knob 6 a 0
+knob 6 s 127
+knob 6 r 20
+knob 6 cut 105
+knob 6 res 30
+knob 6 ctype crush
+knob 6 camt 40
+knob 6 brain no
+knob 6 level 57
+
+knob 12 engine room
+mst drive 50
+mst color 70
+mst wobble 30
+mst noise 40
+mst comp 40
+mst level 81
+
+# ---- T1 the break (slice k = note 52 + k): P1 straight, P2 re-chopped (kick doubled, ghost snares moved), P3 the
+# hook's (a stutter on the last beat)
+pat 1 1 16 1 100 35
+notes 1 1 1 0 120 53
+notes 1 1 2 0 105 54
+notes 1 1 3 0 110 55
+notes 1 1 4 0 105 56
+notes 1 1 5 0 120 57
+notes 1 1 6 0 105 58
+notes 1 1 7 0 110 59
+notes 1 1 8 0 105 60
+notes 1 1 9 0 115 61
+notes 1 1 10 0 105 62
+notes 1 1 11 0 110 63
+notes 1 1 12 0 105 64
+notes 1 1 13 0 120 65
+notes 1 1 14 0 105 66
+notes 1 1 15 0 110 67
+notes 1 1 16 0 105 68
+pat 1 2 16 1 100 35
+notes 1 2 1 0 120 53
+notes 1 2 2 0 105 54
+notes 1 2 3 0 110 55
+notes 1 2 4 0 110 53
+notes 1 2 5 0 120 57
+notes 1 2 6 0 105 58
+notes 1 2 7 0 110 56
+notes 1 2 8 0 105 60
+notes 1 2 9 0 115 61
+notes 1 2 10 0 110 53
+notes 1 2 11 0 110 63
+notes 1 2 12 0 105 58
+notes 1 2 13 0 120 65
+notes 1 2 14 0 105 66
+notes 1 2 15 0 110 64
+notes 1 2 16 0 105 60
+chance 1 2 10 1:2
+pat 1 3 16 1 100 35
+notes 1 3 1 0 120 53
+notes 1 3 2 0 105 54
+notes 1 3 3 0 110 55
+notes 1 3 4 0 110 53
+notes 1 3 5 0 120 57
+notes 1 3 6 0 105 58
+notes 1 3 7 0 110 59
+notes 1 3 8 0 105 60
+notes 1 3 9 0 115 61
+notes 1 3 10 0 110 53
+notes 1 3 11 0 110 63
+notes 1 3 12 0 105 64
+notes 1 3 13 0 120 65
+notes 1 3 14 0 105 57
+notes 1 3 15 0 110 57
+notes 1 3 16 0 105 57
+trick 1 3 15 multiply 2
+trick 1 3 16 multiply 3
+
+# ---- T2 the boom and the bap: kick 1, snare 2, hat 3
+pat 2 1 16 1 50 35
+hits 2 1 1 x.........x.....
+hits 2 1 2 ....x.......x...
+pat 2 2 16 1 50 35
+hits 2 2 1 x......x..x..o..
+hits 2 2 2 ....x.......x...
+hits 2 2 3 ..g...g...g...g.
+
+# ---- T3 the bass: Cm | Fm | Bb | Eb
+pat 3 1 64 1 70 35
+notes 3 1 1 3 110 C2
+notes 3 1 7 1 90 C2
+notes 3 1 11 2 100 G1
+notes 3 1 14 1 90 Bb1
+notes 3 1 17 3 110 F1
+notes 3 1 23 1 90 F1
+notes 3 1 27 2 100 C2
+notes 3 1 30 1 90 Ab1
+notes 3 1 33 3 110 Bb1
+notes 3 1 39 1 90 Bb1
+notes 3 1 43 2 100 F1
+notes 3 1 46 1 90 Ab1
+notes 3 1 49 3 110 Eb2
+notes 3 1 55 1 90 Eb2
+notes 3 1 59 2 100 Bb1
+notes 3 1 62 1 90 B1
+trick 3 1 62 porta 4
+
+# ---- T4 the Rhodes: Cm9 | Fm9 | Bb9 | Ebmaj9, pushed an eighth early into bars 2 and 4
+pat 4 1 64 1 100 35
+notes 4 1 1 14 90 Eb3 G3 Bb3 D4
+notes 4 1 15 16 85 Ab3 C4 Eb4 G4
+notes 4 1 33 14 90 Ab3 C4 D4 G4
+notes 4 1 47 18 85 G3 Bb3 D4 F4
+
+# ---- T5 the horn (a Bb7 at Bb3): on the hook, hit on each chord's root, the last one doubled
+pat 5 1 64 1 100 35
+notes 5 1 1 2 110 C4
+notes 5 1 8 1 90 C4
+notes 5 1 17 2 110 F3
+notes 5 1 24 1 90 F3
+notes 5 1 33 2 115 Bb3
+notes 5 1 36 1 100 Bb3
+notes 5 1 49 2 110 Eb4
+notes 5 1 56 1 95 Eb4
+notes 5 1 58 1 105 Eb4
+# P2 the second verse: only the Bb bar
+pat 5 2 64 1 100 35
+notes 5 2 33 2 110 Bb3
+notes 5 2 40 1 90 Bb3
+
+# ---- T6 the scratch: "ah" (its root A3) pushed and pulled: bends and glides on short notes
+pat 6 1 32 1 100 35
+notes 6 1 3 1 110 A3
+trick 6 1 3 bend 5
+notes 6 1 5 0.5 100 E4
+trick 6 1 5 porta 2
+notes 6 1 6 0.5 100 A3
+trick 6 1 6 porta 2
+notes 6 1 11 1 110 A3
+trick 6 1 11 bend 6
+notes 6 1 13 0.5 100 D4
+notes 6 1 14 0.5 90 A3
+trick 6 1 14 bend 1
+notes 6 1 19 1 110 A3
+trick 6 1 19 bend 9
+notes 6 1 21 0.5 100 E4
+trick 6 1 21 multiply 3
+notes 6 1 27 1 110 A3
+trick 6 1 27 bend 5
+notes 6 1 29 0.5 100 G4
+trick 6 1 29 porta 3
+notes 6 1 30 0.5 100 A3
+trick 6 1 30 porta 3
+notes 6 1 31 1 110 E4
+trick 6 1 31 bend 2
+
+# ---- scenes: T1 T2 T3 T4 T5 T6
+scenedef 1 1 1 1 1 1 1 1 1
+scenemute 1 .xx.xxxx
+scenedef 2 1 1 1 1 1 1 1 1
+scenemute 2 ....xxxx
+scenedef 3 3 2 1 1 1 1 1 1
+scenemute 3 ......xx
+scenedef 4 2 2 1 1 2 1 1 1
+scenemute 4 .....xxx
+scenedef 5 3 2 1 1 1 1 1 1
+scenemute 5 ......xx
+scenedef 6 1 1 1 1 1 1 1 1
+scenemute 6 .xx.xxxx
+song 1:2 2:8 3:4 4:4 5:4 6:2
+songloop 0
+
+# ---- play the song (HOME, SELECT to the Song page, PLAY), and perform
+knob 1 cut 64
+tap HOME
+turn SELECT 1
+stats reset
+wav loom_demo_hiphop.wav
+tap PLAY
+# intro 2: the break opening up
+bars 1
+knob 1 cut 84
+bars 0.75
+knob 1 cut 118
+bars 0.25
+# verse 8: a mute throw on the drums for the last beat (the classic drop-out)
+bars 7.75
+throw mute on perc
+throw mute on mel 1
+bars 0.25
+throw mute off perc
+throw mute off mel 1
+# hook 4
+bars 4
+# verse 2, 4: the keys' tremolo faster
+knob 4 lspeed 84
+bars 4
+knob 4 lspeed 76
+# hook 4
+bars 3.5
+throw echo on mel 5
+bars 0.5
+throw echo off mel 5
+# outro 2: the break into the filter
+knob 1 cut 90
+bars 1
+knob 1 cut 70
+bars 1
+wait 3000
+wavstop
+stats

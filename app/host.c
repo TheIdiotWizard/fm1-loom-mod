@@ -229,8 +229,448 @@ static int expect_more(const char *what, const char *a, const char *b, const cha
     return 1;
 }
 
+/* ---- the song commands (tools/demos): what a player writes on the device, in fewer words. Names where the
+ * screen has them, so a script reads as the pages do and survives a parameter's index moving:
+ *   knob T PARAM VALUE           a knob turned to VALUE as the UI turns it (set_tp: an engine, LFO type or drum
+ *                                model starts from its own defaults; FX tracks re-applied). PARAM: a TP_* name
+ *                                (below) or its number; VALUE: a number, a name of the value's list (spaces as _),
+ *                                a sample's name, or uN = user sample N
+ *   preset T NAME [ENGINE]       a factory preset by name (exact, else the first holding the word; else, with
+ *                                ENGINE, that engine's first, with a warning)
+ *   pat T PAT LEN [SCALE [NLEN [GROOVE [SHAPE]]]]   a pattern's length, scale (sixteenths a step: h 1 2 3 4 5 6
+ *                                8 16), note length %, groove amount, lock shape
+ *   hits T PAT SOUND STRING      a drum sound on the steps: one character a step from step 1 (| and spaces skip):
+ *                                . or - none, x 100, X 127, o 80, g 45, 1..9 = 14..126; a step's other sounds stay
+ *                                (a drum step has one velocity: the loudest written)
+ *   notes T PAT S LEN VEL N1 [N2 [N3 [N4]]]   notes on step S, LEN steps long (decimals: 0.25 steps; 0 = the
+ *                                pattern's note length); N a number or a name (C4 = 60, F#3, Bb2)
+ *   trick T PAT S NAME VAL[:MODE]  a trick (pulse hold multiply velocity rampup rampdown random porta bend tonality
+ *                                jump skiplock skiptrick skip) at its value 1..9 (10 random), the black keys';
+ *                                skips' MODE 0 last pass, 1 not the last, 2 only the first. A third replaces the second
+ *   chance T PAT S PCT|A:B       the step's condition
+ *   nudge T PAT S TICKS          -12..12 (24 a step)
+ *   lock T PAT S PARAM VALUE     a parameter lock on the step (PARAM / VALUE as knob)
+ *   scenedef N P1 .. P10         scene N's pattern for tracks 1-8, COND, THROW (1-based; 0 = pattern 1); used
+ *   scenemute N MASK             scene N's mutes: a character a track 1-8, COND, THROW: x muted, . not
+ *   song S:R [S:R ...]           the song: scene S (1-based) R times (each time track 1's span)
+ *   songloop 0|1
+ *   mst NAME VALUE               a master knob (lo mid hi blend drive color wobble noise perc mel comp level)
+ *   groove NAME                  the project's groove type (swing lilt weave ...)
+ *   play T NOTE on|off [VEL]     a key on track T (through its player and the conductor), at any octave
+ *   throw NAME on|off perc|mel [T]   a throw (mute stutter repeat echo build floor jumble warble pan octave chop
+ *                                ring) held or let go, on the percussive or melodic group, or on track T only
+ *   bars N                       run N bars at the tempo (in sixteenths: 0.25 a beat), counted from the start on the
+ *                                sequencer's own sixteenths while it plays (the waits never drift)
+ *   stats [reset]                the peaks since the last reset: synth and drum voices, guard trips, and the load
+ *                                the FM-1 would show (a model: below) */
+static const char *const TPN[TP_DRUM0] = {
+    "engine", "e1", "e2", "e3", "e4", "vmode", "porta", "bend", "volume", "a", "d", "s", "r", "fa", "fd", "fs", "fr",
+    "cut", "res", "fenv", "ktrk", "ftype", "send1", "send2", "ltype", "lspeed", "lamt", "ldest", "lx", "lx2",
+    "ctype", "camt", "ctone", "cmix", "player", "p1", "p2", "p3", "p4", "ap1", "ap2", "ap3", "ap4", "level", "pan",
+    "brain", "chan"};
+static const char *const DPN[DP_N] = {"model", "k1", "k2", "k3", "k4", "random", "pan", "volume", "mode", "attack",
+                                      "hold", "decay", "lag", "cut", "res", "fenv", "drive", "ftype"};
+static int ieq(const char *a, const char *b)       /* names alike: case and '_' for ' ' */
+{
+    for (; *a && *b; a++, b++) {
+        char x = *a == '_' ? ' ' : *a, y = *b == '_' ? ' ' : *b;
+        if (x >= 'A' && x <= 'Z')
+            x = (char)(x + 32);
+        if (y >= 'A' && y <= 'Z')
+            y = (char)(y + 32);
+        if (x != y)
+            return 0;
+    }
+    return !*a && !*b;
+}
+static int isnum(const char *s) { return *s && strspn(s + (*s == '-'), "0123456789") == strlen(s + (*s == '-')); }
+static void host_die(const char *what, const char *s)
+{
+    printf("demo: %s \"%s\" (line: %s)\n", what, s, plat_host_line);
+    exit(2);
+}
+static int param_of(const char *s)                 /* a TP_* name, dK.NAME (drum key K 1..11), or a number */
+{
+    int k;
+    if (isnum(s))
+        return atoi(s);
+    if (s[0] == 'd' && s[1] >= '1' && s[1] <= '9') {
+        int key = atoi(s + 1);
+        const char *dot = strchr(s, '.');
+        if (dot && key >= 1 && key <= NDRUM)
+            for (k = 0; k < DP_N; k++)
+                if (ieq(dot + 1, DPN[k]))
+                    return TP_DRUM(key - 1, k);
+    }
+    for (k = 0; k < TP_DRUM0; k++)
+        if (ieq(s, TPN[k]))
+            return k;
+    host_die("no parameter", s);
+    return 0;
+}
+static int value_of(int t, int p, const char *s)   /* a number, a name of the value's list, uN */
+{
+    const tp_info_t *in = t < NTRK ? tp_info_par(p, proj.trk[t].par) : 0;
+    if (in && in->kind == PK_NAMES && in->names)
+        for (int k = in->lo; k <= in->hi; k++)
+            if (in->names[k] && ieq(s, in->names[k]))
+                return k;
+    if (s[0] == 'u' && isnum(s + 1))
+        return smp_factory() + atoi(s + 1) - 1;
+    if (in && in->kind == PK_SAMPLE)                /* a sample by its name: "ah", "break" */
+        for (int k = 0; k < smp_slots(); k++)
+            if (ieq(s, smp_name(k)))
+                return k;
+    if (t == AUX_FX1 || t == AUX_FX2)
+        for (int k = 0; k < NFXPICK; k++)
+            if (p == TP_ENGINE && ieq(s, fx_pick_name(k)))
+                return k;
+    if (!isnum(s))
+        host_die("no value", s);
+    return atoi(s);
+}
+static int note_of(const char *s)                  /* 60, C4, F#3, Bb2 */
+{
+    static const int8_t L[7] = {9, 11, 0, 2, 4, 5, 7};   /* a .. g */
+    int n, i = 1;
+    char c = s[0];
+    if (isnum(s))
+        return atoi(s);
+    if (c >= 'a' && c <= 'g')
+        c = (char)(c - 32);
+    if (c < 'A' || c > 'G')
+        host_die("no note", s);
+    n = L[c - 'A'];
+    if (s[1] == '#')
+        n++, i++;
+    else if (s[1] == 'b')
+        n--, i++;
+    return n + 12 * (atoi(s + i) + 1);
+}
+static int words(char *buf, char **w, int max)     /* the script's line in words (w[0] the command) */
+{
+    int n = 0;
+    char *p;
+    snprintf(buf, 512, "%s", plat_host_line);
+    for (p = strtok(buf, " \t\r\n"); p && n < max; p = strtok(0, " \t\r\n")) {
+        if (p[0] == '#')
+            break;
+        w[n++] = p;
+    }
+    return n;
+}
+static tpat_t *pat_or_die(const char *t, const char *p)
+{
+    tpat_t *tp = pat_of(atoi(t), atoi(p));
+    if (!tp || atoi(p) < 1)
+        host_die("no track / pattern", plat_host_line);
+    return tp;
+}
+static step_t *step_or_die(tpat_t *tp, const char *s)
+{
+    int k = atoi(s) - 1;
+    if (k < 0 || k >= NSTEP)
+        host_die("no step", s);
+    return &tp->st[k];
+}
+
+/* the peaks, every simulated millisecond: the voices, and the load the FM-1's Status page would show by a model
+ * of its measurements (the user's: idle ~13 %, a synth voice ~3.5 %, a kit playing ~+27 % over idle, the master
+ * tape ~+12 %). The second core renders voices [0, k) (engine.c split_at), the first the rest, the kits, the FX,
+ * the tape and the mix, then waits for the second: the load is the longer of the two */
+static uint32_t st_ms, st_syn, st_drum, st_guard0, st_hi_ms;
+static float st_load, st_load_sum;
+#define LOAD_IDLE 13.0f
+#define LOAD_VOICE 3.5f
+#define LOAD_KIT 27.0f
+#define LOAD_TAPE 12.0f
+static float load_model(int *nsyn, int *ndrum)
+{
+    int k = (int)split_at(), v0 = 0, v1 = 0, t, kits = 0;
+    float c0, c1;
+    *ndrum = 0;
+    for (int i = 0; i < NVOICE; i++)
+        if (synth_sounding(SY, i, i + 1))
+            *(i < k ? &v1 : &v0) += 1;
+    for (t = 0; t < NTRK; t++)
+        if (eng_drum[t] && dl_slot[t] != 0xFFu && drumline_sounding(DL(t))) {
+            kits++;
+            *ndrum += drumline_voices(DL(t));
+        }
+    *nsyn = v0 + v1;
+    c0 = LOAD_IDLE + LOAD_VOICE * (float)v0 + LOAD_KIT * (float)kits;
+    if (proj.master[MS_TP_DRIVE] || proj.master[MS_TP_COLOR] || proj.master[MS_TP_WOBBLE] || proj.master[MS_TP_NOISE])
+        c0 += LOAD_TAPE;
+    c1 = LOAD_VOICE * (float)v1 + 2.0f;            /* (its own buffers, zeroed and summed) */
+    return c0 > c1 ? c0 : c1;
+}
+void app_host_ms(void)
+{
+    int ns, nd;
+    float l;
+    if (!seq.playing)
+        return;
+    l = load_model(&ns, &nd);
+    st_ms++;
+    st_load_sum += l;
+    if (l > st_load)
+        st_load = l;
+    if (l > 85.0f)
+        st_hi_ms++;
+    if ((uint32_t)ns > st_syn)
+        st_syn = (uint32_t)ns;
+    if ((uint32_t)nd > st_drum)
+        st_drum = (uint32_t)nd;
+}
+static void stats_print(void)
+{
+    printf("stats: %.1f s playing, peak synth voices %u (of %d), peak drum voices %u, guard trips %u; "
+           "model load peak %.0f %%, mean %.0f %%, over 85 %% for %u ms\n", st_ms / 1000.0, st_syn, NVOICE, st_drum,
+           (unsigned)(eng_guard_count - st_guard0), st_load, st_ms ? st_load_sum / (float)st_ms : 0.0f, st_hi_ms);
+}
+
+static int song_cmd(const char *cmd)
+{
+    char buf[512], *w[80];
+    int n = words(buf, w, 80), t, k;
+    if (!strcmp(cmd, "knob")) {                     /* knob T PARAM VALUE */
+        if (n < 4)
+            host_die("knob T PARAM VALUE", "");
+        t = atoi(w[1]) - 1;
+        if (t < 0 || t >= NALLTRK)
+            host_die("no track", w[1]);
+        k = param_of(w[2]);
+        set_tp(t, k, value_of(t, k, w[3]));
+        run_ms(1);
+    } else if (!strcmp(cmd, "preset")) {            /* preset T NAME [ENGINE] (NAME: _ for spaces) */
+        int pick = -1;
+        t = atoi(w[1]) - 1;
+        if (n < 3 || t < 0 || t >= NTRK)
+            host_die("preset T NAME", "");
+        for (k = 0; k < NPRESETS && pick < 0; k++)
+            if (ieq(w[2], PRESETS[k].name))
+                pick = k;
+        for (k = 0; k < NPRESETS && pick < 0; k++) {
+            char nm[32];
+            snprintf(nm, sizeof nm, "%s", w[2]);
+            for (char *q = nm; *q; q++)
+                if (*q == '_')
+                    *q = ' ';
+            if (strstr(PRESETS[k].name, nm))
+                pick = k;
+        }
+        if (pick < 0 && n > 3) {
+            for (k = 0; k < NENGINE; k++)
+                if (ieq(w[3], EG_NAME[k]))
+                    pick = preset_first(k);
+            if (pick >= 0)
+                printf("demo: no preset \"%s\": %s's first, \"%s\"\n", w[2], w[3], PRESETS[pick].name);
+        }
+        if (pick < 0)
+            host_die("no preset", w[2]);
+        load_preset(t, &PRESETS[pick]);
+        run_ms(1);
+    } else if (!strcmp(cmd, "pat")) {               /* pat T PAT LEN [SCALE [NLEN [GROOVE [SHAPE]]]] */
+        static const char *const SC[NTS] = {"h", "1", "2", "3", "4", "5", "6", "8", "16"};
+        tpat_t *tp = pat_or_die(w[1], w[2]);
+        if (n < 4)
+            host_die("pat T PAT LEN ...", "");
+        tp->len = (uint8_t)(atoi(w[3]) < 1 ? 1 : atoi(w[3]) > NSTEP ? NSTEP : atoi(w[3]));
+        if (n > 4) {
+            for (k = 0; k < NTS && strcmp(w[4], SC[k]); k++)
+                ;
+            if (k == NTS)
+                host_die("no scale", w[4]);
+            tp->scale = (uint8_t)k;
+        }
+        if (n > 5)
+            tp->nlen = (uint8_t)atoi(w[5]);
+        if (n > 6)
+            tp->groove = (int8_t)atoi(w[6]);
+        if (n > 7)
+            tp->shape = (uint8_t)atoi(w[7]);
+    } else if (!strcmp(cmd, "hits")) {              /* hits T PAT SOUND STRING... */
+        tpat_t *tp = pat_or_die(w[1], w[2]);
+        int snd = atoi(w[3]), s = 0;
+        if (n < 5 || snd < 1 || snd > NDRUM)
+            host_die("hits T PAT SOUND STRING", "");
+        for (int i = 4; i < n; i++)
+            for (const char *q = w[i]; *q; q++) {
+                int vel = *q == 'x' ? 100 : *q == 'X' ? 127 : *q == 'o' ? 80 : *q == 'g' ? 45
+                        : (*q >= '1' && *q <= '9') ? (*q - '0') * 14 : 0;
+                step_t *st;
+                if (*q == '|')
+                    continue;
+                if (s >= NSTEP)
+                    host_die("more than 64 steps", w[i]);
+                st = &tp->st[s++];
+                if (!vel)
+                    continue;
+                for (k = 0; k < SN && st->note[k] && st->note[k] != snd; k++)
+                    ;
+                if (k == SN)
+                    host_die("a fifth sound on a step", w[i]);
+                st->note[k] = (uint8_t)snd;
+                if (vel > st->vel)
+                    st->vel = (uint8_t)vel;
+            }
+    } else if (!strcmp(cmd, "notes")) {             /* notes T PAT S LEN VEL N1 [N2 [N3 [N4]]] */
+        tpat_t *tp = pat_or_die(w[1], w[2]);
+        step_t *st = step_or_die(tp, w[3]);
+        uint8_t nn[SN];
+        int m = 0;
+        if (n < 7)
+            host_die("notes T PAT S LEN VEL N1 ..", "");
+        for (int i = 6; i < n && m < SN; i++)
+            nn[m++] = (uint8_t)note_of(w[i]);
+        step_set_notes(st, nn, m, atoi(w[5]));
+        k = (int)(atof(w[4]) * 4.0 + 0.5);
+        st->len = (uint8_t)(k > 255 ? 255 : k);
+    } else if (!strcmp(cmd, "trick")) {             /* trick T PAT S NAME VAL[:MODE] */
+        static const char *const TN[NSC] = {"none", "pulse", "hold", "multiply", "velocity", "rampup", "rampdown",
+                                            "random", "porta", "bend", "tonality", "jump", "skiplock", "skiptrick",
+                                            "skip"};
+        step_t *st = step_or_die(pat_or_die(w[1], w[2]), w[3]);
+        int v;
+        if (n < 6)
+            host_die("trick T PAT S NAME VAL", "");
+        for (k = 1; k < NSC && !ieq(w[4], TN[k]); k++)
+            ;
+        if (k == NSC)
+            host_die("no trick", w[4]);
+        v = atoi(w[5]) - 1;
+        if (v < 0 || v > SC_RANDOM_VAL)
+            host_die("a trick's value is 1..10", w[5]);
+        if (k >= SC_SKIP_LOCK)
+            v = SK_VAL(v, strchr(w[5], ':') ? atoi(strchr(w[5], ':') + 1) : 0);
+        if (!st->comp || st->comp == k) {
+            st->comp = (uint8_t)k;
+            st->cval = (uint8_t)v;
+        } else {
+            st->comp2 = (uint8_t)k;
+            st->cval2 = (uint8_t)v;
+        }
+    } else if (!strcmp(cmd, "chance")) {            /* chance T PAT S PCT|A:B */
+        step_t *st = step_or_die(pat_or_die(w[1], w[2]), w[3]);
+        if (n < 5)
+            host_die("chance T PAT S PCT|A:B", "");
+        if (strchr(w[4], ':')) {
+            int A = atoi(w[4]), B = atoi(strchr(w[4], ':') + 1), a2, b2;
+            for (k = 0; k < COND_NAB; k++) {
+                cond_ab(k, &a2, &b2);
+                if (a2 == A && b2 == B)
+                    break;
+            }
+            if (k == COND_NAB)
+                host_die("no cycle", w[4]);
+            st->cond = (uint8_t)(COND_AB + k);
+        } else
+            st->cond = (uint8_t)atoi(w[4]);
+    } else if (!strcmp(cmd, "nudge")) {
+        step_t *st = step_or_die(pat_or_die(w[1], w[2]), w[3]);
+        st->nudge = (int8_t)atoi(w[4]);
+    } else if (!strcmp(cmd, "lock")) {              /* lock T PAT S PARAM VALUE */
+        int p, l, s = atoi(w[3]) - 1;
+        if (n < 6 || s < 0 || s >= NSTEP)
+            host_die("lock T PAT S PARAM VALUE", "");
+        pat_or_die(w[1], w[2]);
+        t = atoi(w[1]) - 1;
+        p = param_of(w[4]);
+        l = lane_find(pats.lane, t, atoi(w[2]) - 1, p);
+        if (l < 0)
+            l = lane_alloc(pats.lane, t, atoi(w[2]) - 1, p);
+        if (l < 0)
+            host_die("the lanes are full", "");
+        pats.lane[l].val[s] = (uint8_t)value_of(t, p, w[5]);
+    } else if (!strcmp(cmd, "scenedef")) {          /* scenedef N P1 .. P10 */
+        int sc = atoi(w[1]) - 1;
+        if (sc < 0 || sc >= NSCENE)
+            host_die("no scene", w[1]);
+        for (t = 0; t < NSEQT; t++)
+            pats.scene[sc].pat[t] = (uint8_t)(n > 2 + t && atoi(w[2 + t]) > 0 ? (atoi(w[2 + t]) - 1) % NPATT : 0);
+        pats.scene[sc].used = 1;
+        pats.scene[sc].brain_key = seq.brain_key;
+        pats.scene[sc].brain_scale = seq.brain_scale;
+    } else if (!strcmp(cmd, "scenemute")) {         /* scenemute N MASK */
+        int sc = atoi(w[1]) - 1;
+        uint16_t m = 0;
+        if (sc < 0 || sc >= NSCENE || n < 3)
+            host_die("scenemute N MASK", "");
+        for (t = 0; t < NSEQT && w[2][t]; t++)
+            if (w[2][t] == 'x')
+                m |= (uint16_t)(1u << t);
+        pats.scene[sc].mute = m;
+    } else if (!strcmp(cmd, "song")) {              /* song S:R ... */
+        pats.song.len = 0;
+        for (int i = 1; i < n && pats.song.len < NSONG; i++) {
+            int sc = atoi(w[i]) - 1, r = strchr(w[i], ':') ? atoi(strchr(w[i], ':') + 1) : 1;
+            if (sc < 0 || sc >= NSCENE || r < 1 || r > 16)
+                host_die("a song slot is S:R (scene 1..16, 1..16 times)", w[i]);
+            pats.song.slot[pats.song.len].scene = (uint8_t)sc;
+            pats.song.slot[pats.song.len++].rep = (uint8_t)r;
+        }
+    } else if (!strcmp(cmd, "songloop"))
+        pats.song.loop = (uint8_t)(atoi(w[1]) != 0);
+    else if (!strcmp(cmd, "mst")) {                 /* mst NAME VALUE */
+        static const char *const MN[NMS] = {"lo", "mid", "hi", "blend", "drive", "color", "wobble", "noise", "perc",
+                                            "mel", "comp", "level"};
+        for (k = 0; k < NMS && !ieq(w[1], MN[k]); k++)
+            ;
+        if (k == NMS || n < 3)
+            host_die("no master knob", w[1]);
+        proj.master[k] = (uint8_t)clampi(atoi(w[2]), 0, 127);
+        engine_master(k, proj.master[k]);
+        run_ms(1);
+    } else if (!strcmp(cmd, "groove")) {
+        for (k = 0; k < NGROOVE && !ieq(w[1], GR_NAME[k]); k++)
+            ;
+        if (k == NGROOVE)
+            host_die("no groove", w[1]);
+        set_groove_type(k);
+    } else if (!strcmp(cmd, "play")) {              /* play T NOTE on|off [VEL] */
+        if (n < 4)
+            host_die("play T NOTE on|off [VEL]", "");
+        engine_key(atoi(w[1]) - 1, note_of(w[2]), !strcmp(w[3], "on"), n > 4 ? atoi(w[4]) : 100);
+        run_ms(1);
+    } else if (!strcmp(cmd, "throw")) {             /* throw NAME on|off perc|mel [T]: HOME + its key */
+        int fx;
+        for (k = 0; k < NPUNCH && !ieq(w[1], PUNCH_NAME[k]); k++)
+            ;
+        if (k == NPUNCH || n < 4)
+            host_die("throw NAME on|off perc|mel [T]", w[1]);
+        fx = k + (!strcmp(w[3], "mel") ? PX_MEL : 0);
+        engine_punch(fx, !strcmp(w[2], "on"), n > 4 ? atoi(w[4]) - 1 : -1);
+        run_ms(1);
+    } else if (!strcmp(cmd, "bars")) {              /* on the sequencer's sixteenths while it plays: no drift */
+        static uint32_t mark;
+        uint32_t six = (uint32_t)(atof(w[1]) * 16.0 + 0.5), guard = 0;
+        if (!seq.playing) {
+            run_ms((uint32_t)(atof(w[1]) * 240000.0 / seq_tempo(&seq) + 0.5));
+            mark = 0;
+        } else {
+            if (seq.step_tick + 1u < mark)          /* (started again) */
+                mark = 0;
+            mark += six;
+            while (seq.playing && seq.step_tick < mark && guard++ < 600000u)
+                run_ms(1);
+        }
+    }
+    else if (!strcmp(cmd, "stats")) {
+        if (n > 1 && !strcmp(w[1], "reset")) {     /* (quietly) */
+            st_ms = st_syn = st_drum = st_hi_ms = 0;
+            st_load = st_load_sum = 0.0f;
+            st_guard0 = eng_guard_count;
+        } else
+            stats_print();
+    } else
+        return 0;
+    return 1;
+}
+
 int app_host_cmd(const char *cmd, const char *a, const char *b, const char *c, const char *d)
 {
+    if (song_cmd(cmd))
+        return 1;
     if (!strcmp(cmd, "expect"))
         return expect_more(a, b, c, d);
     if (!strcmp(cmd, "param")) {                    /* param T P V */

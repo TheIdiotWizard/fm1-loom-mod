@@ -79,6 +79,8 @@ void app_speak_dump(void);
 void app_host_reboot(void);
 #define APP_HOST_FAILS
 int app_host_fails(void);
+#define APP_HOST_MS                     /* the voices' and the estimated load's peaks (host.c "stats") */
+void app_host_ms(void);
 #endif
 
 /* LOOM-8's own platform extras, beyond fm1-base's plat.h: on the FM-1 in plat_loom.c (felucca-bsp's helpers and the

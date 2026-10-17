@@ -1,0 +1,71 @@
+# the song commands tools/demos/*.xy use (app/host.c): knobs by name, presets by name, patterns, drum strings,
+# notes by name, tricks, chances, locks, scenes, the song and its playback by bars, the master, throws, stats
+wait 300
+# knob: names for parameters and values (an engine, a filter type, a drum key's model and mode, a sample)
+knob 3 engine slice
+expect par3.0 10
+knob 3 e1 break
+expect par3.1 7
+knob 3 ftype hp12
+expect par3.21 3
+knob 1 d3.model shaker
+expect par1.83 4
+knob 1 d3.mode choke_2
+expect par1.91 4
+knob 3 brain no
+expect par3.45 0
+# preset by name (spaces as _), the engine's first as a fallback with ENGINE
+preset 2 rope_sub stack
+expect par2.0 1
+expect par2.1 64
+preset 4 no_such_preset tines
+expect par4.0 4
+# the FX tracks by their effect's name
+knob 12 engine hall
+expect par12.0 9
+# patterns: length, scale, note length, groove
+pat 1 1 16 1 50 40
+pat 2 1 32 2
+# drums by string: two sounds on step 1, the loudest velocity kept
+hits 1 1 1 x...x...x...x...
+hits 1 1 3 X.g.x.g.x.g.x.g.
+expect note 1 1 1 1
+steps 1 1
+# notes by name, LEN in steps
+notes 2 1 1 2 110 A1
+notes 2 1 5 0.5 90 C2 E2
+expect note 2 1 1 33
+expect note 2 1 5 36
+trick 2 1 5 multiply 3
+trick 2 1 5 porta 4
+chance 2 1 5 1:2
+nudge 2 1 5 -3
+lock 2 1 1 cut 40
+steps 2 1
+# scenes, mutes and the song: scene 1 then scene 2 (track 2 muted), once each, no loop
+scenedef 1 1 1
+scenedef 2 1 1
+scenemute 2 .x
+song 1:1 2:1
+songloop 0
+mst comp 40
+mst level 90
+groove swing
+bpm 120
+tap HOME
+turn SELECT 1
+expect page Song
+stats reset
+tap PLAY
+expect playing 1
+expect scene 1
+bars 1.5
+expect scene 2
+throw stutter on perc
+bars 0.25
+throw stutter off perc
+play 4 C4 on 100
+play 4 C4 off
+bars 0.5
+expect playing 0
+stats

@@ -1,0 +1,386 @@
+# LOOM-8 demo: modern pop, 110 BPM, C major (C G Am F). (tools/demos/render.sh renders it; its bank is
+# build/demos/pop.bin: the hook sung in a bar and an "oh" to play as an instrument, both made by
+# tools/demos/make_banks.py.)
+#   T1 kit: kick, the clap as a snap, eighth hats with rolls      T2 stack "ply bass": the bass, octave bounce in
+#   the chorus     T3 tines "felt piano": the chords (whole notes, then eighths)     T4 slice: the hook in 16
+#   T5 sample: "oh" (user 2, its root C5) played as a vocal-chop lead, the post-chorus drop
+#   T6 wavetable "lace keys" through the arp (1/8, bounce, two octaves, latched), the chord held by hand each bar
+# Song: intro 2, verse 8, pre 2 (the build), chorus 8, drop 4 (the chop lead), outro 2.
+master 4096
+samples build/demos/pop.bin
+bpm 110
+
+# ---- the sounds
+knob 1 d1.k2 60
+knob 1 d1.k3 90
+knob 1 d5.volume 80
+knob 1 d5.k2 50
+knob 1 d3.volume 62
+knob 1 d4.volume 58
+knob 1 res 50
+knob 1 fenv 20
+knob 1 level 90
+knob 1 send2 16
+
+preset 2 ply_bass stack
+knob 2 brain no
+knob 2 level 96
+
+preset 3 felt_piano tines
+knob 3 brain no
+knob 3 level 62
+knob 3 send2 40
+
+knob 4 engine slice
+preset 4 chop slice
+knob 4 e1 u1
+knob 4 e4 127
+knob 4 vmode poly
+knob 4 cut 127
+knob 4 brain no
+knob 4 level 100
+knob 4 send1 30
+knob 4 send2 50
+
+knob 5 engine sample
+knob 5 e1 u2
+knob 5 e2 3
+knob 5 e4 one-shot
+knob 5 vmode poly
+knob 5 a 0
+knob 5 d 84
+knob 5 s 50
+knob 5 r 50
+knob 5 cut 116
+knob 5 ctype drive
+knob 5 camt 40
+knob 5 ctone 110
+knob 5 cmix 127
+knob 5 brain no
+knob 5 level 127
+knob 5 send1 40
+knob 5 send2 40
+
+preset 6 lace_keys wavetable
+knob 6 brain no
+knob 6 player arp
+knob 6 p1 1/8
+knob 6 p2 bounce
+knob 6 p3 2
+knob 6 p4 1
+knob 6 ap4 narrow
+knob 6 level 62
+knob 6 send1 50
+
+knob 11 engine delay
+knob 11 e1 80
+knob 11 e3 60
+knob 12 engine plate
+mst color 30
+mst comp 40
+mst level 78
+mst blend 127
+mst hi 80
+
+# ---- T1 the kit: kick 1, hat 3, open 4, clap 5, tom 6/7
+# P1 verse: light
+pat 1 1 16 1 50 10
+hits 1 1 1 x......x..x.....
+hits 1 1 5 ....x.......x...
+hits 1 1 3 x.x.x.x.x.x.x.x.
+# P2 chorus: fuller, a roll at the bar's end
+pat 1 2 16 1 50 10
+hits 1 2 1 x......x..x..x..
+hits 1 2 5 ....X.......X...
+hits 1 2 3 x.xxx.x.x.xxx.x.
+hits 1 2 4 ......o.......o.
+trick 1 2 16 multiply 3
+hits 1 2 3 ...............x
+# P3 pre-chorus build, 2 bars: the clap in eighths then sixteenths, toms at the end
+pat 1 3 32 1 50 10
+hits 1 3 5 x.x.x.x.x.x.x.x.|xxxxxxxxxxxxxxxx
+hits 1 3 1 x...x...x...x...|x...x...x.......
+hits 1 3 7 ................|............x.x.
+hits 1 3 6 ................|.............x.x
+trick 1 3 29 multiply 2
+trick 1 3 30 multiply 2
+trick 1 3 31 multiply 3
+trick 1 3 32 multiply 4
+
+# ---- T2 the bass: P1 the verse (roots, a push), P2 the chorus (eighths, octaves)
+pat 2 1 64 1 70
+notes 2 1 1 3 110 C2
+notes 2 1 8 1 90 C2
+notes 2 1 11 2 100 C2
+notes 2 1 17 3 110 G1
+notes 2 1 24 1 90 G1
+notes 2 1 27 2 100 G1
+notes 2 1 33 3 110 A1
+notes 2 1 40 1 90 A1
+notes 2 1 43 2 100 A1
+notes 2 1 49 3 110 F1
+notes 2 1 56 1 90 F1
+notes 2 1 59 2 100 G1
+pat 2 2 64 1 60
+notes 2 2 1 1 110 C2
+notes 2 2 3 1 90 C3
+notes 2 2 5 1 100 C2
+notes 2 2 7 1 90 C3
+notes 2 2 9 1 100 C2
+notes 2 2 11 1 90 C3
+notes 2 2 13 1 100 C2
+notes 2 2 15 1 90 D2
+notes 2 2 17 1 110 G1
+notes 2 2 19 1 90 G2
+notes 2 2 21 1 100 G1
+notes 2 2 23 1 90 G2
+notes 2 2 25 1 100 G1
+notes 2 2 27 1 90 G2
+notes 2 2 29 1 100 G1
+notes 2 2 31 1 90 B1
+notes 2 2 33 1 110 A1
+notes 2 2 35 1 90 A2
+notes 2 2 37 1 100 A1
+notes 2 2 39 1 90 A2
+notes 2 2 41 1 100 A1
+notes 2 2 43 1 90 A2
+notes 2 2 45 1 100 A1
+notes 2 2 47 1 90 E2
+notes 2 2 49 1 110 F1
+notes 2 2 51 1 90 F2
+notes 2 2 53 1 100 F1
+notes 2 2 55 1 90 F2
+notes 2 2 57 1 100 F1
+notes 2 2 59 1 90 F2
+notes 2 2 61 1 100 G1
+notes 2 2 63 1 90 G2
+
+# ---- T3 the piano: C | G/B | Am | F
+pat 3 1 64
+notes 3 1 1 16 90 C4 E4 G4 C5
+notes 3 1 17 16 90 B3 D4 G4 B4
+notes 3 1 33 16 90 C4 E4 A4 C5
+notes 3 1 49 16 90 C4 F4 A4 C5
+pat 3 2 64 1 40
+notes 3 2 1 1 100 C4 E4 G4 C5
+notes 3 2 3 1 80 C4 E4 G4 C5
+notes 3 2 5 1 90 C4 E4 G4 C5
+notes 3 2 7 1 80 C4 E4 G4 C5
+notes 3 2 9 1 95 C4 E4 G4 C5
+notes 3 2 11 1 80 C4 E4 G4 C5
+notes 3 2 13 1 90 C4 E4 G4 C5
+notes 3 2 15 1 80 C4 E4 G4 C5
+notes 3 2 17 1 100 B3 D4 G4 B4
+notes 3 2 19 1 80 B3 D4 G4 B4
+notes 3 2 21 1 90 B3 D4 G4 B4
+notes 3 2 23 1 80 B3 D4 G4 B4
+notes 3 2 25 1 95 B3 D4 G4 B4
+notes 3 2 27 1 80 B3 D4 G4 B4
+notes 3 2 29 1 90 B3 D4 G4 B4
+notes 3 2 31 1 80 B3 D4 G4 B4
+notes 3 2 33 1 100 C4 E4 A4 C5
+notes 3 2 35 1 80 C4 E4 A4 C5
+notes 3 2 37 1 90 C4 E4 A4 C5
+notes 3 2 39 1 80 C4 E4 A4 C5
+notes 3 2 41 1 95 C4 E4 A4 C5
+notes 3 2 43 1 80 C4 E4 A4 C5
+notes 3 2 45 1 90 C4 E4 A4 C5
+notes 3 2 47 1 80 C4 E4 A4 C5
+notes 3 2 49 1 100 C4 F4 A4 C5
+notes 3 2 51 1 80 C4 F4 A4 C5
+notes 3 2 53 1 90 C4 F4 A4 C5
+notes 3 2 55 1 80 C4 F4 A4 C5
+notes 3 2 57 1 95 C4 F4 A4 C5
+notes 3 2 59 1 80 C4 F4 A4 C5
+notes 3 2 61 1 90 B3 D4 G4 B4
+notes 3 2 63 1 80 B3 D4 G4 B4
+
+# ---- T4 the hook: P1 as sung, every bar; P2 the verse's: only its first half, every other bar
+pat 4 1 16 1 100
+notes 4 1 1 0 110 53
+notes 4 1 2 0 110 54
+notes 4 1 3 0 110 55
+notes 4 1 4 0 110 56
+notes 4 1 5 0 110 57
+notes 4 1 6 0 110 58
+notes 4 1 7 0 110 59
+notes 4 1 8 0 110 60
+notes 4 1 9 0 110 61
+notes 4 1 10 0 110 62
+notes 4 1 11 0 110 63
+notes 4 1 12 0 110 64
+notes 4 1 13 0 110 65
+notes 4 1 14 0 110 66
+notes 4 1 15 0 110 67
+notes 4 1 16 0 110 68
+pat 4 2 32 1 100
+notes 4 2 1 0 110 53
+notes 4 2 2 0 110 54
+notes 4 2 3 0 110 55
+notes 4 2 4 0 110 56
+notes 4 2 5 0 110 57
+notes 4 2 6 0 110 58
+notes 4 2 7 0 110 59
+notes 4 2 8 0 110 60
+
+# ---- T5 the chop lead ("oh", its root C5): the drop's riff, a bar a chord
+pat 5 1 64 1 50
+notes 5 1 1 0.5 110 E5
+notes 5 1 3 0.5 90 G5
+notes 5 1 4 0.5 100 C6
+notes 5 1 6 0.5 90 G5
+notes 5 1 7 1 105 E5
+notes 5 1 9 0.5 90 D5
+notes 5 1 11 0.5 100 E5
+notes 5 1 12 0.5 90 G5
+notes 5 1 17 0.5 110 D5
+notes 5 1 19 0.5 90 G5
+notes 5 1 20 0.5 100 B5
+notes 5 1 22 0.5 90 G5
+notes 5 1 23 1 105 D5
+notes 5 1 25 0.5 90 B4
+notes 5 1 27 0.5 100 D5
+notes 5 1 28 0.5 90 G5
+notes 5 1 33 0.5 110 E5
+notes 5 1 35 0.5 90 A5
+notes 5 1 36 0.5 100 C6
+notes 5 1 38 0.5 90 A5
+notes 5 1 39 1 105 E5
+notes 5 1 41 0.5 90 C5
+notes 5 1 43 0.5 100 E5
+notes 5 1 44 0.5 90 A5
+notes 5 1 49 0.5 110 F5
+notes 5 1 51 0.5 90 A5
+notes 5 1 52 0.5 100 C6
+notes 5 1 54 0.5 90 A5
+notes 5 1 55 1 105 G5
+notes 5 1 57 0.5 90 F5
+notes 5 1 59 0.5 100 E5
+notes 5 1 60 0.5 90 D5
+trick 5 1 7 porta 3
+trick 5 1 23 porta 3
+trick 5 1 39 porta 3
+trick 5 1 55 bend 2
+
+# ---- scenes: T1 T2 T3 T4 T5 T6
+scenedef 1 1 1 1 1 1 1 1 1
+scenemute 1 xx..xxxx
+scenedef 2 1 1 1 2 1 1 1 1
+scenemute 2 ....xxxx
+scenedef 3 3 1 2 2 1 1 1 1
+scenemute 3 .x..xxxx
+scenedef 4 2 2 2 1 1 1 1 1
+scenemute 4 ....x.xx
+scenedef 5 2 2 1 2 1 1 1 1
+scenemute 5 ...x..xx
+scenedef 6 1 1 1 1 1 1 1 1
+scenemute 6 xx..xxxx
+song 1:2 2:8 3:1 4:8 5:4 6:2
+songloop 0
+
+# ---- play the song (HOME, SELECT to the Song page, PLAY), and perform
+knob 4 cut 70
+knob 3 cut 90
+tap HOME
+turn SELECT 1
+stats reset
+wav loom_demo_pop.wav
+tap PLAY
+# intro 2: the hook opening
+bars 1
+knob 4 cut 96
+bars 1
+knob 4 cut 127
+knob 3 cut 110
+# verse 8
+bars 8
+# pre 2: the piano's filter closing into the chorus, a riser by the hook pitched up a little each half bar
+knob 3 cut 96
+knob 4 e3 66
+bars 0.5
+knob 4 e3 68
+bars 0.5
+knob 4 e3 70
+knob 3 cut 84
+bars 0.5
+knob 4 e3 72
+bars 0.375
+knob 4 e3 64
+knob 3 cut 110
+bars 0.125
+# chorus 8: the arp on T6, a chord held each bar
+play 6 C4 on 100
+play 6 E4 on 100
+play 6 G4 on 100
+play 6 C4 off
+play 6 E4 off
+play 6 G4 off
+bars 1
+play 6 B3 on 100
+play 6 D4 on 100
+play 6 G4 on 100
+play 6 B3 off
+play 6 D4 off
+play 6 G4 off
+bars 1
+play 6 C4 on 100
+play 6 E4 on 100
+play 6 A4 on 100
+play 6 C4 off
+play 6 E4 off
+play 6 A4 off
+bars 1
+play 6 C4 on 100
+play 6 F4 on 100
+play 6 A4 on 100
+play 6 C4 off
+play 6 F4 off
+play 6 A4 off
+bars 1
+play 6 C4 on 100
+play 6 E4 on 100
+play 6 G4 on 100
+play 6 C4 off
+play 6 E4 off
+play 6 G4 off
+bars 1
+play 6 B3 on 100
+play 6 D4 on 100
+play 6 G4 on 100
+play 6 B3 off
+play 6 D4 off
+play 6 G4 off
+bars 1
+play 6 C4 on 100
+play 6 E4 on 100
+play 6 A4 on 100
+play 6 C4 off
+play 6 E4 off
+play 6 A4 off
+bars 1
+play 6 C4 on 100
+play 6 F4 on 100
+play 6 A4 on 100
+play 6 C4 off
+play 6 F4 off
+play 6 A4 off
+bars 0.75
+throw stutter on mel 4
+bars 0.25
+throw stutter off mel 4
+# drop 4: the chop lead; the arp let go
+knob 6 p4 0
+play 6 C4 on 1
+play 6 C4 off
+bars 3.5
+throw echo on mel 5
+bars 0.5
+throw echo off mel 5
+# outro 2: the hook through the echo
+bars 1
+throw echo on mel 4
+bars 1
+throw echo off mel 4
+wait 3000
+wavstop
+stats
