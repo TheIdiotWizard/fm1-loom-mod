@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* LOOM-8 voices: sixteen voices playing eight engines (synth.h), each with two ADSRs, a filter (six
+/* LOOM-8 voices: sixteen voices playing nine engines (synth.h), each with two ADSRs, a filter (six
  * types), a character stage (six types: drive, fold, crush, ring, tilt, rectify), a steal fade and sends; per track an LFO, a mono stack, parameter locks and
  * performance offsets.
  *
@@ -20,6 +20,7 @@
 #include "synth.h"
 #include "fastmath.h"
 #include "drumline.h"
+#include "sample.h"
 #include "wavetables.h"
 
 #define SUB 16                                /* filter coefficient refresh, steal fade steps */
@@ -39,15 +40,16 @@
 
 /* ------------------------------------------------------------------ names --- */
 const char *const EG_NAME[NENGINE] = {"weft", "stack", "wavetable", "orbit", "tines", "organ", "sync",
-                                      "swarm", "kit"};
+                                      "swarm", "kit", "sample"};
 const char *const EG_KNOB[NENGINE][4] = {
     {"bend", "wave", "sweep", "spread"},   {"wave", "ratio", "detune", "spread"}, {"table", "scan", "bend", "ripple"},
     {"bright", "ratio", "edge", "wobble"}, {"bright", "grit", "bite", "bell"},    {"stops", "pedal", "rotor", "rate"},
-    {"reach", "sub", "hiss", "thin"},      {"swarm", "ring", "tone", "spread"},   {"-", "-", "-", "-"}};
+    {"reach", "sub", "hiss", "thin"},      {"swarm", "ring", "tone", "spread"},   {"-", "-", "-", "-"},
+    {"sample", "start", "length", "mode"}};
 /* each engine's plain sound (INIT), 0..127; the organ's four and stack's ratio are discrete 1..8 */
 static const uint8_t EG_DEF[NENGINE][4] = {{40, 0, 20, 0}, {0, 2, 12, 64}, {0, 40, 0, 0}, {40, 25, 0, 0},
                                            {50, 0, 40, 50}, {3, 4, 2, 5},  {30, 0, 0, 0}, {30, 0, 30, 20},
-                                           {0, 0, 0, 0}};
+                                           {0, 0, 0, 0},    {5, 0, 127, SM_ONESHOT}};
 static const char *const VMODE_N[3] = {"poly", "mono", "legato"};
 static const char *const FTYPE_N[NFT] = {"lp24", "ladder", "lp12", "hp12", "dynamic", "bp12"};
 static const char *const LTYPE_N[NLT] = {"off", "wave", "wobble", "drift", "pump"};
@@ -75,6 +77,8 @@ static const char *const ENVP_N[4] = {"attack", "decay", "sustain", "release"};
 static const char *const FLTP_N[4] = {"cutoff", "reso", "env", "keytrack"};
 static const char *const AMPP_N[4] = {"volume", "pitch", "pan", "character"};
 static const char *const CTYPE_N[NCT] = {"off", "drive", "fold", "crush", "ring", "tilt", "rectify"};
+static const char *const SMODE_N[NSM] = {"one-shot", "loop", "reverse", "ping-pong"};
+static const char *const DFTYPE_N[NDF] = {"off", "lp", "hp", "bp"};
 /* ring: the modulator's ratios to the note, tone / 8 */
 static const float RING_R[16] = {0.25f, 0.5f, 0.75f, 1.0f, 1.25f, 1.414f, 1.5f, 1.75f, 2.0f, 2.5f, 2.76f, 3.0f, 3.5f,
                                  4.0f, 5.0f, 7.0f};
@@ -120,6 +124,7 @@ typedef struct {
     uint8_t nchunk;                   /* chunks so far (the slow refreshes count on it, not on the block size) */
     env_t amp, flt;                   /* stepped once a sub-block (SUB samples) */
     uint8_t fresh;                    /* configured mid-block: refresh the coefficients before the next sample */
+    uint8_t vi;                       /* the voice's index (its sample cache, smp_vc) */
     float amp_cur, amp_step;          /* the amp level, ramped inside the sub-block */
     float steal_gain, sg_step;
     float glc, grc, gl_step, gr_step; /* the dry gains, ramped */
@@ -135,9 +140,13 @@ typedef struct {
     float o[16];                      /* the engine's state */
     float cz[6];                      /* the character stage's: low-pass / hold L R, DC L R, phase, - */
 } voice_t;
+/* the sample engine's decoded windows (dsp/sample.h), a voice each: beside the struct, in RAM (the pool is
+ * the scarcer); each is touched only by its own voice's render, on whichever core renders it */
+static smp_cache_t smp_vc[NVOICE];
 
+#define NTP_LOCK TP_DRUM0             /* the synth's locks: the kit's own parameters never reach a voice */
 typedef struct {
-    uint8_t lock[NTP];
+    uint8_t lock[NTP_LOCK];
     perf_t perf;
     int16_t bend_c;
     uint8_t mono_n, mono_note[8], mono_vel[8];
@@ -278,6 +287,7 @@ static void eng_init(voice_t *v)
     int i;
     for (i = 0; i < 16; i++)
         v->o[i] = 0.0f;
+    smp_cache_reset(&smp_vc[v->vi % NVOICE]);
     if (v->engine == EG_ORGAN)
         for (i = 0; i < 6; i++)
             v->o[i * 2] = 1.0f;                  /* the rotating phasors start at 1 + 0i */
@@ -784,6 +794,100 @@ static void dis_run(voice_t *v, float *xl, float *xr, int m)
     v->o[3] = n1;
 }
 
+/* sample: a sample of the bank (dsp/sample.h) at the note's pitch; its root note plays it at its own rate
+ * (22.05 kHz: half a sample a frame), linearly interpolated. start: where in it (0..99 %); length: how much
+ * of the rest (127 = to its end): the region. Modes: one-shot (the region once; then the voice ends), loop
+ * (from the region's start, round its loop: the sample's own loop if it lies inside the region, else the
+ * region), reverse (the region once, backwards), pingpong (into the loop, then forth and back across it).
+ * o[0] the position (a whole sample: exact in a float), o[1] its fraction, o[2] the direction (+-1), o[3]
+ * 1 = done, o[4] 1 = started; the block being read is decoded in v->sc. */
+static void smp_prep(voice_t *v)
+{
+    cfg_t *c = &v->c;
+    int idx = (int)fm_clampf(fm_floorf(c->ek[0] + 0.5f), 0.0f, (float)(smp_slots() - 1));
+    const smp_t *sm = smp_get(idx);
+    float n, s0, s1, ls, le;
+    c->stereo = 0;
+    c->ex[6] = (float)idx;
+    c->ex[7] = fm_clampf(fm_floorf(c->ek[3] + 0.5f), 0.0f, (float)(NSM - 1));
+    if (!sm) {
+        c->ex[0] = 0.0f;
+        return;
+    }
+    n = (float)sm->n;
+    s0 = fm_floorf(fm_minf(c->e[1], 0.99f) * n);
+    s1 = fm_minf(s0 + fm_maxf(fm_floorf(c->e[2] * (n - s0) + 0.5f), 32.0f), n);
+    ls = s0;
+    le = s1;
+    if (sm->le > sm->ls && (float)sm->ls >= s0 && (float)sm->le <= s1) {
+        ls = (float)sm->ls;
+        le = (float)sm->le;
+    }
+    /* the rate: the note over the root, times the sample's rate over ours (at most 3 octaves above its own) */
+    c->ex[0] = fm_minf(c->freq / (440.0f * fm_exp2f(((float)sm->root - 69.0f) * (1.0f / 12.0f))) *
+                       ((float)SMP_RATE / SY_SR), 8.0f);
+    c->ex[1] = s0;
+    c->ex[2] = s1;
+    c->ex[3] = ls;
+    c->ex[4] = le;
+}
+static void smp_run(voice_t *v, float *xl, float *xr, int m)
+{
+    const cfg_t *c = &v->c;
+    const smp_t *sm = smp_get((int)c->ex[6]);
+    const int mode = (int)c->ex[7];
+    const int32_t s0 = (int32_t)c->ex[1], s1 = (int32_t)c->ex[2], ls = (int32_t)c->ex[3], le = (int32_t)c->ex[4];
+    const float inc = c->ex[0];
+    float fr = v->o[1];
+    int32_t pos = (int32_t)v->o[0], dir = v->o[2] < 0.0f ? -1 : 1;
+    int i = 0, done = !sm || inc <= 0.0f || v->o[3] > 0.5f, turns = 0;
+    (void)xr;
+    if (!done && v->o[4] < 0.5f) {               /* the note's first sample: the region's start (reverse: its end) */
+        v->o[4] = 1.0f;
+        pos = mode == SM_REVERSE ? s1 - 1 : s0;
+        fr = 0.0f;
+        dir = mode == SM_REVERSE ? -1 : 1;
+    }
+    while (!done && i < m) {
+        int32_t lo = s0, hi = s1;
+        if (mode == SM_LOOP || mode == SM_PINGPONG) {   /* into the loop, then round (or across) it */
+            hi = le;
+            lo = dir < 0 || pos >= ls ? ls : s0;
+        }
+        i += smp_play(&smp_vc[v->vi % NVOICE], sm, &pos, &fr, inc, dir, lo, hi, xl + i, m - i);
+        if (i >= m)
+            break;
+        if (mode == SM_ONESHOT || mode == SM_REVERSE || le - ls < 2 || ++turns > 4)
+            done = 1;                            /* (a loop shorter than the step: once round is enough) */
+        else if (mode == SM_LOOP)
+            pos = ls + (pos - le) % (le - ls);
+        else if (dir > 0) {                      /* pingpong: back from the loop's end */
+            pos = 2 * (le - 1) - pos - (fr > 0.0f);
+            fr = fr > 0.0f ? 1.0f - fr : 0.0f;
+            dir = -1;
+            if (pos < ls)
+                pos = ls;
+        } else {                                 /* and forth from its start */
+            pos = 2 * ls - pos - (fr > 0.0f);
+            fr = fr > 0.0f ? 1.0f - fr : 0.0f;
+            dir = 1;
+            if (pos >= le)
+                pos = le - 1;
+        }
+    }
+    if (done) {                                  /* the region has played (or nothing to play): silence, the voice
+                                                  * is free (its amp ramps to 0 over the silence) */
+        for (; i < m; i++)
+            xl[i] = 0.0f;
+        v->o[3] = 1.0f;
+        v->amp.stage = ENV_OFF;
+        v->amp.level = 0.0f;
+    }
+    v->o[0] = (float)pos;
+    v->o[1] = fr;
+    v->o[2] = (float)dir;
+}
+
 static void eng_chunk(voice_t *v)                /* every chunk: the engines' own slow movements */
 {
     switch (v->engine) {
@@ -803,6 +907,7 @@ static void eng_prep(voice_t *v)
     case EG_TINES: tines_prep(v); break;
     case EG_ORGAN: organ_prep(v); break;
     case EG_SYNC: hs_prep(v); break;
+    case EG_SAMPLE: smp_prep(v); break;
     default: dis_prep(v); break;
     }
 }
@@ -816,6 +921,7 @@ static void eng_run(voice_t *v, float *xl, float *xr, int m)
     case EG_TINES: tines_run(v, xl, xr, m); break;
     case EG_ORGAN: organ_run(v, xl, xr, m); break;
     case EG_SYNC: hs_run(v, xl, xr, m); break;
+    case EG_SAMPLE: smp_run(v, xl, xr, m); break;
     default: dis_run(v, xl, xr, m); break;
     }
 }
@@ -830,7 +936,7 @@ static void voice_start(synth_t *s, voice_t *v, int note, int vel, int glide_ms,
     trk_t *t = &s->t[v->trk];
     float ms = porta_ms(glide_ms, P(s, v->trk, TP_PORTA));
     int eng = P(s, v->trk, TP_ENGINE);
-    if (eng >= EG_DRUMLINE)
+    if (!eg_synth(eng))
         eng = EG_WEFT;
     if (eng != v->engine || !v_sounding(v)) {
         v->engine = (uint8_t)eng;
@@ -853,6 +959,8 @@ static void voice_start(synth_t *s, voice_t *v, int note, int vel, int glide_ms,
         v->o[14] = 1.0f;
         v->o[13] = 1.0f;
     }
+    if (v->engine == EG_SAMPLE)                  /* from the region's start again */
+        v->o[3] = v->o[4] = 0.0f;
     if (!in_render)
         t->last_pitch = v->pitch;
     v->fresh = 1;
@@ -1006,6 +1114,8 @@ void synth_note_on(synth_t *s, int trk, int note, int vel, int glide_ms, uint32_
                 v->tsec = 0.0f;
                 if (v->engine == EG_TINES)
                     v->o[15] = v->o[14] = v->o[13] = 1.0f;
+                if (v->engine == EG_SAMPLE)
+                    v->o[3] = v->o[4] = 0.0f;
             }
             return;
         }
@@ -1100,7 +1210,7 @@ void synth_bend(synth_t *s, int trk, int cents)
 perf_t *synth_perf(synth_t *s, int trk) { return &s->t[trk < 0 ? 0 : trk >= NTRK ? NTRK - 1 : trk].perf; }
 void synth_lock(synth_t *s, int trk, int param, int val)
 {
-    if (trk >= 0 && trk < NTRK && param >= 0 && param < NTP)
+    if (trk >= 0 && trk < NTRK && param >= 0 && param < NTP_LOCK)
         s->t[trk].lock[param] = (uint8_t)(val < 0 ? 0 : val > 255 ? 255 : val);
 }
 void synth_tempo(synth_t *s, float bpm) { s->bpm = bpm < 20.0f ? 20.0f : bpm > 400.0f ? 400.0f : bpm; }
@@ -1129,7 +1239,7 @@ void synth_init(synth_t *s, uint8_t (*par)[NTP])
     s->max_voices = NVOICE;
     for (i = 0; i < NTRK; i++) {
         trk_t *t = &s->t[i];
-        for (j = 0; j < NTP; j++)
+        for (j = 0; j < NTP_LOCK; j++)
             t->lock[j] = LOCK_NONE;
         t->mono_voice = -1;
         t->rng = 0x9E3779B9u * (uint32_t)(i + 1);
@@ -1139,6 +1249,7 @@ void synth_init(synth_t *s, uint8_t (*par)[NTP])
     }
     for (i = 0; i < NVOICE; i++) {
         voice_t *v = &s->v[i];
+        v->vi = (uint8_t)i;
         v->rng = 0x2545F491u * (uint32_t)(i + 1) + 1u;
         v->steal_gain = 1.0f;
         v->engine = EG_WEFT;
@@ -1932,13 +2043,19 @@ static const tp_info_t FIXED[NTP_SOUND + 13] = {
     {"stereo", 0, 2, 0, PK_NAMES, ARPSTE_N},            {"level", 0, 127, 100, PK_PCT, 0},
     {"pan", 0, 127, 64, PK_BIP, 0},                     {"follow", 0, 2, 1, PK_NAMES, BRAIN_N},
     {"channel", 0, 16, 0, PK_NUM, 0}};
-/* a drumline key's nine values; its model's knobs take their names and defaults from drumline.c (tp_info_par) */
+/* a drumline key's values (synth.h DP_*); its model's knobs take their names and defaults from drumline.c
+ * (tp_info_par). The key's envelope and filter: its Envelope and Filter pages */
 static const tp_info_t DRUMP[DP_N] = {{"model", 0, NDM - 1, 0, PK_NAMES, DM_NAME}, {"knob 1", 0, 127, 64, PK_NN, 0},
                                       {"knob 2", 0, 127, 64, PK_NN, 0}, {"knob 3", 0, 127, 64, PK_NN, 0},
                                       {"knob 4", 0, 127, 64, PK_NN, 0}, {"random", 0, 127, 0, PK_PCT, 0},
                                       {"pan", 0, 127, 64, PK_BIP, 0}, {"volume", 0, 127, 76, PK_DB, 0},
-                                      {"mode", 0, NPM - 1, PM_ONESHOT, PK_NAMES, PM_NAME}};
-/* a drumline track's Envelope and Filter pages */
+                                      {"mode", 0, NPM - 1, PM_ONESHOT, PK_NAMES, PM_NAME},
+                                      {"attack", 0, 127, 0, PK_DMS, 0}, {"hold", 0, 127, 0, PK_DMS, 0},
+                                      {"decay", 0, 127, 127, PK_DECAY, 0}, {"lag", 0, 127, 0, PK_LAGMS, 0},
+                                      {"cutoff", 0, 127, 127, PK_HZ, 0}, {"reso", 0, 127, 0, PK_PCT, 0},
+                                      {"env", 0, 127, 64, PK_BIP, 0}, {"drive", 0, 127, 0, PK_PCT, 0},
+                                      {"type", 0, NDF - 1, DF_OFF, PK_NAMES, DFTYPE_N}};
+/* a drumline track's kit pages: Kit env (TP_A..TP_R) and Kit filter (the bus: TP_CUT..TP_KTRK) */
 static const tp_info_t DRUMENV[4] = {{"lag", 0, 127, 0, PK_PCT, 0}, {"attack", 0, 127, 0, PK_PCT, 0},
                                      {"random", 0, 127, 0, PK_PCT, 0}, {"length", 0, 127, 64, PK_PCT, 0}};
 static const tp_info_t DRUMFLT[4] = {{"lowcut", 0, 127, 0, PK_HZ, 0}, {"comp", 0, 127, 0, PK_PCT, 0},
@@ -1987,6 +2104,11 @@ static void eknob_init(void)
                 i->hi = 8;
                 i->kind = PK_NUM;              /* stack's ratio prints "N:1" (tp_text) */
             }
+            if (e == EG_SAMPLE) {              /* sample, start, length, mode */
+                i->kind = k == 0 ? PK_SAMPLE : k == 3 ? PK_NAMES : PK_PCT;
+                i->hi = (uint8_t)(k == 0 ? smp_slots() - 1 : k == 3 ? NSM - 1 : 127);
+                i->names = k == 3 ? SMODE_N : 0;
+            }
         }
         lparam[e] = LFO_PARAM_ENV;
         lparam[e].names = EG_KNOB[e];
@@ -1997,6 +2119,17 @@ static void eknob_init(void)
             dknob[e][k].name = DM_KNOB[e][k];
             dknob[e][k].def = DM_DEFAULT[e][k];
         }
+    {   /* the sample model: sample, pitch (+-24 semitones), start, reverse */
+        tp_info_t *d = dknob[DM_SAMPLE];
+        d[0].kind = PK_SAMPLE;
+        d[0].hi = (uint8_t)(smp_slots() - 1);
+        d[1].kind = PK_BIPST;
+        d[1].lo = 40;
+        d[1].hi = 88;
+        d[2].kind = PK_PCT;
+        d[3].kind = PK_SWITCH;
+        d[3].hi = 1;
+    }
     eknob_ready = 1;
 }
 
@@ -2191,6 +2324,26 @@ static void tp_text_i(const tp_info_t *i, int p, int v, int engine, char *num, c
         put_s(unit, "dB");
         break;
     }
+    case PK_SAMPLE: put_s(num, smp_name(v)); break;
+    case PK_BIPST:
+        if (v - 64 > 0)
+            *num++ = '+';
+        put_i(num, v - 64);
+        put_s(unit, "st");
+        break;
+    case PK_DMS: case PK_DECAY:
+        if (i->kind == PK_DECAY && v >= 127)
+            put_s(num, "off");
+        else if (v <= 0 && i->kind == PK_DMS) {
+            put_s(num, "0");
+            put_s(unit, "ms");
+        } else
+            ms_text(env_seconds((float)v * (1.0f / 127.0f)), num, unit);
+        break;
+    case PK_LAGMS:
+        put_i(num, (v * 60 + 63) / 127);
+        put_s(unit, "ms");
+        break;
     default: put_i(num, v); break;
     }
 }
@@ -2235,7 +2388,7 @@ void sound_default(uint8_t *par, int engine)
  * (3 = 1/4), above free: 20 is about 0.16 Hz, 40 0.45 Hz, 60 1.2 Hz, 80 3 Hz, 92 5.6 Hz.
  * Times: 32 is about 10 ms, 64 100 ms, 80 330 ms, 96 1.1 s, 110 3 s. Cutoff: 59 is 800 Hz, 80 2.2 kHz,
  * 100 5.6 kHz. Each engine is a material of the loom: weft cotton, stack ply, wavetable silk, orbit linen,
- * tines felt, organ reed, sync wire, swarm fleece. Each engine's eight span it: a bass, a lead, a pad, something
+ * tines felt, organ reed, sync wire, swarm fleece, sample jute. Each engine's eight span it: a bass, a lead, a pad, something
  * struck, a bright one and a dark one, one that moves; the volumes put each preset's phrase (tools/render_presets.sh)
  * near -19.5 dBFS RMS dry, its peak under -1.5 dBFS. */
 #define LFO_(lt, ls, la, ld, lx, lx2) lt, ls, la, ld, lx, lx2
@@ -2322,6 +2475,16 @@ const preset_t PRESETS[] = {
     PR("breeze", EG_SWARM, 127, 40, 45, 70, VM_POLY, 0, 105, 80, 90, 100, 96, 0, 60, 0, 40, 110, 20, 64, 64, FT_LP12, 0, 70, (LT_DRIFT, 30, 70, LD_FILTER + LD_FREE, 0, 64), (CT_TILT, 64, 100, 127)),
     PR("cashmere", EG_SWARM, 15, 0, 0, 30, VM_POLY, 0, 97, 40, 90, 70, 90, 0, 60, 0, 40, 60, 5, 64, 64, FT_LP12, 5, 60, NOLFO, NOCH),
     PR("burr", EG_SWARM, 70, 110, 70, 60, VM_POLY, 0, 127, 10, 70, 50, 56, 0, 60, 0, 40, 100, 10, 64, 64, FT_LP24, 15, 35, NOLFO, (CT_FOLD, 90, 90, 127)),
+    /* sample: jute and the bast fibres, the bank's own sounds played by the keys. sample (0 kick, 1 snare, 2 hat,
+     * 3 clap, 4 ah, 5 piano, 6 sweep; then the user bank), start, length, mode (one-shot, loop, reverse, pingpong) */
+    PR("jute keys", EG_SAMPLE, 5, 0, 127, SM_ONESHOT, VM_POLY, 0, 120, 0, 80, 100, 66, 0, 70, 0, 50, 110, 5, 64, 64, FT_LP12, 10, 30, NOLFO, (CT_DRIVE, 25, 110, 127)),
+    PR("jute choir", EG_SAMPLE, 4, 0, 127, SM_LOOP, VM_POLY, 0, 90, 88, 90, 100, 92, 60, 90, 60, 90, 92, 8, 70, 50, FT_LP12, 10, 75, (LT_WAVE, 25, 90, LD_FILTER + LD_FREE, 0, 1), NOCH),
+    PR("hessian", EG_SAMPLE, 4, 0, 127, SM_PINGPONG, VM_LEGATO, 25, 116, 10, 80, 100, 60, 0, 66, 40, 50, 96, 15, 76, 64, FT_LP24, 25, 25, VIB(30), (CT_DRIVE, 40, 115, 127)),
+    PR("hemp bass", EG_SAMPLE, 0, 0, 127, SM_ONESHOT, VM_MONO, 0, 127, 0, 70, 100, 40, 0, 60, 0, 30, 80, 10, 84, 40, FT_LP24, 0, 5, NOLFO, (CT_DRIVE, 55, 60, 127)),
+    PR("sisal sweep", EG_SAMPLE, 6, 0, 127, SM_PINGPONG, VM_POLY, 0, 127, 70, 90, 100, 90, 50, 80, 50, 80, 105, 20, 64, 64, FT_LP12, 10, 80, (LT_DRIFT, 40, 70, LD_FILTER + LD_FREE, 0, 64), NOCH),
+    PR("raffia", EG_SAMPLE, 5, 0, 127, SM_REVERSE, VM_POLY, 0, 127, 30, 80, 100, 60, 0, 70, 0, 50, 100, 5, 64, 64, FT_LP12, 20, 60, NOLFO, (CT_TILT, 60, 80, 127)),
+    PR("coir", EG_SAMPLE, 1, 0, 30, SM_PINGPONG, VM_POLY, 0, 127, 0, 80, 70, 60, 0, 50, 0, 40, 100, 40, 90, 64, FT_LP12, 15, 35, NOLFO, (CT_CRUSH, 45, 60, 127)),
+    PR("flax bell", EG_SAMPLE, 5, 4, 127, SM_ONESHOT, VM_POLY, 0, 127, 0, 92, 0, 85, 0, 80, 0, 70, 120, 0, 64, 64, FT_LP12, 15, 60, NOLFO, (CT_RING, 40, 104, 127)),
 };
 const int NPRESETS = (int)(sizeof PRESETS / sizeof PRESETS[0]);
 

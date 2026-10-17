@@ -1,9 +1,11 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* LOOM-8 drumline (drumline.h): the kit engine's ten drum models, analytic, on NDVOICE voices.
+/* LOOM-8 drumline (drumline.h): the kit engine's eleven drum models on NDVOICE voices, each key through
+ * its own envelope and filter.
  *
- * Every sound is a few oscillators, a noise source and a filter or two, shaped by exponential
- * envelopes (env *= k a sample): no samples, no tables, so a kit costs nothing in flash and a voice
- * stays well under 80 instructions a sample. The kick, snare, hat, clap, conga and tom descend
+ * Ten models are analytic: a few oscillators, a noise source and a filter or two, shaped by exponential
+ * envelopes (env *= k a sample): no tables, so they cost nothing in flash and a voice stays well under 80
+ * instructions a sample. The eleventh, sample, plays a sample of the bank (dsp/sample.h: IMA ADPCM read in
+ * place, a block of 65 decoded into the voice's cache at a time). The kick, snare, hat, clap, conga and tom descend
  * from X0X's 909 / 808 ports (drum909.c, drum808.c): the kick's pitch drop and click, the snare's two
  * detuned sines over band-passed noise, the hat's six square waves through high-passes, the clap's
  * four bursts; the shaker, tambourine, string (Karplus-Strong) and fm are our own.
@@ -11,9 +13,14 @@
  * Each key of the kit is a model instance: par[TP_DRUM(key, DP_MODEL)] picks the model, DP_K1..K4
  * are the model's own four knobs (drumline.h DM_KNOB, read at the hit), DP_RANDOM varies those four
  * a little differently every hit, DP_PAN and DP_VOLUME (-30..+20 dB) place it, DP_MODE says how it
- * plays (one-shot, gated, loop, choke groups). The track's par[TP_A..TP_R] are the drumline envelope,
- * lag / attack / random / length: a delay before the hit, a fade-in, a track-wide randomisation (the
- * kick's pitch excepted) and a scale on every model's length.
+ * plays (one-shot, gated, loop, choke groups). Then the key's own stage, after the model: its filter (a
+ * TPT state-variable section, 12 dB: low-pass, high-pass or band-pass; DP_CUT, DP_RES, the envelope's
+ * reach DP_FENV), its drive (a tanh shape, the level made up at a typical drum peak) and its envelope
+ * (DP_ATTACK a linear rise, DP_HOLD, DP_DECAY an exponential fall to -60 dB, off at 127: the model's own
+ * length; DP_LAG a delay), the envelope as a function of the time since the hit, evaluated once a
+ * sub-block (32 samples) and ramped between: a key left neutral costs nothing. The track's
+ * par[TP_A..TP_R] are the kit's envelope, lag / attack / random / length: a delay before every hit, a
+ * fade-in, a track-wide randomisation (the kick's pitch excepted) and a scale on every model's length.
  *
  * Levels: a balanced gain per key: every model is trimmed (SPEC[].trim) so that its defaults at
  * velocity 127 and volume 0 dB peak between -12 and -6 dBFS, the kick and snare on top (-6), the hats
@@ -39,13 +46,14 @@
 _Static_assert((RESO_LEN & (RESO_LEN - 1)) == 0, "a string's line wraps by a mask");
 
 const char *const DM_NAME[NDM] = {"kick", "snare", "hat", "clap", "shaker", "tambourine", "string",
-                                  "conga", "tom", "fm"};
+                                  "conga", "tom", "fm", "sample"};
 const char *const DM_KNOB[NDM][4] = {
     [DM_KICK] = {"pitch", "length", "punch", "tone"},    [DM_SNARE] = {"pitch", "length", "wires", "punch"},
     [DM_HIHAT] = {"pitch", "length", "metal", "focus"},  [DM_CLAP] = {"tone", "length", "spread", "tail"},
     [DM_SHAKER] = {"color", "length", "swell", "return"}, [DM_TAMB] = {"tone", "length", "jingle", "hiss"},
     [DM_RESO] = {"pitch", "length", "bright", "pluck"},  [DM_CONGA] = {"pitch", "length", "slide", "drive"},
     [DM_TOM] = {"pitch", "length", "sweep", "rate"},     [DM_FM] = {"pitch", "length", "mod", "feedback"},
+    [DM_SAMPLE] = {"sample", "pitch", "start", "reverse"},
 };
 /* the kit tuned to C (the pitch knobs, from start()'s mappings; measured by tests/host/drumline_test.c):
  *   kick   82: 16 Hz x 2^(82/127 x 2.5)       = 49.0 Hz  G1      length 42: -60 dB at about 0.17 s
@@ -60,7 +68,7 @@ const uint8_t DM_DEFAULT[NDM][4] = {
     [DM_KICK] = {82, 42, 64, 64},   [DM_SNARE] = {79, 40, 84, 64},  [DM_HIHAT] = {93, 23, 64, 88},
     [DM_CLAP] = {100, 64, 64, 38},  [DM_SHAKER] = {31, 64, 64, 101}, [DM_TAMB] = {80, 34, 72, 56},
     [DM_RESO] = {36, 70, 70, 100},  [DM_CONGA] = {109, 46, 64, 0},  [DM_TOM] = {70, 46, 38, 64},
-    [DM_FM] = {103, 100, 46, 15},
+    [DM_FM] = {103, 100, 46, 15},  [DM_SAMPLE] = {0, 64, 0, 0},
 };
 const char *const PM_NAME[NPM] = {"one-shot", "gated", "loop", "choke 1", "choke 2", "choke 3"};
 const char *const DL_SOUND_NAME[DL_NSOUND] = {"kick", "snare", "hat", "open", "clap", "ltom", "htom", "conga",
@@ -68,20 +76,22 @@ const char *const DL_SOUND_NAME[DL_NSOUND] = {"kick", "snare", "hat", "open", "c
 /* the default kit up the eleven black keys: kick, snare, closed hat, open hat (the same model with a long
  * length, choke group 1 with the closed), clap, low tom, high tom, conga, shaker, string, fm. The
  * tambourine has no key of its own: turn any key's model knob to it.
- * DP_MODEL, DP_K1..K4, DP_RANDOM, DP_PAN, DP_VOLUME (76 = 0 dB), DP_MODE */
+ * DP_MODEL, DP_K1..K4, DP_RANDOM, DP_PAN, DP_VOLUME (76 = 0 dB), DP_MODE, then the key's envelope and filter,
+ * neutral (KEYN: attack 0, hold 0, decay off, lag 0; cutoff open, no resonance, no envelope, no drive, off) */
 #define VOL0 76
-const uint8_t DL_DEFAULT_KIT[DL_NSOUND][9] = {
-    {DM_KICK, 82, 42, 64, 64, 0, 64, VOL0, PM_ONESHOT},
-    {DM_SNARE, 79, 40, 84, 64, 0, 64, VOL0, PM_ONESHOT},
-    {DM_HIHAT, 93, 23, 64, 88, 0, 74, VOL0, PM_CHOKE1},
-    {DM_HIHAT, 93, 88, 64, 88, 0, 74, VOL0, PM_CHOKE1},
-    {DM_CLAP, 100, 64, 64, 38, 0, 54, VOL0, PM_ONESHOT},
-    {DM_TOM, 70, 46, 38, 64, 0, 44, VOL0, PM_ONESHOT},
-    {DM_TOM, 100, 46, 38, 64, 0, 84, VOL0, PM_ONESHOT},
-    {DM_CONGA, 109, 46, 64, 0, 0, 54, VOL0, PM_ONESHOT},
-    {DM_SHAKER, 31, 64, 64, 101, 0, 80, VOL0, PM_ONESHOT},
-    {DM_RESO, 36, 70, 70, 100, 0, 50, VOL0, PM_ONESHOT},
-    {DM_FM, 103, 100, 46, 15, 0, 64, VOL0, PM_ONESHOT},
+#define KEYN 0, 0, 127, 0, 127, 0, 64, 0, DF_OFF
+const uint8_t DL_DEFAULT_KIT[DL_NSOUND][DP_N] = {
+    {DM_KICK, 82, 42, 64, 64, 0, 64, VOL0, PM_ONESHOT, KEYN},
+    {DM_SNARE, 79, 40, 84, 64, 0, 64, VOL0, PM_ONESHOT, KEYN},
+    {DM_HIHAT, 93, 23, 64, 88, 0, 74, VOL0, PM_CHOKE1, KEYN},
+    {DM_HIHAT, 93, 88, 64, 88, 0, 74, VOL0, PM_CHOKE1, KEYN},
+    {DM_CLAP, 100, 64, 64, 38, 0, 54, VOL0, PM_ONESHOT, KEYN},
+    {DM_TOM, 70, 46, 38, 64, 0, 44, VOL0, PM_ONESHOT, KEYN},
+    {DM_TOM, 100, 46, 38, 64, 0, 84, VOL0, PM_ONESHOT, KEYN},
+    {DM_CONGA, 109, 46, 64, 0, 0, 54, VOL0, PM_ONESHOT, KEYN},
+    {DM_SHAKER, 31, 64, 64, 101, 0, 80, VOL0, PM_ONESHOT, KEYN},
+    {DM_RESO, 36, 70, 70, 100, 0, 50, VOL0, PM_ONESHOT, KEYN},
+    {DM_FM, 103, 100, 46, 15, 0, 64, VOL0, PM_ONESHOT, KEYN},
 };
 volatile uint8_t drumline_hitv[DL_NSOUND];
 
@@ -91,7 +101,7 @@ static const dm_spec_t SPEC[NDM] = {
     [DM_KICK] = {0.05f, 1.5f, 0.7f},    [DM_SNARE] = {0.06f, 1.0f, 0.336f}, [DM_HIHAT] = {0.02f, 2.5f, 1.8f},
     [DM_CLAP] = {0.05f, 1.2f, 0.6f},     [DM_SHAKER] = {0.02f, 0.6f, 0.67f},  [DM_TAMB] = {0.03f, 1.5f, 1.5f},
     [DM_RESO] = {0.05f, 2.5f, 0.585f},  [DM_CONGA] = {0.05f, 0.9f, 0.55f},  [DM_TOM] = {0.08f, 1.5f, 0.47f},
-    [DM_FM] = {0.03f, 1.5f, 0.535f},
+    [DM_FM] = {0.03f, 1.5f, 0.535f},     [DM_SAMPLE] = {0.05f, 1.5f, 0.5f},
 };
 /* the 808's six metal oscillators (sc808: 205.3, 304.4, 369.6, 522.7, 540, 800 Hz) and the tambourine's
  * jingles: six inharmonic partials of a small brass disc */
@@ -117,8 +127,15 @@ typedef struct {
     float gl, gr, gs1, gs2;           /* gains now: left, right, the two sends (set each chunk) */
     float dgl, dgr;                   /* left and right ramp toward the chunk's targets */
     uint32_t mp[6], mi[6];            /* the hat's / tambourine's six square phases and increments */
-    int32_t len, w;                   /* the string: its length, write position */
-    float fr, lp, fb, damp, pk;       /* its fractional length, loop filter, feedback, damping, peak */
+    int32_t len, w;                   /* the string: its length, write position (the sample: position, its start) */
+    float fr, lp, fb, damp, pk;       /* its fractional length, loop filter, feedback, damping, peak (the
+                                       * sample: the position's fraction) */
+    /* the key's own stage (DP_ATTACK..DP_FTYPE) */
+    uint32_t et;                      /* samples since the hit began (after the lag) */
+    float eatt, ehold, edec;          /* the attack's end, the hold's end (samples); the decay's log a sample (0: off) */
+    float eg;                         /* the envelope now (at the sub-block's start) */
+    float fz1, fz2;                   /* the filter's states */
+    uint8_t ftype, sidx, sci, rsv2;   /* the filter's type (DF_*); the sample model's sample, its cache + 1 */
 } dvoice_t;
 
 /* the dynamic filter: coefficients from drumline_filter, states per channel */
@@ -131,20 +148,29 @@ typedef struct {
     float lo[4], hi[4];               /* low cut L1 L2 R1 R2, hi cut the same */
 } dynf_t;
 
+#define NDSC 4                        /* sample caches: sample keys sounding at once (a fifth takes the oldest's) */
 struct drumline {
     const uint8_t *par;
     dvoice_t v[NDVOICE];
+    smp_cache_t sc[NDSC];             /* the sample model's decoded windows (dsp/sample.h) */
+    int8_t sc_owner[NDSC];            /* the voice holding each, -1 */
     dynf_t f;
     int8_t line_owner[NRESO];         /* the voice holding each string, -1 */
     int16_t line[NRESO][RESO_LEN];
 };
 _Static_assert(sizeof(struct drumline) <= DRUMLINE_BYTES, "drumline_t does not fit DRUMLINE_BYTES");
+#ifdef XY_HOST
+int drumline_sizeof(void) { return (int)sizeof(struct drumline); }
+#endif
 
 static inline float noise(uint32_t *r)
 {
     *r = *r * 1664525u + 1013904223u;
     return (float)(int32_t)*r * (1.0f / 2147483648.0f);
 }
+/* a key's envelope time from its knob: 0 = none, else 1 ms .. 10 s (as the synth's envelopes, synth.c
+ * env_seconds; the screen prints the same) */
+static inline float key_secs(int v) { return v <= 0 ? 0.0f : 0.001f * fm_exp2f((float)v * (13.2877124f / 127.0f)); }
 /* the multiplier that takes an envelope to -60 dB in t seconds */
 static inline float dec_k(float t) { return fm_expf(-6.9078f / (fm_maxf(t, 0.001f) * SR)); }
 /* a one-pole's coefficient for a cutoff in Hz */
@@ -186,10 +212,36 @@ void drumline_init(drumline_t *d, const uint8_t *par)
         z[i] = 0;
     d->par = par;
     d->f.gain = 1.0f;
+    for (i = 0; i < NDSC; i++)
+        d->sc_owner[i] = -1;
     for (i = 0; i < NRESO; i++)
         d->line_owner[i] = -1;
     for (i = 0; i < NDVOICE; i++)
         d->v[i].rng = 0x9E3779B9u * (i + 1);
+}
+
+/* a sample cache for voice vi: a free one (or one whose voice has moved on), else the oldest sample voice's
+ * (that voice ends). Returns the cache + 1 (dvoice_t.sci) */
+static uint8_t sc_claim(drumline_t *d, int vi)
+{
+    int i, best = -1;
+    uint32_t oldest = 0;
+    for (i = 0; i < NDSC; i++) {
+        int o = d->sc_owner[i];
+        if (o < 0 || o == vi || !d->v[o].on || d->v[o].model != DM_SAMPLE || d->v[o].sci != i + 1)
+            best = i;
+    }
+    if (best < 0)
+        for (i = 0; i < NDSC; i++)
+            if (d->v[d->sc_owner[i]].age >= oldest) {
+                oldest = d->v[d->sc_owner[i]].age;
+                best = i;
+            }
+    if (d->sc_owner[best] >= 0 && d->sc_owner[best] != vi)
+        d->v[d->sc_owner[best]].on = 0;
+    d->sc_owner[best] = (int8_t)vi;
+    smp_cache_reset(&d->sc[best]);
+    return (uint8_t)(best + 1);
 }
 
 /* a voice for the sound: its own (a retrigger), a free one, else the oldest */
@@ -330,8 +382,22 @@ static void start(drumline_t *d, dvoice_t *v, int sound, int vel, int pitch_semi
     v->env2 = 1.0f;
     v->k2 = v->k;
     v->g = (float)vel * (1.0f / 127.0f) * sp->trim;   /* the velocity: a gain; the chunk adds volume / pan */
-    /* the track envelope: lag = the start waits 0..60 ms, attack = a fade-in of 0..100 ms */
-    v->wait = with_lag ? (int32_t)((float)par[TP_A] * (0.060f / 127.0f) * SR) : 0;
+    /* the track envelope: lag = the start waits 0..60 ms (and the key's own lag, another 0..60), attack = a
+     * fade-in of 0..100 ms */
+    v->wait = with_lag ? (int32_t)((float)(par[TP_A] + p[DP_LAG]) * (0.060f / 127.0f) * SR) : 0;
+    {   /* the key's envelope: attack, hold, decay (off at 127) */
+        float a = key_secs(p[DP_ATTACK]) * SR, hd = key_secs(p[DP_HOLD]) * SR;
+        float dk = p[DP_DECAY] >= 127 ? 0.0f : fm_maxf(key_secs(p[DP_DECAY]), 0.001f);
+        if (model == DM_SAMPLE && (flags & HF_SHORT))
+            dk = dk > 0.0f ? fm_minf(dk, 0.06f) : 0.06f;   /* a short step: as the models' 60 ms */
+        if (flags & HF_LONG)
+            dk *= 4.0f;
+        v->eatt = a;
+        v->ehold = a + hd;
+        v->edec = dk > 0.0f ? -6.9078f / (fm_maxf(dk, 0.001f) * SR) : 0.0f;
+        v->eg = a > 0.0f ? 0.0f : 1.0f;
+        v->et = 0;
+    }
     {
         float at = (float)par[TP_D] * (0.100f / 127.0f) * SR;
         v->att = at < 1.0f ? 1.0f : 0.0f;
@@ -456,6 +522,28 @@ static void start(drumline_t *d, dvoice_t *v, int sound, int vel, int pitch_semi
         v->k2 = dec_k(0.03f);
         v->c1 = lp_c(1500.0f);
         break;
+    case DM_SAMPLE: {                                 /* a sample of the bank: pitch about its own rate, start,
+                                                       * reverse (from its end back to the start) */
+        int idx = p[DP_K1] < smp_slots() ? p[DP_K1] : smp_slots() - 1;
+        const smp_t *sm = smp_get(idx);
+        v->sidx = (uint8_t)idx;
+        v->sci = sc_claim(d, (int)(v - d->v));
+        v->k = v->k2 = 1.0f;                          /* (its length is the sample's: the env only chokes) */
+        v->env2 = 0.0f;
+        if (!sm) {                                    /* an empty slot: nothing, the voice ends at once */
+            v->env = 0.0f;
+            break;
+        }
+        {   /* the pitch knob (40..88: +-24 semitones), its random a fifth of the others', the hit's transpose */
+            float st = fm_clampf(knob(p, 1, rnd * 0.2f, &v->rng) * 127.0f - 64.0f, -24.0f, 24.0f) + semi;
+            v->inc = fm_minf(((float)SMP_RATE / SR) * fm_exp2f(st * (1.0f / 12.0f)), 4.0f);
+        }
+        v->w = (int32_t)(fm_minf(k3, 0.99f) * (float)sm->n);   /* the start */
+        v->a = (p[DP_K4] & 1u) ? -1.0f : 1.0f;
+        v->len = v->a > 0.0f ? v->w : (int32_t)sm->n - 1;
+        v->fr = 0.0f;
+        break;
+    }
     case DM_FM: {                                     /* 2-op: stepped pitch, mod = the index and the
                                                        * modulator's ratio, feedback = the modulator's
                                                        * self-modulation */
@@ -468,7 +556,8 @@ static void start(drumline_t *d, dvoice_t *v, int sound, int vel, int pitch_semi
         break;
     }
     }
-    v->inc = hz / SR;
+    if (model != DM_SAMPLE)
+        v->inc = hz / SR;
 }
 
 void drumline_hit(drumline_t *d, int sound, int vel, int pitch_semi, int short_gate, int long_tail)
@@ -492,7 +581,7 @@ void drumline_hit(drumline_t *d, int sound, int vel, int pitch_semi, int short_g
 }
 
 /* ---- one voice, m samples (<= SUB) of mono into t[] ---- */
-static void render_voice(dvoice_t *v, int16_t *line, float *t, int m)
+static void render_voice(dvoice_t *v, int16_t *line, smp_cache_t *sc, float *t, int m)
 {
     int i;
     float env = v->env, k = v->k, env2 = v->env2, k2 = v->k2, ph = v->ph, inc = v->inc, g = v->g;
@@ -730,6 +819,30 @@ static void render_voice(dvoice_t *v, int16_t *line, float *t, int m)
         v->f1 = mo;
         break;
     }
+    case DM_SAMPLE: {                                 /* the sample, interpolated, forward or backward */
+        const smp_t *sm = smp_get(v->sidx);           /* (0: the user bank is being rewritten: the voice stops) */
+        int32_t pos = v->len;
+        float fr = v->fr;
+        i = sm && sc && env > 0.0f ? smp_play(sc, sm, &pos, &fr, inc, v->a > 0.0f ? 1 : -1, v->w, (int32_t)sm->n, t, m) : 0;
+        if (k == 1.0f) {
+            float eg = env * g;
+            for (int j = 0; j < i; j++)
+                t[j] *= eg;
+        } else
+            for (int j = 0; j < i; j++) {
+                t[j] *= env * g;
+                env *= k;
+            }
+        if (i < m) {                                  /* its end (or its start, reversed): the voice ends */
+            for (; i < m; i++)
+                t[i] = 0.0f;
+            env = 0.0f;
+        }
+        v->len = pos;
+        v->fr = fr;
+        env2 = 0.0f;
+        break;
+    }
     default:
         for (i = 0; i < m; i++)
             t[i] = 0.0f;
@@ -747,6 +860,83 @@ static void render_voice(dvoice_t *v, int16_t *line, float *t, int m)
     } else if (env < 1e-4f && env2 < 1e-4f) {
         v->on = 0;
     }
+}
+
+/* tanh's shape for a few instructions: x (27 + x^2) / (27 + 9 x^2) (a Pade form), flat past +-3 */
+static inline float tanh_r(float x)
+{
+    float x2;
+    if (x > 3.0f)
+        return 1.0f;
+    if (x < -3.0f)
+        return -1.0f;
+    x2 = x * x;
+    return x * (27.0f + x2) / (27.0f + 9.0f * x2);
+}
+
+/* ---- the key's own stage: filter, drive, envelope, after the model ---- */
+/* the key's envelope at t samples after the hit: a linear rise to the attack's end, flat to the hold's end,
+ * then an exponential fall (none: decay off) */
+static inline float key_env(const dvoice_t *v, float t)
+{
+    if (t < v->eatt)
+        return t / v->eatt;
+    if (t < v->ehold || v->edec == 0.0f)
+        return 1.0f;
+    return fm_expf(v->edec * (t - v->ehold));
+}
+/* m samples (<= SUB) of the voice's output in t[], in place. A neutral key (no filter, no drive, the
+ * envelope flat at 1) is left as it is */
+static void key_post(const uint8_t *p, dvoice_t *v, float *t, int m)
+{
+    int i, ft = p[DP_FTYPE] % NDF, filt = ft != DF_OFF, drv = p[DP_DRIVE] > 0;
+    float e0 = v->eg, e1, de;
+    if (ft != v->ftype) {                            /* another type: from rest */
+        v->fz1 = v->fz2 = 0.0f;
+        v->ftype = (uint8_t)ft;
+    }
+    uint32_t t1 = v->et + (uint32_t)m;
+    if (!filt && !drv && v->eatt == 0.0f && v->edec == 0.0f) {
+        v->et = t1;
+        return;
+    }
+    e1 = key_env(v, (float)t1);
+    de = (e1 - e0) * (1.0f / (float)m);
+    if (filt) {                                      /* a TPT state-variable section, its cutoff on the envelope */
+        /* cutoff 50 Hz .. 20 kHz, the envelope's reach +-6 octaves, Q 0.5 .. 10 */
+        float oct = (float)p[DP_CUT] * (8.64385619f / 127.0f) + ((float)p[DP_FENV] - 64.0f) * (6.0f / 64.0f) * 0.5f * (e0 + e1);
+        float hz = 50.0f * fm_exp2f(oct), g, a1, a2, a3, k = 2.0f * fm_exp2f((float)p[DP_RES] * (-4.3f / 127.0f));
+        float z1 = v->fz1, z2 = v->fz2;
+        hz = hz > 0.45f * SR ? 0.45f * SR : hz < 20.0f ? 20.0f : hz;
+        g = fm_tanf(FM_PI * hz / SR);
+        a1 = 1.0f / (1.0f + g * (g + k));
+        a2 = g * a1;
+        a3 = g * a2;
+        for (i = 0; i < m; i++) {
+            float x = t[i], v3 = x - z2, v1 = a1 * z1 + a2 * v3, v2 = z2 + a2 * z1 + a3 * v3;
+            z1 = 2.0f * v1 - z1;
+            z2 = 2.0f * v2 - z2;
+            t[i] = ft == DF_LP ? v2 : ft == DF_HP ? x - k * v1 - v2 : k * v1;
+        }
+        v->fz1 = fm_flush(z1);
+        v->fz2 = fm_flush(z2);
+    }
+    if (drv) {                                       /* gain 1..16; a peak of 0.5 (a drum's, about) keeps its level */
+        float d = (float)p[DP_DRIVE] * (1.0f / 127.0f), dg = 1.0f + 15.0f * d * d, mk = 0.5f / tanh_r(0.5f * dg);
+        for (i = 0; i < m; i++)
+            t[i] = tanh_r(t[i] * dg) * mk;
+    }
+    if (e0 != 1.0f || e1 != 1.0f) {
+        float e = e0;
+        for (i = 0; i < m; i++) {
+            e += de;
+            t[i] *= e;
+        }
+    }
+    v->eg = e1;
+    v->et = t1;
+    if (v->edec < 0.0f && (float)t1 > v->ehold && e1 < 1e-4f)
+        v->on = 0;                                   /* the key's decay has run out: the voice ends */
 }
 
 /* the key's volume in dB: 0 silent, 1..76 = -30..0 dB, 76..127 = 0..+20 dB */
@@ -813,17 +1003,6 @@ void drumline_filter(drumline_t *d, int type, int locut, int comp, int drive, in
     f->dcomp = 0.6f + 0.4f / f->drive;
 }
 
-/* tanh's shape for a few instructions: x (27 + x^2) / (27 + 9 x^2) (a Pade form), flat past +-3 */
-static inline float tanh_r(float x)
-{
-    float x2;
-    if (x > 3.0f)
-        return 1.0f;
-    if (x < -3.0f)
-        return -1.0f;
-    x2 = x * x;
-    return x * (27.0f + x2) / (27.0f + 9.0f * x2);
-}
 
 /* m samples (<= SUB) of the dry pair through the filter, in place */
 static void dynf_run(dynf_t *f, float *l, float *r, int m)
@@ -919,7 +1098,9 @@ void drumline_render(drumline_t *d, float *l, float *r, float *s1, float *s2, ui
                         t[i] = 0.0f;
                 }
                 any = 1;
-                render_voice(v, d->line[v->line], t + from, mm - from);
+                render_voice(v, d->line[v->line],
+                             v->sci && d->sc_owner[v->sci - 1] == vi ? &d->sc[v->sci - 1] : 0, t + from, mm - from);
+                key_post(d->par + TP_DRUM(v->sound, 0), v, t + from, mm - from);
                 gl = v->gl;
                 gr = v->gr;
                 att = v->att;

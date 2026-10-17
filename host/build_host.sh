@@ -11,12 +11,13 @@ PY="${PYTHON:-python3}"
 mkdir -p build/gen build/host
 [ -f build/gen/felucca_font.h ] || "$PY" tools/gen_font.py build/gen/felucca_font.h >/dev/null
 [ -f build/gen/wavetables.h ] || "$PY" tools/gen_wavetables.py build/gen/wavetables.h >/dev/null
+[ -f build/gen/samples.h ] || "$PY" tools/gen_samples.py build/gen/samples.h >/dev/null
 "$PY" tools/gen_words.py firmware/words.tsv web/words build/gen/ann_words.h >/dev/null
 W="-O2 -ffp-contract=off -std=c99 -Wall -Wextra -Wdouble-promotion -Werror -Wno-unused-function -Wno-unused-parameter"
 I="-DXY_HOST -Ifirmware/src -Ifirmware/src/seq -Ifirmware/src/dsp -Ibuild/gen"
-for u in dsp/synth dsp/drumline dsp/fx seq/pattern seq/seq; do
+for u in dsp/synth dsp/drumline dsp/sample dsp/fx seq/pattern seq/seq; do
     $CC $W $I -c firmware/src/$u.c -o build/host/$(basename $u).o
 done
 $CC $W $I -Wno-unused-variable -o build/host/xy_host host/xy_host.c build/host/synth.o build/host/drumline.o \
-    build/host/fx.o build/host/pattern.o build/host/seq.o -lm
+    build/host/sample.o build/host/fx.o build/host/pattern.o build/host/seq.o -lm
 echo "host: build/host/xy_host"

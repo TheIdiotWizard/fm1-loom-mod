@@ -125,6 +125,9 @@ press…" means keep **HOME** down while you press the next thing.
 | weave two patterns | Copy one (**SEL**, COPY PATTERN), go to the other, **SEL**, WEAVE WITH COPIED: **ALGORITHM** picks bars, steps, rhythm or notes. **SEL** does it. |
 | change the sound | Press **EDIT** and turn **PRESETS**: the engine's own sounds, "PRESET 3/8". **SEL** changes the engine. |
 | edit a drum sound | On a drum track, press **EDIT** and press the sound's black key. The knobs are the model's own four. Turn **SELECT** for the model, random, pan and volume; its **SEL** list has the play mode. |
+| shape one drum | On a drum track, press **ENV** and press the drum's black key: its own attack, hold, decay and lag. Turn **SELECT** for its filter: **PRESETS** picks low-pass, high-pass or band-pass, the knobs cutoff, resonance, envelope and drive. |
+| play a sample | On a drum track, turn a key's model to sample. On a synth track, **SEL** and ENGINE: sample. The sample knob picks it. |
+| load my own samples | Connect the FM-1 by USB and run `tools/loom_samples.py load kick.wav snare.wav` on the computer. They come after the factory samples, as user 1, user 2 ... |
 | change the filter | Press **ENV** and turn **SELECT** to Filter. **PRESETS** turns the filter type. |
 | give a sound some character | Press **FX**: the Character page. **PRESETS** turns the type (drive, fold, crush, ring, tilt, rectify); the knobs are its amount, tone and mix. |
 | use the effects | Press **FX** and turn **SELECT** to Sends: the track's sends. Turn on for FX I and FX II; **PRESETS** picks the effect. |
@@ -362,15 +365,16 @@ SCRAMBLE for a random sound, SAVE AS PRESET, RESET SOUND, and whether the track 
 | sync | freq, sub, noise, lowcut |
 | swarm | swarm, am, fm, detune |
 | kit | the shown key's model knobs |
+| sample | sample, start, length, mode |
 
 ### Kit
 
 A drum track has eleven keys on the black keys, each with a drum model: kick, snare, hat, clap, shaker,
-tambourine, string (a plucked string), conga, tom or fm. The kit is tuned to C: kick G1, snare G3, low tom C3,
+tambourine, string (a plucked string), conga, tom, fm or sample. The kit is tuned to C: kick G1, snare G3, low tom C3,
 high tom G3, conga C4, string C3, fm C5. Press a black key, or turn **PRESETS**, to pick the key the
 knobs edit. The Engine page's four knobs are the model's own:
 
-<img src="img/screen-drum-engine.png" width="240" alt="Engine on T1 kit: the eleven keys as pads, the snare picked; its knobs pitch, length, wires, punch" title="A drum key&#x27;s knobs"> <img src="img/screen-drum-key.png" width="240" alt="The Key page: the snare&#x27;s model, random, pan and volume" title="The Key page"> <img src="img/screen-drum-envelope.png" width="240" alt="ENV on a drum track: lag, attack, random and length for the whole kit" title="The drum envelope">
+<img src="img/screen-drum-engine.png" width="240" alt="Engine on T1 kit: the eleven keys as pads, the snare picked; its knobs pitch, length, wires, punch" title="A drum key&#x27;s knobs"> <img src="img/screen-drum-key.png" width="240" alt="The Key page: the snare&#x27;s model, random, pan and volume" title="The Key page"> <img src="img/screen-drum-envelope.png" width="240" alt="ENV&#x27;s Kit env page on a drum track: lag, attack, random and length for the whole kit" title="The kit&#x27;s envelope">
 
 | Model | Knobs |
 | --- | --- |
@@ -384,12 +388,80 @@ knobs edit. The Engine page's four knobs are the model's own:
 | conga | pitch, length, slide, drive |
 | tom | pitch, length, sweep, rate |
 | fm | pitch, length, mod, feedback |
+| sample | sample, pitch (24 semitones each way), start, reverse |
 
 On every sound page of a drum track, a black key picks the key the knobs edit. Turn **SELECT** for the
 key's page: the model, random (a variation on every hit), pan and volume in dB; its **SEL** list has the play
-mode: one-shot, gated, loop, or choke groups 1 to 3. **ENV** on a drum track is the kit's envelope: lag
-(a delay before the hit), attack, random and length. Its Filter page with the dynamic type is low cut,
-compression, drive and hi cut.
+mode: one-shot, gated, loop, or choke groups 1 to 3. A new model starts from its own knobs.
+
+**ENV** on a drum track has four pages. The first two are the shown key's own, after its model:
+
+- **Envelope**: attack (a rise from silence, up to a second), hold (full level, up to a second), decay (a fall
+  to silence; at "off" the model's own length decides) and lag (the key starts up to 60 ms late: a lazy snare,
+  a flam). The picture draws the shape; the key's name is in the line above the knobs.
+- **Filter**: cutoff (50 Hz to 20 kHz), resonance, env (how far the key's envelope moves the cutoff, up or
+  down: with a decay set, a sweep on every hit) and drive (the key squared off, its level kept). **PRESETS**
+  picks the type: off, low-pass, high-pass or band-pass. The picture draws the curve, and faintly where the
+  envelope takes it.
+
+A key left as it comes (attack, hold and lag at 0, decay off, no filter, no drive) sounds as its model alone
+and costs nothing. Then two pages for the whole kit:
+
+- **Kit env**: lag (a delay before every hit), attack, random (every key's knobs vary on each hit) and length
+  (every model's length scaled).
+- **Kit filter**: the kit's bus, after the keys are summed: low cut, compression, drive and hi cut.
+  **PRESETS** turns it on or off.
+
+Locks reach a key's own: hold a step and press **ENV**, and the knobs are the envelope (then, turning
+**SELECT**, the filter) of the step's key: the one shown if the step plays it, else the step's first. The
+line above the knobs names it.
+
+<img src="img/screen-drum-key-envelope.png" width="240" alt="ENV on T1 kit: the snare&#x27;s own envelope, attack 3 ms, hold 4 ms, decay 550 ms, lag 0, its shape drawn" title="A key&#x27;s envelope"> <img src="img/screen-drum-key-filter.png" width="240" alt="ENV&#x27;s Filter page on T1 kit: the snare through a low-pass at 1.2 kHz, resonance 71 %, the envelope opening it, drive 24 %" title="A key&#x27;s filter">
+
+The **sample** model plays a sample of the bank (below) on the key: sample picks it, pitch tunes it 24
+semitones either way of its own rate, start begins later in it, reverse plays it from its end back to the
+start. It plays to the sample's end, or as long as the key's decay lets it. Four sample keys sound at once; a
+fifth takes the oldest's place.
+
+### Samples
+
+LOOM-8 carries a bank of samples: seven of its own, made for now as placeholders (kick, snare, hat, clap, ah,
+piano, sweep), then sixteen of yours, user 1 to user 16. The sample model on a drum key and the sample engine
+on a synth track both play them, the knob naming each one.
+
+The **sample** engine plays a sample at the pitch of the note: the sample's root note plays it at its own rate,
+an octave up twice as fast. Its knobs:
+
+| Knob | What it does |
+| --- | --- |
+| sample | which one (an empty user slot plays nothing) |
+| start | where it begins, 0 to 99 % in |
+| length | how much of the rest plays, to its end at 100 % |
+| mode | one-shot (once, then the note ends), loop (round and round; a sample with its own loop loops that), reverse (once, backwards), ping-pong (forth and back) |
+
+The picture shows the sample's waveform, the part that plays bright, a dot where it starts and the loop's ends
+marked. Then the track's envelopes, filter, character and LFO shape it like any engine. Its eight presets:
+jute keys, jute choir, hessian, hemp bass, sisal sweep, raffia, coir and flax bell.
+
+<img src="img/screen-sample-engine.png" width="240" alt="Engine on T3 sample: the piano&#x27;s waveform, its root C4, all of it playing once; knobs sample, start, length, mode" title="The sample engine">
+
+**Your own samples.** Connect the FM-1 (running LOOM-8) to a computer by USB and run, from the firmware's
+folder:
+
+```sh
+pip install mido python-rtmidi
+python3 tools/loom_samples.py load kick.wav snare.wav "vox=ah_A3.wav" "pad=pad.wav:57"
+python3 tools/loom_samples.py info
+python3 tools/loom_samples.py erase
+```
+
+`load` replaces the user samples with the files given, in that order: user 1, user 2... Each WAV (any rate,
+mono or stereo, 8 to 32 bit) is made mono at 22050 Hz and its peak evened out. `NAME=` names it on the screen
+(11 characters; else the file's name); `:ROOT` is the note that plays it at its own pitch on a synth track
+(else a note in the file's name, as "ah_A3", or C4). A loop in the WAV is kept. The bank holds about four
+seconds of sound in all; `loom_samples.py` says when the files are too long. The sound stops for a few seconds
+while it writes; then the screen says LOADED. A sample a track was playing keeps its place: user 2 is still user
+2, whatever is in it now.
 
 ### The synth pages
 
@@ -571,6 +643,10 @@ On a sound page, hold **SAVE** and press white key 1 to 16 to keep the track's s
 | ENV | Envelope | attack | decay | sustain | release | play |
 | ENV, SELECT | Filter | cutoff | reso | env | keytrack | play; PRESETS: the type |
 | ENV, SELECT twice | Filter env | attack | decay | sustain | release | play |
+| ENV, drum track | Envelope | the key's attack | hold | decay | lag | black: the key |
+| ENV, drum track, SELECT | Filter | the key's cutoff | reso | env | drive | black: the key; PRESETS: the type |
+| ENV, drum track, SELECT twice | Kit env | lag | attack | random | length | play |
+| ENV, drum track, SELECT 3 times | Kit filter | low cut | comp | drive | hi cut | play; PRESETS: on or off |
 | FX | Character | type | amount | tone | mix | play; PRESETS: the type |
 | FX, SELECT | Sends | fx I | fx II | pan | level | play |
 | FX, SELECT twice | FX I, FX II | the effect's four | | | | play; PRESETS: the effect (and the reverb's mode) |

@@ -40,6 +40,8 @@
  *   where                        the reader asks for everything on the screen
  *   said TEXT                    some SAY since the last "said" (or "listen") has TEXT in it: else a failure
  *   speakdump                    every page, knob value and message as the reader gets them (the audit)
+ *   samples FILE                 the user sample bank from FILE (an image from tools/loom_samples.py build),
+ *                                as an upload would leave it (empty at boot)
  * XY_SAID_LOG=FILE: a reader listens from boot, quietly, and every SAY is appended to FILE (the audit).
  */
 #define XY_HOST 1
@@ -376,8 +378,16 @@ static double now_ns(void)
     return (double)t.tv_sec * 1e9 + (double)t.tv_nsec;
 }
 
+static uint8_t host_bank[SMP_BANK_SIZE];               /* the user sample bank's flash (0xCF000), erased */
 static void boot(void)
 {
+    static int bank_ready;
+    if (!bank_ready) {
+        memset(host_bank, 0xFF, sizeof host_bank);
+        bank_ready = 1;
+    }
+    smp_user_attach(host_bank);
+    smp_user_scan();
     project_load(0);
     presets_load();
     engine_init(&pats, proj_par);
@@ -687,6 +697,19 @@ int main(int argc, char **argv)
             }
             proj.trk[t].par[p] = (uint8_t)v;
             engine_set(t, p, v);
+            run_ms(1);
+        } else if (!strcmp(cmd, "samples")) {        /* samples FILE: the user bank as uploaded */
+            FILE *bf = fopen(a, "rb");
+            size_t nb;
+            if (!bf) {
+                printf("line %d: no bank %s\n", lineno, a);
+                return 2;
+            }
+            memset(host_bank, 0xFF, sizeof host_bank);
+            nb = fread(host_bank, 1, sizeof host_bank, bf);
+            fclose(bf);
+            smp_user_drop();
+            printf("samples: %s, %d B, %d user samples\n", a, (int)nb, smp_user_scan());
             run_ms(1);
         } else if (!strcmp(cmd, "load"))
             load_force = atoi(a);

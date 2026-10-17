@@ -3,10 +3,14 @@
  * -20..0 dBFS at volume 0 dB and velocity 127, falls to silence within its length; every model with
  * its four knobs at their ends stays finite and in range; the play modes (gated stops on release,
  * loop repeats while held, choke groups cut); the key's random and the track's random vary hits;
- * the track envelope's lag delays the onset, attack fades in, length scales; the dynamic filter
- * bounds its output and bypasses on the other types; volume in dB, pan, sends; eight voices at once
- * stay bounded; and the cost in instructions a sample (macOS: proc_pid_rusage). Each key's hit is
- * written to build/host/drum_<name>.wav for inspection (nothing here plays audio).
+ * the track envelope's lag delays the onset, attack fades in, length scales; the key's own envelope
+ * (attack, hold, decay, lag) and filter (low-pass darkens, high-pass thins, resonance peaks, the envelope
+ * sweeps the cutoff, drive squares it, a turned knob is heard at once), bounded and finite at every corner;
+ * the sample model (plays its sample at its rate, pitch, start, reverse, an empty slot is silent); the
+ * dynamic filter bounds its output and bypasses on the other types; volume in dB, pan, sends; eight voices
+ * at once stay bounded; and the cost in instructions a sample (macOS: proc_pid_rusage), the key stages and
+ * the sample model too. Each key's hit is written to build/host/drum_<name>.wav for inspection (nothing
+ * here plays audio).
  *   tests/host/drumline_test.sh */
 #include <stdio.h>
 #include <string.h>
@@ -157,6 +161,50 @@ static hit_t one_hit(int sound, int vel, int pitch, int sg, int lt, FILE *wav)
     return h;
 }
 static float dbfs(float x) { return 20.0f * fm_log2f(x + 1e-9f) * 0.30103f; }
+static float rms_of(const float *x, int n)
+{
+    double s = 0.0;
+    int i;
+    for (i = 0; i < n; i++)
+        s += (double)x[i] * (double)x[i];
+    return n ? (float)sqrt(s / n) : 0.0f;
+}
+static float peak_of(const float *x, int n)
+{
+    float p = 0.0f;
+    int i;
+    for (i = 0; i < n; i++)
+        p = fm_maxf(p, fm_fabsf(x[i]));
+    return p;
+}
+static float diff_rms(const float *x, int n)          /* the first difference's RMS: brightness */
+{
+    double s = 0.0;
+    int i;
+    for (i = 1; i < n; i++)
+        s += (double)(x[i] - x[i - 1]) * (double)(x[i] - x[i - 1]);
+    return n > 1 ? (float)sqrt(s / (n - 1)) : 0.0f;
+}
+static float mag_at(const float *x, int n, float hz)  /* |DFT| at hz over a Hann window, per sample */
+{
+    double re = 0.0, im = 0.0, w = 6.283185307179586 * (double)hz / SR;
+    int i;
+    for (i = 0; i < n; i++) {
+        double hw = 0.5 - 0.5 * cos(6.283185307179586 * i / (n - 1));
+        re += hw * (double)x[i] * cos(w * i);
+        im -= hw * (double)x[i] * sin(w * i);
+    }
+    return (float)(sqrt(re * re + im * im) / n);
+}
+static float cut_hz(int v) { return 50.0f * fm_exp2f((float)v * (8.64385619f / 127.0f)); }   /* DP_CUT, as synth.c */
+static float band_at(const float *x, int n, float hz) /* the mean |DFT| over hz +-4 % (noise: one bin varies) */
+{
+    float s = 0.0f;
+    int k;
+    for (k = -20; k <= 20; k++)
+        s += mag_at(x, n, hz * (1.0f + 0.002f * (float)k));
+    return s / 41.0f;
+}
 
 /* a key's pitch: its hit alone (the mono mix) from t0 to t1 seconds, through a Hann window, and the
  * strongest frequency within -4 .. +4 semitones of the target, found in steps of a cent (a DFT at each:
@@ -321,7 +369,16 @@ int main(void)
                 if (d2 < worst_lo || k == 0)
                     worst_lo = fm_minf(worst_lo, d2);
                 worst_hi = fm_maxf(worst_hi, d2);
-                if (nan_seen || d2 < -26.0f || d2 > 1.0f) {
+                if (m == DM_SAMPLE && k == 0 && e > smp_factory() - 1) {   /* an empty user slot: silence */
+                    if (nan_seen || h2.peak > 0.0f || h2.tend > 0.01f) {
+                        printf("  sample: an empty slot plays %.1f dBFS, ends at %.3f s\n", (double)d2, (double)h2.tend);
+                        ok = 0;
+                    }
+                    par[TP_DRUM(0, DP_K1 + k)] = DM_DEFAULT[m][k];
+                    continue;
+                }
+                if (nan_seen || d2 < (m == DM_SAMPLE && k == 2 ? -40.0f : -26.0f) || d2 > 1.0f) {   /* (the
+                                                       * sample's start at 99 %: its quiet tail) */
                     printf("  %s %s=%d: %.1f dBFS, nan %d\n", DM_NAME[m], DM_KNOB[m][k], e, (double)d2, nan_seen);
                     ok = 0;
                 }
@@ -600,6 +657,255 @@ int main(void)
         check(name, h.t60 < t0 * 0.5f && h2.t60 > t0 * 2.0f);
     }
 
+    printf("-- the key's own envelope: attack, hold, decay, lag\n");
+    {
+        kit_default();
+        par[TP_DRUM(0, DP_K2)] = 127;                     /* a long kick: 1.5 s of model */
+        h = one_hit(0, 127, 0, 0, 0, 0);
+        par[TP_DRUM(0, DP_DECAY)] = 64;                   /* the key's decay: about 100 ms to -60 dB */
+        h2 = one_hit(0, 127, 0, 0, 0, 0);
+        snprintf(name, sizeof name, "  decay 64: the long kick's -60 dB at %.2f -> %.2f s, it ends at %.2f s", (double)h.t60,
+                 (double)h2.t60, (double)h2.tend);
+        check(name, h2.t60 < 0.15f && h2.t60 > 0.05f && h2.tend > 0.0f && h2.tend < 0.2f && h.t60 > 0.8f);
+        par[TP_DRUM(0, DP_DECAY)] = 90;
+        h = one_hit(0, 127, 0, 0, 0, 0);
+        snprintf(name, sizeof name, "  decay 90 rings longer than 64: %.2f s", (double)h.t60);
+        check(name, h.t60 > h2.t60 * 2.0f);
+        par[TP_DRUM(0, DP_HOLD)] = 70;                    /* hold ~140 ms, then the decay */
+        par[TP_DRUM(0, DP_DECAY)] = 40;
+        h2 = one_hit(0, 127, 0, 0, 0, 0);
+        snprintf(name, sizeof name, "  hold 70 + decay 40: -60 dB at %.3f s (the hold's 0.16 s and a short fall)", (double)h2.t60);
+        check(name, h2.t60 > 0.14f && h2.t60 < 0.2f);
+        par[TP_DRUM(0, DP_HOLD)] = 0;
+        par[TP_DRUM(0, DP_DECAY)] = 127;
+        {   /* attack: the first 10 ms quiet, by 400 ms full */
+            int b, a;
+            float early[2], late[2];
+            for (a = 0; a < 2; a++) {
+                par[TP_DRUM(3, DP_ATTACK)] = (uint8_t)(a ? 80 : 0);   /* ~330 ms on the open hat */
+                drumline_init(dl, par);
+                drumline_hit(dl, 3, 127, 0, 0, 0);
+                early[a] = late[a] = 0.0f;
+                for (b = 0; b < 7; b++) { render(); early[a] = fm_maxf(early[a], blk_peak()); }
+                for (b = 0; b < 260; b++) render();
+                for (b = 0; b < 7; b++) { render(); late[a] = fm_maxf(late[a], blk_peak()); }   /* at ~400 ms */
+            }
+            snprintf(name, sizeof name, "  attack 80: the open hat's first 10 ms %.3f -> %.3f, at 400 ms %.4f -> %.4f",
+                     (double)early[0], (double)early[1], (double)late[0], (double)late[1]);
+            check(name, early[1] < early[0] * 0.1f && late[1] > late[0] * 0.5f);
+            par[TP_DRUM(3, DP_ATTACK)] = 0;
+        }
+        h = one_hit(1, 127, 0, 0, 0, 0);
+        par[TP_DRUM(1, DP_LAG)] = 127;
+        h2 = one_hit(1, 127, 0, 0, 0, 0);
+        snprintf(name, sizeof name, "  the key's lag 127: the snare starts %.1f ms later (55..65)", (double)((h2.t_on - h.t_on) * 1000.0f));
+        check(name, h2.t_on - h.t_on > 0.055f && h2.t_on - h.t_on < 0.065f);
+        par[TP_A] = 127;
+        h2 = one_hit(1, 127, 0, 0, 0, 0);
+        snprintf(name, sizeof name, "  and the kit's lag on top: %.1f ms later (115..125)", (double)((h2.t_on - h.t_on) * 1000.0f));
+        check(name, h2.t_on - h.t_on > 0.115f && h2.t_on - h.t_on < 0.125f);
+        kit_default();
+    }
+
+    printf("-- the key's own filter: type, cutoff, resonance, envelope, drive\n");
+    {
+        static float buf[SR];
+        int n;
+        float r_off, r_lp, d_off, d_lp, m0, m1, a_early, a_late;
+        /* a hit's mono mix into buf (up to a second): its length */
+#define GRAB(snd) do { int b_, i_; n = 0; drumline_init(dl, par); drumline_hit(dl, (snd), 127, 0, 0, 0); \
+        for (b_ = 0; b_ < SR / BLK; b_++) { render(); for (i_ = 0; i_ < BLK; i_++) buf[n++] = (L[i_] + R[i_]) * 0.7071f; } } while (0)
+        kit_default();
+        GRAB(3);                                          /* the open hat: bright */
+        r_off = rms_of(buf, n);
+        d_off = diff_rms(buf, n) / r_off;
+        par[TP_DRUM(3, DP_FTYPE)] = DF_LP;
+        par[TP_DRUM(3, DP_CUT)] = 127;
+        GRAB(3);
+        snprintf(name, sizeof name, "  lp open (cutoff 127) is close to off: %.2f dB", (double)(dbfs(rms_of(buf, n)) - dbfs(r_off)));
+        check(name, fm_fabsf(dbfs(rms_of(buf, n)) - dbfs(r_off)) < 1.5f && !nan_seen);
+        par[TP_DRUM(3, DP_CUT)] = 60;
+        GRAB(3);
+        r_lp = rms_of(buf, n);
+        d_lp = diff_rms(buf, n) / r_lp;
+        snprintf(name, sizeof name, "  lp at %.0f Hz darkens the open hat: RMS %.1f dB, brightness %.3f -> %.3f",
+                 (double)cut_hz(60), (double)(dbfs(r_lp) - dbfs(r_off)), (double)d_off, (double)d_lp);
+        check(name, dbfs(r_lp) < dbfs(r_off) - 10.0f && d_lp < d_off * 0.5f);
+        kit_default();
+        GRAB(0);                                          /* the kick */
+        r_off = rms_of(buf, n);
+        par[TP_DRUM(0, DP_FTYPE)] = DF_HP;
+        par[TP_DRUM(0, DP_CUT)] = 75;
+        GRAB(0);
+        snprintf(name, sizeof name, "  hp at %.0f Hz thins the kick: %.1f dB", (double)cut_hz(75), (double)(dbfs(rms_of(buf, n)) - dbfs(r_off)));
+        check(name, dbfs(rms_of(buf, n)) < dbfs(r_off) - 15.0f);
+        kit_default();
+        key_model(0, DM_SHAKER);                          /* noise: the resonance's peak at the cutoff */
+        par[TP_DRUM(0, DP_K2)] = 127;
+        par[TP_DRUM(0, DP_FTYPE)] = DF_LP;
+        par[TP_DRUM(0, DP_CUT)] = 75;
+        par[TP_DRUM(0, DP_RES)] = 0;
+        GRAB(0);
+        m0 = band_at(buf, n, cut_hz(75)) / rms_of(buf, n);
+        par[TP_DRUM(0, DP_RES)] = 127;
+        GRAB(0);
+        m1 = band_at(buf, n, cut_hz(75)) / rms_of(buf, n);
+        snprintf(name, sizeof name, "  resonance 127 peaks at the cutoff (%.0f Hz): %.1f dB more of it in the sound",
+                 (double)cut_hz(75), (double)(dbfs(m1) - dbfs(m0)));
+        check(name, dbfs(m1) > dbfs(m0) + 6.0f && !nan_seen);
+        par[TP_DRUM(0, DP_RES)] = 127;
+        par[TP_DRUM(0, DP_FTYPE)] = DF_BP;
+        GRAB(0);
+        check("  band-pass at full resonance: finite, bounded", !nan_seen && peak_of(buf, n) < 1.0f && rms_of(buf, n) > 1e-4f);
+        /* the envelope on the cutoff: a low cutoff opened by the envelope, the decay closing it */
+        par[TP_DRUM(0, DP_FTYPE)] = DF_LP;
+        par[TP_DRUM(0, DP_RES)] = 30;
+        par[TP_DRUM(0, DP_CUT)] = 30;
+        par[TP_DRUM(0, DP_FENV)] = 127;
+        par[TP_DRUM(0, DP_DECAY)] = 85;                   /* ~0.4 s */
+        GRAB(0);
+        a_early = diff_rms(buf + 441, 4410) / fm_maxf(rms_of(buf + 441, 4410), 1e-9f);
+        a_late = diff_rms(buf + 13230, 4410) / fm_maxf(rms_of(buf + 13230, 4410), 1e-9f);
+        snprintf(name, sizeof name, "  env 127: bright at the hit, darker as the decay closes it (%.3f -> %.3f)",
+                 (double)a_early, (double)a_late);
+        check(name, a_early > a_late * 1.5f);
+        /* drive: a quiet hit squared off, its level kept near a drum's */
+        kit_default();
+        {
+            float c0, c1;
+            GRAB(1);
+            c0 = peak_of(buf, n) / rms_of(buf, n);
+            par[TP_DRUM(1, DP_DRIVE)] = 127;
+            GRAB(1);
+            c1 = peak_of(buf, n) / rms_of(buf, n);
+            snprintf(name, sizeof name, "  drive 127 squares the snare: crest %.1f -> %.1f, peak %.2f", (double)c0, (double)c1,
+                     (double)peak_of(buf, n));
+            check(name, c1 < c0 * 0.6f && peak_of(buf, n) < 1.0f && peak_of(buf, n) > 0.2f);
+        }
+        /* a knob turned on a sounding key is heard at once (read every chunk), and locks reach it (epar) */
+        kit_default();
+        {
+            int b;
+            float before, after;
+            par[TP_DRUM(9, DP_K2)] = 127;                 /* the string, long */
+            drumline_init(dl, par);
+            drumline_hit(dl, 9, 127, 0, 0, 0);
+            for (b = 0; b < 100; b++)
+                render();
+            for (before = 0.0f, b = 0; b < 20; b++) { render(); before += diff_rms(L, BLK); }
+            par[TP_DRUM(9, DP_FTYPE)] = DF_LP;
+            par[TP_DRUM(9, DP_CUT)] = 20;
+            for (after = 0.0f, b = 0; b < 20; b++) { render(); after += diff_rms(L, BLK); }
+            snprintf(name, sizeof name, "  the cutoff turned down on a ringing string darkens it at once (%.4f -> %.4f)",
+                     (double)before, (double)after);
+            check(name, after < before * 0.3f);
+        }
+        /* every model, every type, the corners: finite and bounded */
+        {
+            int ok = 1, ft, c, mdl;
+            static const uint8_t CORNER[4][6] = {{0, 0, 0, 0, 0, 0}, {127, 127, 127, 127, 127, 127},
+                                                 {0, 127, 0, 127, 0, 127}, {127, 0, 127, 0, 127, 0}};
+            float pk = 0.0f;
+            for (mdl = 0; mdl < NDM && ok; mdl++)
+                for (ft = 0; ft < NDF && ok; ft++)
+                    for (c = 0; c < 4 && ok; c++) {
+                        kit_default();
+                        key_model(0, mdl);
+                        par[TP_DRUM(0, DP_FTYPE)] = (uint8_t)ft;
+                        par[TP_DRUM(0, DP_CUT)] = CORNER[c][0];
+                        par[TP_DRUM(0, DP_RES)] = CORNER[c][1];
+                        par[TP_DRUM(0, DP_FENV)] = CORNER[c][2];
+                        par[TP_DRUM(0, DP_DRIVE)] = CORNER[c][3];
+                        par[TP_DRUM(0, DP_ATTACK)] = CORNER[c][4] / 2;
+                        par[TP_DRUM(0, DP_DECAY)] = CORNER[c][5] ? 100 : 30;
+                        nan_seen = 0;
+                        h = one_hit(0, 127, 0, 0, 0, 0);
+                        pk = fm_maxf(pk, h.peak);
+                        if (nan_seen || h.peak > 1.5f || h.tend < 0.0f) {
+                            printf("  %s, filter %d, corner %d: peak %.2f, nan %d, ends %.2f\n", DM_NAME[mdl], ft, c,
+                                   (double)h.peak, nan_seen, (double)h.tend);
+                            ok = 0;
+                        }
+                    }
+            snprintf(name, sizeof name, "  every model x type x corner: finite, ends, peak %.2f (under 1.5)", (double)pk);
+            check(name, ok);
+        }
+        kit_default();
+#undef GRAB
+    }
+
+    printf("-- the sample model\n");
+    {
+        const smp_t *kick = smp_get(0);
+        float t_root, t_up;
+        kit_default();
+        key_model(0, DM_SAMPLE);                          /* sample 0: the factory kick */
+        h = one_hit(0, 127, 0, 0, 0, 0);
+        t_root = h.tend;
+        snprintf(name, sizeof name, "  the kick sample: peak %.1f dBFS, ends at %.3f s (its %.3f s)", (double)dbfs(h.peak),
+                 (double)h.tend, (double)((float)kick->n / (float)SMP_RATE));
+        check(name, dbfs(h.peak) > -14.0f && dbfs(h.peak) < -3.0f && fm_fabsf(h.tend - (float)kick->n / (float)SMP_RATE) < 0.01f);
+        par[TP_DRUM(0, DP_K2)] = 76;                      /* +12 */
+        h = one_hit(0, 127, 0, 0, 0, 0);
+        t_up = h.tend;
+        snprintf(name, sizeof name, "  pitch +12 plays it twice as fast: %.3f s", (double)t_up);
+        check(name, fm_fabsf(t_up - t_root * 0.5f) < 0.01f);
+        h = one_hit(0, 127, -12, 0, 0, 0);
+        snprintf(name, sizeof name, "  and the hit's transpose -12 back at its rate: %.3f s", (double)h.tend);
+        check(name, fm_fabsf(h.tend - t_root) < 0.01f);
+        par[TP_DRUM(0, DP_K2)] = 64;
+        par[TP_DRUM(0, DP_K3)] = 64;                      /* from the middle */
+        h = one_hit(0, 127, 0, 0, 0, 0);
+        snprintf(name, sizeof name, "  start 50 %%: half of it, %.3f s", (double)h.tend);
+        check(name, fm_fabsf(h.tend - t_root * 0.5f) < 0.02f);
+        par[TP_DRUM(0, DP_K3)] = 0;
+        par[TP_DRUM(0, DP_DECAY)] = 40;
+        h = one_hit(0, 127, 0, 0, 0, 0);
+        snprintf(name, sizeof name, "  the key's decay 40 shortens it: ends at %.3f s", (double)h.tend);
+        check(name, h.tend < t_root * 0.5f);
+        par[TP_DRUM(0, DP_DECAY)] = 127;
+        {   /* reverse: the kick backwards swells into its attack */
+            static float buf[SR];
+            int b, i, n = 0;
+            float e0, e1;
+            par[TP_DRUM(0, DP_K4)] = 1;
+            drumline_init(dl, par);
+            drumline_hit(dl, 0, 127, 0, 0, 0);
+            for (b = 0; b < (int)(t_root * SR) / BLK; b++) {
+                render();
+                for (i = 0; i < BLK; i++)
+                    buf[n++] = L[i];
+            }
+            e0 = rms_of(buf, n / 4);
+            e1 = rms_of(buf + 3 * n / 4, n / 4);
+            snprintf(name, sizeof name, "  reverse: quiet first, loud last (RMS %.4f -> %.4f)", (double)e0, (double)e1);
+            check(name, e1 > e0 * 4.0f && !nan_seen);
+            par[TP_DRUM(0, DP_K4)] = 0;
+        }
+        par[TP_DRUM(0, DP_K1)] = (uint8_t)smp_factory();  /* the first user slot: empty here */
+        h = one_hit(0, 127, 0, 0, 0, 0);
+        check("  an empty user slot is silent, the voice ends at once", h.peak == 0.0f && h.tend >= 0.0f && h.tend < 0.01f);
+        {   /* every factory sample, forward and back, pitched to the ends: finite, bounded */
+            int ok = 1, sm, rv, pt;
+            for (sm = 0; sm < smp_factory(); sm++)
+                for (rv = 0; rv < 2; rv++)
+                    for (pt = 40; pt <= 88; pt += 48) {
+                        par[TP_DRUM(0, DP_K1)] = (uint8_t)sm;
+                        par[TP_DRUM(0, DP_K4)] = (uint8_t)rv;
+                        par[TP_DRUM(0, DP_K2)] = (uint8_t)pt;
+                        nan_seen = 0;
+                        h = one_hit(0, 127, 0, 0, 0, 0);
+                        if (nan_seen || h.peak > 1.0f || h.peak < 0.01f || h.tend < 0.0f) {
+                            printf("  sample %s reverse %d pitch %d: peak %.2f ends %.2f nan %d\n", smp_name(sm), rv, pt,
+                                   (double)h.peak, (double)h.tend, nan_seen);
+                            ok = 0;
+                        }
+                    }
+            check("  every factory sample forward and reversed at -24 / +24: finite, in range, ends", ok);
+        }
+        kit_default();
+    }
+
     printf("-- the dynamic filter\n");
     {
         int b;
@@ -726,9 +1032,14 @@ int main(void)
     {
         static float l[256], r[256], a[256], b2[256];
         uint64_t i0, di;
+        {
+            int drumline_sizeof(void);
+            printf("  drumline_t: %d of %d bytes\n", drumline_sizeof(), DRUMLINE_BYTES);
+        }
         for (m = 0; m < NDM; m++) {
             key_model(0, m);
-            par[TP_DRUM(0, DP_K2)] = 127;
+            if (m != DM_SAMPLE)
+                par[TP_DRUM(0, DP_K2)] = 127;             /* (the sample's pitch stays at its own rate) */
             drumline_init(dl, par);
             drumline_hit(dl, 0, 127, 0, 0, 0);
             memset(l, 0, sizeof l);
@@ -763,9 +1074,54 @@ int main(void)
             }
             printf("  8 voices%s:  %5.0f mean, %5.0f worst block\n", k ? " + dynamic filter" : "",
                    (double)total / (55.0 * 256.0), (double)worst / 256.0);
-            check(k ? "eight voices with the dynamic filter under 760 instructions a sample (the filter ~120)"
-                    : "eight voices under 640 instructions a sample (80 a voice)",
-                  total / (55 * 256) < (k ? 760u : 640u));
+            check(k ? "eight voices with the dynamic filter under 780 instructions a sample (the filter ~120)"
+                    : "eight voices under 660 instructions a sample (80 a voice, the key stages neutral)",
+                  total / (55 * 256) < (k ? 780u : 660u));
+        }
+        /* the key stages: every key through its filter (resonant, on the envelope), its drive, its decay; then
+         * eight sample voices (the kick at its rate, and two octaves up) */
+        for (k = 0; k < 4; k++) {
+            uint64_t total = 0, worst = 0;
+            int blk;
+            static const char *const WHAT[4] = {"8 voices, filter + env", "8 voices, filter + env + drive",
+                                                "8 sample hits, 4 sound (at their rate)", "8 sample hits, 4 sound (+24 semitones)"};
+            kit_default();
+            for (s = 0; s < DL_NSOUND; s++) {
+                par[TP_DRUM(s, DP_K2)] = 127;
+                if (k < 2) {
+                    par[TP_DRUM(s, DP_FTYPE)] = DF_LP;
+                    par[TP_DRUM(s, DP_CUT)] = 70;
+                    par[TP_DRUM(s, DP_RES)] = 80;
+                    par[TP_DRUM(s, DP_FENV)] = 100;
+                    par[TP_DRUM(s, DP_DECAY)] = 110;
+                    par[TP_DRUM(s, DP_DRIVE)] = (uint8_t)(k == 1 ? 90 : 0);
+                } else {
+                    key_model(s, DM_SAMPLE);
+                    par[TP_DRUM(s, DP_K1)] = 5;           /* the piano: the longest */
+                    par[TP_DRUM(s, DP_K2)] = (uint8_t)(k == 3 ? 88 : 64);
+                }
+            }
+            drumline_init(dl, par);
+            for (s = 0; s < 8; s++)
+                drumline_hit(dl, s + 3, 127, 0, 0, 0);
+            for (blk = 0; blk < 60; blk++) {
+                memset(l, 0, sizeof l);
+                i0 = instr_now();
+                drumline_render(dl, l, r, a, b2, 256);
+                di = instr_now() - i0;
+                if (blk > 4) {
+                    total += di;
+                    if (di > worst)
+                        worst = di;
+                }
+            }
+            printf("  %-32s %5.0f mean, %5.0f worst block%s\n", WHAT[k], (double)total / (55.0 * 256.0),
+                   (double)worst / 256.0, drumline_sounding(dl) ? "" : " (all ended)");
+            if (k == 1)
+                check("eight voices through filter, envelope and drive under 1000 instructions a sample",
+                      total / (55 * 256) < 1000u);
+            if (k == 2)
+                check("sample voices (four at once: the caches) under 760 instructions a sample", total / (55 * 256) < 760u);
         }
         kit_default();
     }
