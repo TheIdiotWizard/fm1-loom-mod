@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-"""Make the LOOM-8 site for GitHub Pages (https://charlesvestal.github.io/fm1-xy/):
+"""Make the LOOM-8 site for GitHub Pages (https://charlesvestal.github.io/fm1-loom/):
 
   index.html                    what LOOM-8 is, and the ways in: try, install, download, manual, source
   manual/index.html             docs/MANUAL.md as a page (tools/make_manual.py), its screenshots in img/
@@ -27,7 +27,7 @@ SRC = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SRC / "web"))
 from make_site import product_of, strip_module  # noqa: E402  (Felucca's: the package format)
 
-REPO = "https://github.com/charlesvestal/fm1-xy"
+REPO = "https://github.com/charlesvestal/fm1-loom"
 TRACKS = ["#ff5caa", "#28ccc0", "#f4c83c", "#6898ff", "#ff8840", "#6ed86e", "#b288ff", "#d6b088"]
 
 LANDING = """<!doctype html>

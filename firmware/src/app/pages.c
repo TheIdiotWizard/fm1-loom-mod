@@ -7,37 +7,76 @@
  * Each band is drawn only when what it shows changed (a hash of it). Over the main band: a help card (a
  * button held alone), a list (SEL). The look: below. */
 
-/* The look: dark, and each instrument track its own ink (TRK_INK), so the steps, the arrange rows and the mix
- * say whose they are at a glance. On a track's pages its ink is K_NOW (solid: sounding now, the playhead, the
- * picture's line, dark text on it) and K_TINT (its ink dimmed: the steps with notes). Structure stays grey; red
- * only for recording, locks and questions. */
-#define K_BG RGB(0, 0, 0)
-#define K_PANEL RGB(30, 30, 34)
-#define K_PANEL2 RGB(58, 58, 64)
-#define K_LINE RGB(60, 60, 66)
-#define K_DIM RGB(150, 150, 156)
-#define K_FAINT RGB(96, 96, 102)
-#define K_TEXT RGB(235, 235, 238)
-#define K_NOW_M RGB(130, 130, 138)
-#define K_REC RGB(232, 44, 38)                        /* red: recording, locks, questions, nothing else */
-#define K_SEL K_TEXT                                  /* the cursor, a held step, the knob last turned: white */
+/* The look: a theme (THEMES[]), and in every theme each instrument track its own ink, so the steps, the arrange
+ * rows and the mix say whose they are at a glance. On a track's pages its ink is K_NOW (solid: sounding now, the
+ * playhead, the picture's line, the background's colour as text on it) and K_TINT (its ink thinned over the
+ * background: the steps with notes). Red (K_REC) only for recording, locks and questions. */
+typedef struct {
+    const char *name;
+    uint16_t bg, panel, panel2, line, faint, dim, text, now_m, rec, aux;
+    uint16_t ink[NTRK];
+    uint8_t tint, mid;                                /* the ink's share over the background, of 16 */
+} theme_t;
+static const theme_t THEMES[] = {
+    {"night market", RGB(12, 14, 32), RGB(26, 30, 58), RGB(44, 50, 90), RGB(50, 56, 96), RGB(90, 96, 140),
+     RGB(150, 156, 196), RGB(240, 240, 255), RGB(120, 126, 170), RGB(255, 60, 80), RGB(220, 224, 255),
+     {RGB(255, 64, 160), RGB(0, 230, 210), RGB(255, 226, 64), RGB(80, 140, 255), RGB(255, 120, 40), RGB(120, 255, 120),
+      RGB(190, 110, 255), RGB(255, 200, 140)}, 6, 9},
+    {"tape deck", RGB(24, 18, 14), RGB(44, 34, 26), RGB(70, 56, 42), RGB(74, 60, 46), RGB(120, 100, 80),
+     RGB(190, 170, 140), RGB(244, 230, 200), RGB(150, 130, 104), RGB(230, 70, 40), RGB(240, 220, 180),
+     {RGB(230, 180, 50), RGB(214, 96, 48), RGB(160, 170, 70), RGB(70, 170, 160), RGB(110, 150, 200), RGB(180, 110, 150),
+      RGB(210, 170, 120), RGB(150, 190, 150)}, 6, 9},
+    {"chalkboard", RGB(30, 42, 38), RGB(40, 56, 50), RGB(58, 78, 70), RGB(64, 84, 76), RGB(100, 122, 112),
+     RGB(170, 186, 176), RGB(236, 240, 230), RGB(130, 150, 140), RGB(240, 110, 100), RGB(230, 236, 226),
+     {RGB(250, 170, 200), RGB(150, 210, 250), RGB(250, 236, 140), RGB(160, 240, 190), RGB(250, 190, 140),
+      RGB(200, 180, 250), RGB(130, 230, 230), RGB(230, 210, 170)}, 5, 9},
+    {"blueprint", RGB(16, 48, 104), RGB(24, 62, 128), RGB(40, 84, 156), RGB(60, 100, 170), RGB(110, 140, 200),
+     RGB(170, 195, 235), RGB(240, 246, 255), RGB(130, 160, 215), RGB(255, 110, 90), RGB(255, 255, 255),
+     {RGB(255, 200, 80), RGB(120, 240, 230), RGB(255, 150, 190), RGB(180, 240, 120), RGB(255, 170, 110),
+      RGB(210, 180, 255), RGB(240, 120, 120), RGB(200, 230, 200)}, 5, 9},
+    {"vapor", RGB(28, 16, 40), RGB(44, 28, 62), RGB(68, 46, 92), RGB(72, 50, 98), RGB(120, 96, 150),
+     RGB(196, 176, 220), RGB(250, 240, 255), RGB(150, 130, 180), RGB(255, 70, 100), RGB(240, 230, 255),
+     {RGB(255, 113, 206), RGB(1, 205, 254), RGB(5, 255, 161), RGB(185, 103, 255), RGB(255, 251, 150), RGB(255, 160, 120),
+      RGB(120, 160, 255), RGB(255, 200, 240)}, 6, 9},
+    {"bauhaus", RGB(226, 224, 218), RGB(210, 208, 200), RGB(190, 188, 180), RGB(180, 178, 170), RGB(140, 138, 132),
+     RGB(90, 90, 90), RGB(20, 20, 20), RGB(110, 110, 110), RGB(220, 40, 30), RGB(20, 20, 20),
+     {RGB(30, 70, 170), RGB(190, 130, 0), RGB(0, 120, 110), RGB(230, 90, 20), RGB(30, 120, 60), RGB(100, 60, 150),
+      RGB(60, 130, 200), RGB(120, 80, 50)}, 5, 10},
+    {"ice", RGB(238, 242, 246), RGB(222, 228, 236), RGB(200, 210, 222), RGB(192, 202, 214), RGB(150, 160, 175),
+     RGB(90, 100, 118), RGB(18, 26, 44), RGB(120, 130, 148), RGB(220, 40, 60), RGB(18, 26, 44),
+     {RGB(200, 20, 110), RGB(0, 120, 150), RGB(170, 110, 0), RGB(40, 80, 210), RGB(220, 80, 10), RGB(10, 140, 80),
+      RGB(110, 50, 190), RGB(60, 70, 90)}, 4, 10},
+    {"terminal", RGB(0, 0, 0), RGB(0, 22, 10), RGB(0, 44, 20), RGB(0, 50, 24), RGB(0, 110, 50), RGB(60, 200, 110),
+     RGB(120, 255, 160), RGB(40, 140, 80), RGB(255, 80, 60), RGB(180, 255, 200),
+     {RGB(255, 170, 40), RGB(60, 220, 255), RGB(255, 80, 180), RGB(255, 240, 80), RGB(100, 140, 255), RGB(255, 130, 90),
+      RGB(190, 120, 255), RGB(220, 220, 220)}, 6, 9},
+    {"lacquer", RGB(8, 8, 10), RGB(24, 22, 20), RGB(48, 42, 34), RGB(56, 48, 38), RGB(110, 96, 70), RGB(190, 170, 120),
+     RGB(240, 220, 160), RGB(150, 130, 90), RGB(230, 50, 50), RGB(240, 220, 160),
+     {RGB(40, 200, 130), RGB(70, 130, 255), RGB(180, 100, 240), RGB(255, 190, 60), RGB(255, 140, 180), RGB(80, 220, 220),
+      RGB(230, 230, 90), RGB(255, 130, 90)}, 6, 9},
+    {"candy", RGB(252, 236, 240), RGB(244, 220, 228), RGB(232, 198, 210), RGB(226, 192, 204), RGB(190, 150, 165),
+     RGB(130, 90, 110), RGB(60, 20, 50), RGB(150, 110, 130), RGB(220, 30, 60), RGB(60, 20, 50),
+     {RGB(230, 0, 120), RGB(0, 150, 170), RGB(210, 110, 0), RGB(60, 90, 230), RGB(130, 60, 200), RGB(0, 150, 80),
+      RGB(230, 70, 40), RGB(90, 60, 40)}, 4, 10},
+};
+#define NTHEMES (sizeof THEMES / sizeof THEMES[0])
+static const theme_t *theme = &THEMES[0];
+#define K_BG theme->bg
+#define K_PANEL theme->panel
+#define K_PANEL2 theme->panel2
+#define K_LINE theme->line
+#define K_DIM theme->dim
+#define K_FAINT theme->faint
+#define K_TEXT theme->text
+#define K_NOW_M theme->now_m
+#define K_REC theme->rec
+#define K_SEL K_TEXT                                  /* the cursor, a held step, the knob last turned */
 #define K_NOW k_now
 #define K_TINT k_tint
-#define K_NOW_W RGB(215, 215, 220)                    /* the aux tracks' ink */
-#define K_NOW_T k_mid                                 /* the playhead on an empty step: the ink half dimmed */
-/* the eight tracks' inks: bright enough for dark text on them; the aux tracks are white */
-static const uint16_t TRK_INK[NTRK] = {
-    RGB(255, 92, 170),    /* 1 pink */
-    RGB(40, 204, 192),    /* 2 teal */
-    RGB(244, 200, 60),    /* 3 yellow */
-    RGB(104, 152, 255),   /* 4 blue */
-    RGB(255, 136, 64),    /* 5 orange */
-    RGB(110, 216, 110),   /* 6 green */
-    RGB(178, 136, 255),   /* 7 violet */
-    RGB(214, 176, 136),   /* 8 sand */
-};
-static uint16_t k_now = K_NOW_W, k_tint = K_PANEL2, k_mid = K_DIM;
-static uint16_t trk_ink(int t) { return t >= 0 && t < NTRK ? TRK_INK[t] : K_NOW_W; }
+#define K_NOW_T k_mid                                 /* the playhead on an empty step: the ink half thinned */
+static uint16_t k_now, k_tint, k_mid;
+static const theme_t *k_th;                           /* the theme k_now .. were made in */
+static uint16_t trk_ink(int t) { return t >= 0 && t < NTRK ? theme->ink[t] : theme->aux; }
 static uint16_t ink_mix(uint16_t ink, uint32_t a)    /* the ink at a/16 over the background */
 {
     uint32_t pr = K_BG >> 11, pg = K_BG >> 5 & 63u, pb = K_BG & 31u;
@@ -45,7 +84,7 @@ static uint16_t ink_mix(uint16_t ink, uint32_t a)    /* the ink at a/16 over the
     return (uint16_t)(((r * a + pr * (16u - a)) / 16u) << 11 | ((g * a + pg * (16u - a)) / 16u) << 5 |
                       (b * a + pb * (16u - a)) / 16u);
 }
-static uint16_t trk_tint(int t) { return ink_mix(trk_ink(t), 6u); }
+static uint16_t trk_tint(int t) { return ink_mix(trk_ink(t), theme->tint); }
 
 /* the pages (the spec's Buttons table): a button opens its first page; SELECT turns them. EDIT: the engine
  * (a drum track: the shown key's knobs) and Play (a drum track: the key's model, random, pan, volume); ENV: the
@@ -2771,11 +2810,12 @@ static void draw_rec_strip(void)
 static void ink_follow(void)                         /* another track: its ink, every band drawn again */
 {
     int trk = sel_trk();
-    if (k_now == trk_ink(trk))
+    if (k_th == theme && k_now == trk_ink(trk))
         return;
+    k_th = theme;
     k_now = trk_ink(trk);
     k_tint = trk_tint(trk);
-    k_mid = ink_mix(k_now, 9u);
+    k_mid = ink_mix(k_now, theme->mid);
     for (uint32_t i = 0; i < sizeof ui.sig / sizeof ui.sig[0]; i++)
         ui.sig[i] ^= 0x5A5A5A5Au;
 }

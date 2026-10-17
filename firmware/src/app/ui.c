@@ -2758,6 +2758,10 @@ void ui_init(void)
     apply_brain();
     engine_tempo(proj.tempo_x10);
     engine_groove(proj.groove);
+#if defined(XY_HOST) && !defined(XY_WEB)
+    if (getenv("LOOM_THEME"))                        /* the host's screenshots in another theme */
+        theme = &THEMES[(uint32_t)atoi(getenv("LOOM_THEME")) % NTHEMES];
+#endif
     lcd_fill(0, 0, 240, 240, K_BG);
 }
 

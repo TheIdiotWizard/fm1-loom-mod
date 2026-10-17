@@ -127,7 +127,7 @@ def tc_all(*cmds):
 WORDS_MIN = """# LOOM-8's words for the screen reader (fm1-reader): the screen's text <TAB> what to say. "#" a number,
 # "*" a word left out. tools/gen_words.py makes web/words/<id>.json (published with the site) and the link
 # the FM-1 sends. Change a line and a new file is made: keep the old ones (devices point at them).
-# url: https://charlesvestal.github.io/fm1-xy/words/
+# url: https://charlesvestal.github.io/fm1-loom/words/
 BPM\tbeats per minute
 FX\teffects
 """
