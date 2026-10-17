@@ -273,20 +273,30 @@ static const int8_t SIN32[32] = {0, 20, 38, 56, 71, 83, 92, 98, 100, 98, 92, 83,
 static int32_t sin100(uint32_t k) { return SIN32[k & 31u]; }
 static int32_t cos100(uint32_t k) { return SIN32[(k + 8u) & 31u]; }
 
+/* a rounded box; the corners anti-aliased (each corner pixel by its distance from the corner's centre) */
 static void cv_round(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint16_t c)
 {
-    static const uint8_t IN[7][6] = {{0}, {1}, {1, 0}, {2, 1, 0}, {2, 1, 0, 0}, {3, 2, 1, 0, 0}, {4, 2, 1, 1, 0, 0}};
-    int32_t j;
-    if (r > 6)
-        r = 6;
     if (r > h / 2)
         r = h / 2;
-    cv_rect(x, y + r, w, h - 2 * r, c);
-    for (j = 0; j < r; j++) {
-        int32_t d = IN[r][j];
-        cv_rect(x + d, y + j, w - 2 * d, 1, c);
-        cv_rect(x + d, y + h - 1 - j, w - 2 * d, 1, c);
+    if (r > w / 2)
+        r = w / 2;
+    if (r < 1) {
+        cv_rect(x, y, w, h, c);
+        return;
     }
+    cv_rect(x, y + r, w, h - 2 * r, c);
+    cv_rect(x + r, y, w - 2 * r, r, c);
+    cv_rect(x + r, y + h - r, w - 2 * r, r, c);
+    for (int32_t j = 0; j < r; j++)
+        for (int32_t i = 0; i < r; i++) {
+            float dx = (float)r - ((float)i + 0.5f), dy = (float)r - ((float)j + 0.5f), d2 = dx * dx + dy * dy;
+            float cov = (float)r + 0.5f - (d2 > 1.0f ? f_sqrt1(d2) : 1.0f);
+            uint32_t a = cov >= 1.0f ? 256u : cov <= 0.0f ? 0u : (uint32_t)(cov * 256.0f);
+            cv_blend(x + i, y + j, c, a);                     /* the four corners, mirrored */
+            cv_blend(x + w - 1 - i, y + j, c, a);
+            cv_blend(x + i, y + h - 1 - j, c, a);
+            cv_blend(x + w - 1 - i, y + h - 1 - j, c, a);
+        }
 }
 static void cv_frame(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint16_t c, uint16_t in)
 {
@@ -484,6 +494,21 @@ static int tp_page_param(int p, int k, int trk)
     if (p == P_PLAYERS3 && pl_type(trk) != PL_ARP)
         return -1;
     return M[p - P_ENGINE][k];
+}
+
+/* a pen for smooth curves: pen_to draws an anti-aliased line from the last point (pen_up lifts it) */
+typedef struct { float x, y; int down; } pen_t;
+static void pen_up(pen_t *p) { p->down = 0; }
+static void pen_to(pen_t *p, float x, float y, uint16_t c)
+{
+    if (p->down)
+        cv_linef(p->x, p->y, x, y, c, 1.7f);
+    p->x = x, p->y = y, p->down = 1;
+}
+static float ease_exp(float t)                       /* 1 -> 0 along an exponential, reaching 0 at t = 1 */
+{
+    static const float E4 = 0.0183156f;              /* exp(-4) */
+    return (fm_expf(-4.0f * t) - E4) / (1.0f - E4);
 }
 
 /* ---------------------------------------------------------- alerts --- */
@@ -2081,50 +2106,52 @@ static void pic_stack(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_
 {
     /* two oscillators stacked: shape bends the first from sine to saw; ratio: the second's cycles over it
      * (1..8); detune: the second slides against the first; stereo: the two drawn apart */
-    int32_t gap = 6 + p[TP_E4] * 18 / 127, amp = (h - gap) / 4 - 2, ratio = p[TP_E2] < 1 ? 1 : p[TP_E2] > 8 ? 8 : p[TP_E2];
-    int32_t cy0 = y0 + h / 2 - gap / 2 - amp, cy1 = y0 + h / 2 + gap / 2 + amp;
-    uint32_t slide = p[TP_E3] ? f * (1u + p[TP_E3] / 16u) / 2u : 0u;
+    float gap = 6.0f + p[TP_E4] * 18.0f / 127.0f, amp = ((float)h - gap) / 4.0f - 2.0f;
+    float ratio = (float)(p[TP_E2] < 1 ? 1 : p[TP_E2] > 8 ? 8 : p[TP_E2]);
+    float cy0 = (float)y0 + (float)h / 2.0f - gap / 2.0f - amp, cy1 = (float)y0 + (float)h / 2.0f + gap / 2.0f + amp;
+    float slide = p[TP_E3] ? (float)f * (1.0f + (float)(p[TP_E3] / 16)) / 64.0f : 0.0f;
+    cv_rect(x0, y0 + h / 2, w, 1, K_LINE);
     for (int osc = 0; osc < 2; osc++) {
-        int32_t py = -1, cy = osc ? cy1 : cy0;
-        for (int32_t x = 0; x < w; x++) {
-            uint32_t ph = (uint32_t)(x * 64 / w) * (uint32_t)(osc ? ratio : 1) + (osc ? slide : 0u);
-            int32_t sn = sin100(ph), saw = 100 - (int32_t)(ph & 31u) * 200 / 31;
-            int32_t v = osc ? sn : (sn * (127 - p[TP_E1]) + saw * p[TP_E1]) / 127;
-            int32_t y = cy - v * amp / 100;
-            if (py >= 0)
-                cv_line(x0 + x - 1, py, x0 + x, y, osc ? K_DIM : K_NOW);
-            py = y;
+        pen_t pn = {0, 0, 0};
+        for (int32_t x = 0; x <= w; x++) {
+            float ph = (float)x / (float)w * 2.0f * (osc ? ratio : 1.0f) + (osc ? slide : 0.0f), v;
+            float fr = ph - fm_floorf(ph), sn = fm_sin_turns(ph), saw = 1.0f - 2.0f * fr;
+            v = osc ? sn : (sn * (127 - p[TP_E1]) + saw * p[TP_E1]) / 127.0f;
+            pen_to(&pn, (float)(x0 + x), (osc ? cy1 : cy0) - v * amp, osc ? K_DIM : K_NOW);
         }
     }
-    cv_rect(x0, y0 + h / 2, w, 1, K_LINE);
 }
 static void pic_wave(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
 {
     /* table: the harmonics; position: their mix; warp: the phase bent; drift: a second cycle sliding */
-    int32_t cy = y0 + h / 2, amp = h / 2 - 8, py = -1, harm = 1 + p[TP_E1] * 7 / 127;
+    float cy = (float)(y0 + h / 2), amp = (float)(h / 2 - 8), harm = (float)(1 + p[TP_E1] * 7 / 127);
+    pen_t pn = {0, 0, 0};
     (void)f;
-    cv_rect(x0, cy, w, 1, K_LINE);
-    for (int32_t x = 0; x < w; x++) {
-        int32_t ph = x * 64 / w, bend = ph + (int32_t)(sin100((uint32_t)ph) * p[TP_E3] / 127) / 12;
-        int32_t a = sin100((uint32_t)bend), b = sin100((uint32_t)(bend * harm + p[TP_E4] / 8));
-        int32_t y = cy - (a * (127 - p[TP_E2]) + b * p[TP_E2]) / 127 * amp / 100;
-        if (py >= 0)
-            cv_line(x0 + x - 1, py, x0 + x, y, K_NOW);
-        py = y;
+    cv_rect(x0, y0 + h / 2, w, 1, K_LINE);
+    for (int32_t x = 0; x <= w; x++) {
+        float ph = (float)x / (float)w * 2.0f, bend = ph + fm_sin_turns(ph) * (float)p[TP_E3] / 127.0f / 6.0f;
+        float a = fm_sin_turns(bend), b = fm_sin_turns(bend * harm + (float)p[TP_E4] / 256.0f);
+        pen_to(&pn, (float)(x0 + x), cy - (a * (127 - p[TP_E2]) + b * p[TP_E2]) / 127.0f * amp, K_NOW);
     }
 }
 static void pic_orbit(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
 {
     /* tone: the ring's size; ratio: the modulator's orbit; shape: its dots; tremolo: its speed */
-    int32_t cx = x0 + w / 2, cy = y0 + h / 2, r1 = 14 + p[TP_E1] * (h / 2 - 20) / 127, r2 = 4 + p[TP_E2] * 16 / 127;
-    uint32_t k = f * (1u + p[TP_E4] / 32u) / 2u, dots = 4u + p[TP_E3] / 10u;
-    for (uint32_t i = 0; i < 32; i++)
-        cv_rect(cx + cos100(i) * r1 / 100, cy + sin100(i) * r1 / 100, 2, 2, K_DIM);
+    float cx = (float)(x0 + w / 2), cy = (float)(y0 + h / 2), r1 = 14.0f + p[TP_E1] * (float)(h / 2 - 20) / 127.0f;
+    float r2 = 4.0f + p[TP_E2] * 16.0f / 127.0f, k = (float)f * (1.0f + (float)(p[TP_E4] / 32)) / 64.0f;
+    uint32_t dots = 4u + p[TP_E3] / 10u;
+    pen_t ring = {0, 0, 0};
+    for (int i = 0; i <= 64; i++) {
+        float t = (float)i / 64.0f;
+        pen_to(&ring, cx + fm_sin_turns(t + 0.25f) * r1, cy + fm_sin_turns(t) * r1, K_DIM);
+    }
     {
-        int32_t mx = cx + cos100(k) * r1 / 100, my = cy + sin100(k) * r1 / 100;
-        for (uint32_t j = 0; j < dots; j++)
-            cv_rect(mx + cos100(j * 32u / dots) * r2 / 100, my + sin100(j * 32u / dots) * r2 / 100, 2, 2, K_NOW);
-        cv_line(cx, cy, mx, my, K_DIM);
+        float mx = cx + fm_sin_turns(k + 0.25f) * r1, my = cy + fm_sin_turns(k) * r1;
+        cv_linef(cx, cy, mx, my, K_DIM, 1.2f);
+        for (uint32_t j = 0; j < dots; j++) {
+            float t = (float)j / (float)dots;
+            cv_dotf(mx + fm_sin_turns(t + 0.25f) * r2, my + fm_sin_turns(t) * r2, 1.3f, K_NOW);
+        }
     }
 }
 static void pic_epiano(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
@@ -2379,23 +2406,26 @@ static void draw_fxtrack(int trk)                    /* AUX_FX1 / AUX_FX2: the e
         int32_t x0 = 130, y0 = 60, w = 100;
         uint32_t f = ui.frame;
         switch (type) {
-        case FXT_CHORUS:
-            for (int32_t x = 0; x < w; x += 2) {
-                cv_rect(x0 + x, y0 + 20 + sin100((uint32_t)(x / 6 + f / 3)) * 10 / 100, 2, 2, K_NOW);
-                cv_rect(x0 + x, y0 + 20 + sin100((uint32_t)(x / 6 + f / 3 + 5)) * 10 / 100, 2, 2, K_DIM);
+        case FXT_CHORUS: {
+            pen_t p0 = {0, 0, 0}, p1 = {0, 0, 0};
+            for (int32_t x = 0; x <= w; x++) {
+                float t = (float)x / 192.0f + (float)f / 96.0f;
+                pen_to(&p1, (float)(x0 + x), (float)(y0 + 20) + 10.0f * fm_sin_turns(t + 0.16f), K_DIM);
+                pen_to(&p0, (float)(x0 + x), (float)(y0 + 20) + 10.0f * fm_sin_turns(t), K_NOW);
             }
             break;
+        }
         case FXT_DELAY:
             for (int k = 0; k < 5; k++)
                 cv_round(x0 + k * 20, y0 + 30 - (30 >> k), 10, 30 >> k, 2, k ? K_DIM : K_NOW);
             break;
-        case FXT_DIST:
-            for (int32_t x = 0; x < w; x += 2) {
-                int32_t s = sin100((uint32_t)(x / 3)) * 3;
-                s = s > 100 ? 100 : s < -100 ? -100 : s;
-                cv_rect(x0 + x, y0 + 20 - s * 16 / 100, 2, 2, K_NOW);
-            }
+        case FXT_DIST: {
+            pen_t pn = {0, 0, 0};
+            for (int32_t x = 0; x <= w; x++)             /* a sine driven into a soft clip */
+                pen_to(&pn, (float)(x0 + x), (float)(y0 + 20) - 16.0f * fm_tanhf(3.0f * fm_sin_turns((float)x / 96.0f)),
+                       K_NOW);
             break;
+        }
         case FXT_LOFI:
             for (int32_t x = 0; x < w; x += 8)
                 cv_rect(x0 + x, y0 + 20 - sin100((uint32_t)(x / 8)) * 16 / 100, 8, 3, K_NOW);
@@ -2407,10 +2437,14 @@ static void draw_fxtrack(int trk)                    /* AUX_FX1 / AUX_FX2: the e
             }
             break;
         default:
-            for (int k = 0; k < 6; k++) {
-                int32_t rr = 8 + k * 7;
-                for (uint32_t a = 0; a < 32; a += 2)
-                    cv_rect(x0 + 50 + cos100(a) * rr / 100, y0 + 20 + sin100(a) * rr / 200, 1, 1, k & 1 ? K_DIM : K_NOW);
+            for (int k = 0; k < 6; k++) {                /* rings spreading out, fainter as they go */
+                float rr = 8.0f + (float)k * 7.0f;
+                pen_t pn = {0, 0, 0};
+                for (int i = 0; i <= 48; i++) {
+                    float t = (float)i / 48.0f;
+                    pen_to(&pn, (float)(x0 + 50) + rr * fm_sin_turns(t + 0.25f), (float)(y0 + 20) + rr * 0.5f * fm_sin_turns(t),
+                           k & 1 ? K_DIM : K_NOW);
+                }
             }
             break;
         }
@@ -2442,36 +2476,65 @@ static void draw_env(int filter)
     const uint8_t *p = proj.trk[trk].par;
     uint32_t h = hash_u(hash_u(2166136261u, 0xE7u), (uint32_t)trk | (uint32_t)filter << 4 | (uint32_t)p[b] << 8 |
                                           (uint32_t)p[b + 1] << 16 | (uint32_t)p[b + 2] << 24);
-    int32_t a, d, s, r, x0 = 16, y0 = 16, w = 208, hh = 84, x;
+    float x0 = 16.0f, y0 = 16.0f, w = 208.0f, hh = 84.0f, base = y0 + hh, x = x0, a, d, r, s;
+    float px[64], py[64];
+    int n = 0;
+    pen_t pn = {0, 0, 0};
     h = hash_u(h, p[b + 3] | (uint32_t)drum << 8);
     if (!begin_main(h))
         return;
-    x = x0;
-    cv_rect(x0, y0 + hh, w, 1, K_LINE);
-    if (drum) {                                      /* funk (a delay), attack, then the hit's length */
-        a = 2 + p[TP_A] * 40 / 127;
-        d = 4 + p[TP_D] * 40 / 127;
-        r = 20 + p[TP_R] * 100 / 127;
-        cv_rect(x, y0 + hh - 1, a, 2, K_DIM);
+    cv_rect(16, 16 + 84, 208, 1, K_LINE);
+    /* the shape as points: each stage a curve (attack easing in, decay and release falling exponentially) */
+    if (drum) {                                      /* lag (a delay), attack, then the hit's length */
+        a = 2.0f + p[TP_A] * 40.0f / 127.0f;
+        d = 4.0f + p[TP_D] * 40.0f / 127.0f;
+        r = 20.0f + p[TP_R] * 100.0f / 127.0f;
+        px[n] = x, py[n++] = base;
         x += a;
-        cv_line(x, y0 + hh, x + d, y0, K_NOW);
+        px[n] = x, py[n++] = base;
+        for (int i = 1; i <= 12; i++) {
+            float t = i / 12.0f;
+            px[n] = x + d * t, py[n++] = base - hh * (1.0f - (1.0f - t) * (1.0f - t));
+        }
         x += d;
-        cv_line(x, y0, x + r, y0 + hh, K_NOW);
-        cv_text(x0, y0 + hh + 6, &FONT_XS, "drum envelope: funk, attack, random, length", K_DIM);
+        for (int i = 1; i <= 24; i++) {
+            float t = i / 24.0f;
+            px[n] = x + r * t, py[n++] = base - hh * ease_exp(t);
+        }
     } else {
-        a = 4 + p[b] * 60 / 127;
-        d = 4 + p[b + 1] * 60 / 127;
-        r = 4 + p[b + 3] * 60 / 127;
-        s = p[b + 2] * hh / 127;
-        cv_line(x, y0 + hh, x + a, y0, K_NOW);
+        a = 4.0f + p[b] * 60.0f / 127.0f;
+        d = 4.0f + p[b + 1] * 60.0f / 127.0f;
+        r = 4.0f + p[b + 3] * 60.0f / 127.0f;
+        s = p[b + 2] / 127.0f;
+        px[n] = x, py[n++] = base;
+        for (int i = 1; i <= 12; i++) {
+            float t = i / 12.0f;
+            px[n] = x + a * t, py[n++] = base - hh * (1.0f - (1.0f - t) * (1.0f - t));
+        }
         x += a;
-        cv_line(x, y0, x + d, y0 + hh - s, K_NOW);
+        for (int i = 1; i <= 16; i++) {
+            float t = i / 16.0f;
+            px[n] = x + d * t, py[n++] = base - hh * (s + (1.0f - s) * ease_exp(t));
+        }
         x += d;
-        cv_rect(x, y0 + hh - s, w - a - d - r, 2, K_NOW);
-        x += w - a - d - r;
-        cv_line(x, y0 + hh - s, x + r, y0 + hh, K_NOW);
-        cv_text(x0, y0 + hh + 6, &FONT_XS, filter ? "filter envelope" : "amp envelope", K_DIM);
+        x = x0 + w - r;                              /* the sustain, then the release */
+        px[n] = x, py[n++] = base - hh * s;
+        for (int i = 1; i <= 16; i++) {
+            float t = i / 16.0f;
+            px[n] = x + r * t, py[n++] = base - hh * s * ease_exp(t);
+        }
     }
+    for (int i = 1; i < n; i++)                      /* under the curve, the track's colour thinned */
+        for (int32_t xi = f_floor(px[i - 1] + 0.5f); xi < f_floor(px[i] + 0.5f); xi++) {
+            float t = px[i] > px[i - 1] ? (xi - px[i - 1]) / (px[i] - px[i - 1]) : 0.0f;
+            int32_t yt = f_floor(py[i - 1] + (py[i] - py[i - 1]) * t + 1.5f);
+            if (yt < (int32_t)base)
+                cv_rect(xi, yt, 1, (int32_t)base - yt, K_TINT);
+        }
+    for (int i = 0; i < n; i++)
+        pen_to(&pn, px[i], py[i], K_NOW);
+    cv_text(16, 16 + 84 + 6, &FONT_XS, drum ? "drum envelope: lag, attack, random, length"
+                                              : filter ? "filter envelope" : "amp envelope", K_DIM);
     cv_blit(0, MAIN_Y);
 }
 static void draw_filter(void)
@@ -2494,21 +2557,29 @@ static void draw_filter(void)
         cv_blit(0, MAIN_Y);
         return;
     }
-    for (int32_t x = x0; x < x0 + w; x++) {
-        int32_t dist = x - fc, y, g;
-        g = dist < 0 ? 0 : dist * (ft == FT_SVF || ft == FT_LADDER ? 2 : 1);
-        if (ft == FT_ZHP)
-            g = dist > 0 ? 0 : -dist;
-        g = g > hh - 8 ? hh - 8 : g;
-        {
-            int32_t bump = dist > -8 && dist < 8 ? (8 - (dist < 0 ? -dist : dist)) * res / 30 : 0;
-            y = y0 + 8 + g - bump;
-            if (y < y0)
-                y = y0;
+    {
+        /* the response: a resonant two-pole section (squared for the 24 dB types) on a log frequency axis, an
+         * octave every 22 px, in dB from +12 at the top to -48 at the bottom */
+        float q = 0.7f + (float)res * 6.0f / 127.0f, ys[209];
+        int steep = ft == FT_SVF || ft == FT_LADDER, hp = ft == FT_ZHP;
+        pen_t pn = {0, 0, 0};
+        (void)py;
+        for (int32_t x = 0; x <= w; x++) {
+            float wn = fm_exp2f((float)(x0 + x - fc) / 22.0f), m2, db, y;
+            if (hp)
+                wn = 1.0f / wn;
+            m2 = (1.0f - wn * wn) * (1.0f - wn * wn) + wn * wn / (q * q);   /* 1 / |H|^2 */
+            db = -3.0103f * fm_log2f(m2 > 1e-6f ? m2 : 1e-6f) * (steep ? 2.0f : 1.0f);
+            y = (float)y0 + 14.0f - db * (float)(hh - 14) / 48.0f;
+            ys[x] = y < (float)y0 ? (float)y0 : y > (float)(y0 + hh) ? (float)(y0 + hh) : y;
         }
-        if (py >= 0)
-            cv_line(x - 1, py, x, y, K_NOW);
-        py = y;
+        for (int32_t x = 0; x < w; x++) {            /* under the curve, the track's colour thinned */
+            int32_t yt = f_floor(ys[x] + 1.5f);
+            if (yt < y0 + hh)
+                cv_rect(x0 + x, yt, 1, y0 + hh - yt, K_TINT);
+        }
+        for (int32_t x = 0; x <= w; x++)
+            pen_to(&pn, (float)(x0 + x), ys[x], K_NOW);
     }
     cv_rect(fc, y0, 1, hh, K_FAINT);
     cv_text(x0, y0 + hh + 6, &FONT_XS, tp_info_par(TP_FTYPE, p)->names[ft], K_DIM);
@@ -2552,18 +2623,26 @@ static void draw_lfo(void)
     cv_rect(x0, cy, w, 1, K_LINE);
     if (lt == LT_OFF)
         text_c(120, 40, &FONT_S, "LFO off", K_DIM);
-    for (int32_t x = 0; lt && x < w; x += 2) {
-        int32_t y = cy;
-        uint32_t ph = (uint32_t)(x / 4) + ui.frame / 2;
-        if (lt == LT_VALUE || lt == LT_TREMOLO)
-            y = cy - sin100(ph) * amp / 100;
-        else if (lt == LT_RANDOM) {
-            if (x % 24 == 0)
-                r = r * 1664525u + 1013904223u + (ph / 6);
-            y = cy - (int32_t)((r >> 16) % (uint32_t)(2 * amp + 1)) + amp;
-        } else
-            y = cy + amp - (x % 48 < 6 ? 2 * amp : 2 * amp * (48 - x % 48) / 48);
-        cv_rect(x0 + x, y, 2, 2, K_NOW);
+    {
+        pen_t pn = {0, 0, 0};
+        float scroll = (float)(ui.frame / 2u) * 2.0f;     /* the curve slides left as it runs */
+        (void)r;
+        for (int32_t x = 0; lt && x <= w; x++) {
+            float u = (float)x + scroll, v;              /* v: -1..1 */
+            if (lt == LT_VALUE || lt == LT_TREMOLO)
+                v = fm_sin_turns(u / 128.0f);
+            else if (lt == LT_RANDOM) {                  /* a held random value every 24 px, slewed between */
+                uint32_t k = (uint32_t)(u / 24.0f), h0 = (k * 2654435761u) >> 8, h1 = ((k + 1u) * 2654435761u) >> 8;
+                float t = (u - (float)k * 24.0f) / 24.0f, s0 = (float)(h0 & 1023u) / 511.5f - 1.0f,
+                      s1 = (float)(h1 & 1023u) / 511.5f - 1.0f;
+                t = t * t * (3.0f - 2.0f * t);
+                v = s0 + (s1 - s0) * t;
+            } else {                                     /* pump: down at once, back up exponentially */
+                float t = (u - fm_floorf(u / 48.0f) * 48.0f) / 48.0f;
+                v = 1.0f - 2.0f * ease_exp(t);
+            }
+            pen_to(&pn, (float)(x0 + x), (float)cy - v * (float)amp, K_NOW);
+        }
     }
     if (lt == LT_VALUE || lt == LT_RANDOM) {
         char t[40], num[12], unit[6], *e = s_cat(t, "to ");
@@ -2667,10 +2746,19 @@ static void draw_master(void)
         return;
     cv_rect(x0, cy, w, 1, K_LINE);
     if (pg == 0) {
-        for (int32_t x = 0; x < w; x += 2) {
-            int32_t b = x < w / 3 ? m[MS_EQ_LO] : x < 2 * w / 3 ? m[MS_EQ_MID] : m[MS_EQ_HI];
-            int32_t y = cy - (b - 64) * (hh / 2 - 6) * (int32_t)m[MS_EQ_BLEND] / (64 * 127);
-            cv_rect(x0 + x, y, 2, 2, K_NOW);
+        pen_t pn = {0, 0, 0};
+        for (int32_t x = 0; x <= w; x++) {           /* the three bands, eased into each other */
+            float u = (float)x / (float)w * 3.0f - 0.5f, g0, g1, t, b;
+            int i = u < 0.0f ? 0 : u >= 2.0f ? 2 : (int)u;
+            static const uint8_t BAND[3] = {MS_EQ_LO, MS_EQ_MID, MS_EQ_HI};
+            t = u - (float)i;
+            t = t < 0.0f ? 0.0f : t > 1.0f ? 1.0f : t;
+            t = t * t * (3.0f - 2.0f * t);
+            g0 = (float)m[BAND[i]];
+            g1 = (float)m[BAND[i < 2 ? i + 1 : 2]];
+            b = g0 + (g1 - g0) * t;
+            pen_to(&pn, (float)(x0 + x), (float)cy - (b - 64.0f) * (float)(hh / 2 - 6) * (float)m[MS_EQ_BLEND] / (64.0f * 127.0f),
+                   K_NOW);
         }
         cv_text(x0, y0 + hh + 6, &FONT_XS, "low  mid  high, by the blend", K_DIM);
     } else if (pg == 1) {

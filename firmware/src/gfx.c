@@ -113,25 +113,98 @@ static void cv_rect(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t c)
             cv_px[(uint32_t)y * cv_w + (uint32_t)i] = sc;
 }
 
-static void cv_line(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint16_t c)
+/* colour c over the pixel at a/256 (anti-aliased drawing) */
+static void cv_blend(int32_t x, int32_t y, uint16_t c, uint32_t a)
 {
-    int32_t dx = x1 > x0 ? x1 - x0 : x0 - x1, sx = x0 < x1 ? 1 : -1;
-    int32_t dy = y1 > y0 ? y0 - y1 : y1 - y0, sy = y0 < y1 ? 1 : -1;
-    int32_t err = dx + dy, guard = 2000;
-    while (guard--) {                       /* bounded: a line is never longer than 480 px */
-        int32_t e2 = 2 * err;               /* both tests use the same error value */
-        cv_pset(x0, y0, c);
-        if (x0 == x1 && y0 == y1)
-            break;
-        if (e2 >= dy) {
-            err += dy;
-            x0 += sx;
-        }
-        if (e2 <= dx) {
-            err += dx;
-            y0 += sy;
+    uint32_t bg, r, g, b;
+    y += cv_oy;
+    if ((uint32_t)x >= cv_w || y < cv_y0 || y >= cv_y1 || !a)
+        return;
+    if (a >= 256u) {
+        cv_px[(uint32_t)y * cv_w + (uint32_t)x] = swap16(c);
+        return;
+    }
+    bg = swap16(cv_px[(uint32_t)y * cv_w + (uint32_t)x]);
+    r = ((c >> 11) * a + (bg >> 11) * (256u - a)) >> 8;
+    g = ((c >> 5 & 63u) * a + (bg >> 5 & 63u) * (256u - a)) >> 8;
+    b = ((c & 31u) * a + (bg & 31u) * (256u - a)) >> 8;
+    cv_px[(uint32_t)y * cv_w + (uint32_t)x] = swap16((uint16_t)(r << 11 | g << 5 | b));
+}
+
+static int32_t f_floor(float v) { int32_t i = (int32_t)v; return v < (float)i ? i - 1 : i; }
+static float f_abs(float v) { return v < 0.0f ? -v : v; }
+static float f_sqrt1(float v)                   /* sqrt for v >= 1 (Newton, a few steps: line slopes) */
+{
+    float r = v < 2.0f ? 1.2f : v * 0.5f;
+    for (int i = 0; i < 6; i++)
+        r = 0.5f * (r + v / r);
+    return r;
+}
+
+/* an anti-aliased line w pixels wide between sub-pixel points: along its long axis, each step lights the few
+ * pixels across it by their distance from the line. The long axis is half-open (the end column is the next
+ * segment's first), so a polyline of short segments blends each pixel once. */
+static void cv_linef(float x0, float y0, float x1, float y1, uint16_t c, float w)
+{
+    float dx = x1 - x0, dy = y1 - y0, hw = w * 0.5f;
+    int steep = f_abs(dy) > f_abs(dx);
+    float k, cs, reach;
+    int32_t a, e;
+    if (steep) {                                 /* walk y: swap the axes */
+        float t;
+        t = x0, x0 = y0, y0 = t;
+        t = x1, x1 = y1, y1 = t;
+        t = dx, dx = dy, dy = t;
+    }
+    if (dx < 0.0f) {
+        float t;
+        t = x0, x0 = x1, x1 = t;
+        t = y0, y0 = y1, y1 = t;
+        dx = -dx, dy = -dy;
+    }
+    k = dx > 1e-4f ? dy / dx : 0.0f;
+    cs = 1.0f / f_sqrt1(1.0f + k * k);           /* across the line, per pixel of the short axis */
+    reach = (hw + 1.0f) / cs;
+    a = f_floor(x0 + 0.5f);
+    e = f_floor(x1 + 0.5f);
+    if (e == a)
+        e = a + 1;
+    for (int32_t i = a; i < e; i++) {
+        float yc = y0 + ((float)i - x0) * k;
+        int32_t j0 = f_floor(yc - reach), j1 = f_floor(yc + reach) + 1;
+        for (int32_t j = j0; j <= j1; j++) {
+            float cov = hw + 0.5f - f_abs((float)j - yc) * cs;
+            if (cov <= 0.0f)
+                continue;
+            if (cov > 1.0f)
+                cov = 1.0f;
+            if (steep)
+                cv_blend(j, i, c, (uint32_t)(cov * 256.0f));
+            else
+                cv_blend(i, j, c, (uint32_t)(cov * 256.0f));
         }
     }
+}
+
+/* a soft round dot of radius r at a sub-pixel point */
+static void cv_dotf(float x, float y, float r, uint16_t c)
+{
+    int32_t x0 = f_floor(x - r - 1.0f), x1 = f_floor(x + r + 1.0f), y0 = f_floor(y - r - 1.0f), y1 = f_floor(y + r + 1.0f);
+    for (int32_t j = y0; j <= y1; j++)
+        for (int32_t i = x0; i <= x1; i++) {
+            float ddx = (float)i - x, ddy = (float)j - y, d2 = ddx * ddx + ddy * ddy, cov;
+            if (d2 > (r + 1.0f) * (r + 1.0f))
+                continue;
+            cov = r + 0.5f - (d2 > 1.0f ? f_sqrt1(d2) : d2);
+            if (cov > 0.0f)
+                cv_blend(i, j, c, cov >= 1.0f ? 256u : (uint32_t)(cov * 256.0f));
+        }
+}
+
+/* the integer line: anti-aliased, a little over a pixel wide */
+static void cv_line(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint16_t c)
+{
+    cv_linef((float)x0, (float)y0, (float)x1, (float)y1, c, 1.5f);
 }
 
 /* glyph index of a character: lower case folds to upper case when the font
