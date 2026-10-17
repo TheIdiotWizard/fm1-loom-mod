@@ -268,8 +268,8 @@ def build_app():
                                ("common/bin/objcopy", "-O", "binary", "-j", ".c1_text", elf, OUT / "c1text.bin"),
                                ("common/bin/objcopy", "-O", "binary", "-j", ".ram_dsp", elf, OUT / "dsptext.bin"),
                                ("common/bin/objdump", "-t", elf),
-                               ("common/bin/objdump", "-d", elf),
-                               ("common/bin/objdump", "-d", "-j", ".ram_text", elf))
+                               ("common/bin/objdump", "-d", "-mcpu=r3", "-mattr=+fprev1", elf),
+                               ("common/bin/objdump", "-d", "-mcpu=r3", "-mattr=+fprev1", "-j", ".ram_text", elf))
     (OUT / "loom.dis").write_text(dis)
 
     def symv(name):
