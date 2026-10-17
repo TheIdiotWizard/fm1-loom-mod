@@ -4,11 +4,13 @@
  * as the project sets it) and plays a short phrase: three notes, then a four-note chord held, then its
  * tail; basses an octave down. And the same phrase through the voices alone (dsp/synth.c, dry, the
  * track's level at 100), its peak, RMS and loudest 100 ms in dBFS into OUTDIR/dry.txt: the levels to balance the presets
- * by, before the master's compressor and limiter even them out. Also checks every sample is finite.
- *   preset_scripts OUTDIR       writes OUTDIR/NN-engine-name.xy and OUTDIR/dry.txt, prints the names */
+ * by, before the master's compressor and limiter even them out; the dry phrase itself (mono, 16 bit) into
+ * OUTDIR/dry/NN-engine-name.wav for tools/preset_spectra.py. Also checks every sample is finite.
+ *   preset_scripts OUTDIR       writes OUTDIR/NN-engine-name.xy, OUTDIR/dry.txt and OUTDIR/dry/, prints the names */
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <sys/stat.h>
 #include "synth.h"
 
 #define N 256
@@ -17,6 +19,9 @@ static _Alignas(16) uint8_t mem[SYNTH_BYTES];
 static float L[N], R[N], S1[N], S2[N], ST[N];
 static double acc, peak, win[17], loud;
 static long frames, bad, nblk;
+#define DRY_MAX (44100 * 4)
+static float dry_buf[DRY_MAX];                   /* the dry phrase, mono */
+static long dry_n;
 
 static int is_bass(const char *n) { return strstr(n, "bass") != 0 || strstr(n, "sub") != 0; }
 
@@ -33,6 +38,8 @@ static void run(synth_t *s, int ms, int measure)
         synth_render(s, 0, NVOICE, L, R, S1, S2, ST, N);
         win[nblk++ % 17] = 0.0;
         for (i = 0; i < N; i++) {
+            if (dry_n < DRY_MAX)
+                dry_buf[dry_n++] = (L[i] + R[i]) * 0.5f;
             win[(nblk - 1) % 17] += (double)L[i] * L[i] + (double)R[i] * R[i];
             if (!(L[i] == L[i]) || !(R[i] == R[i]) || fabs((double)L[i]) > 1e6 || fabs((double)R[i]) > 1e6)
                 bad++;
@@ -67,7 +74,7 @@ static void dry(int k, double *pk, double *rms, double *ld)
     synth_init(s, par);
     synth_tempo(s, 120.0f);
     acc = peak = loud = 0.0;
-    frames = nblk = 0;
+    frames = nblk = dry_n = 0;
     for (j = 0; j < 3; j++) {
         synth_note_on(s, 1, NOTE[j] + o, 100, 0, (uint32_t)j);
         run(s, 260, 1);
@@ -85,6 +92,38 @@ static void dry(int k, double *pk, double *rms, double *ld)
     *ld = loud > 0.0 ? 10.0 * log10(loud / (2.0 * 17.0 * N)) : -200.0;
 }
 
+static void put_le(FILE *f, uint32_t v, int n)
+{
+    for (; n > 0; n--, v >>= 8)
+        fputc((int)(v & 255u), f);
+}
+static int dry_wav(const char *path)             /* dry_buf as a 44.1 kHz mono 16-bit WAV */
+{
+    FILE *f = fopen(path, "wb");
+    long i;
+    if (!f)
+        return 1;
+    fwrite("RIFF", 1, 4, f);
+    put_le(f, (uint32_t)(36 + dry_n * 2), 4);
+    fwrite("WAVEfmt ", 1, 8, f);
+    put_le(f, 16, 4);
+    put_le(f, 1, 2);
+    put_le(f, 1, 2);
+    put_le(f, 44100, 4);
+    put_le(f, 88200, 4);
+    put_le(f, 2, 2);
+    put_le(f, 16, 2);
+    fwrite("data", 1, 4, f);
+    put_le(f, (uint32_t)(dry_n * 2), 4);
+    for (i = 0; i < dry_n; i++) {
+        float x = dry_buf[i] * 32767.0f;
+        int v = x > 32767.0f ? 32767 : x < -32768.0f ? -32768 : (int)x;
+        put_le(f, (uint32_t)(uint16_t)(int16_t)v, 2);
+    }
+    fclose(f);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     const char *dir = argc > 1 ? argv[1] : "build/presets";
@@ -95,6 +134,8 @@ int main(int argc, char **argv)
     lv = fopen(path, "w");
     if (!lv)
         return 1;
+    snprintf(path, sizeof path, "%s/dry", dir);
+    mkdir(path, 0755);
     for (k = 0; k < NPRESETS; k++) {
         const preset_t *pr = &PRESETS[k];
         char base[96], *c;
@@ -123,6 +164,9 @@ int main(int argc, char **argv)
                    "key 7 up\nkey 11 up\nkey 14 up\nkey 18 up\nwait 1000\nwavstop\n");
         fclose(f);
         dry(k, &pk, &rms, &ld);
+        snprintf(path, sizeof path, "%s/dry/%s.wav", dir, base);
+        if (dry_wav(path))
+            return 1;
         fprintf(lv, "%s %.2f %.2f %.2f\n", base, pk, rms, ld);
         printf("%s\n", base);
     }

@@ -125,7 +125,8 @@ press…" means keep **HOME** down while you press the next thing.
 | change the sound | Press **EDIT** and turn **PRESETS**: the engine's own sounds, "PRESET 3/8". **SEL** changes the engine. |
 | edit a drum sound | On a drum track, press **EDIT** and press the sound's black key. The knobs are the model's own four. Turn **SELECT** for the model, random, pan and volume; its **SEL** list has the play mode. |
 | change the filter | Press **ENV** and turn **SELECT** to Filter. **PRESETS** turns the filter type. |
-| use the effects | Press **FX**: the track's sends. Turn **SELECT** for FX I and FX II; **PRESETS** picks the effect. |
+| give a sound some character | Press **FX**: the Character page. **PRESETS** turns the type (drive, fold, crush, ring, tilt, rectify); the knobs are its amount, tone and mix. |
+| use the effects | Press **FX** and turn **SELECT** to Sends: the track's sends. Turn on for FX I and FX II; **PRESETS** picks the effect. |
 | play | Press **PLAY**: every track starts from step 1. |
 | record live | Hold **REC** and press **PLAY**: it records from step 1 at once (after the count-in, if set). |
 | record while playing | Hold **REC** and play: it records while you hold it. Hold **REC** and press **PLAY** to keep it on. |
@@ -154,7 +155,7 @@ press…" means keep **HOME** down while you press the next thing.
 | **SEQ** | Opens Steps. Its page 2 is Bar. Hold it on Steps and the keys play the track and set what a step writes. |
 | **EDIT** | Opens Engine. Its page 2 is Play; on a drum track, the key's model, random, pan and volume. |
 | **ENV** | Opens Envelope (a drum track: lag, attack, random, length), then Filter, then the filter's envelope. |
-| **FX** | Opens Sends, the track's sends to FX I, FX II and the tape. Then FX I and FX II, the two effects. |
+| **FX** | Opens Character, the track's own effect. Then Sends, the track's sends to FX I, FX II and the tape. Then FX I and FX II, the two effects. |
 | **LFO** | Opens LFO. Its page 2 has the type's fourth and fifth knobs. |
 | **ARP** | Opens Players. With the arp, page 2 is its second set of knobs and page 3 is hold. |
 | **GLO** | Opens Mix. Turn **SELECT** for Master EQ, Master drive, Master out, Setup and Status. |
@@ -273,7 +274,7 @@ tricks' letters sit at the bottom right, a percent sign marks a chance, and a re
 
 Hold a step and press **EDIT**, **ENV**, **FX** or **LFO**. The knob strip becomes that module's four knobs
 for the held step (turn **SELECT** for its other pages: **ENV** has the envelope, the filter and the filter's
-envelope; **FX** the sends), showing "–" where the step has no lock and the locked values in red. Turn a knob to lock
+envelope; **FX** the character and the sends), showing "–" where the step has no lock and the locked values in red. Turn a knob to lock
 a value on the step. Let go of the step to go back. Hold a step and press **SAVE** to clear its locks. While
 recording, a knob you turn writes locks on the steps as they play. The Bar page's SHAPE knob smooths between
 locks.
@@ -398,7 +399,8 @@ semitones, an octave) and the track's volume.
 
 **ENV** has the amp envelope, then the filter: cutoff in Hz, resonance, envelope amount and key tracking,
 with **PRESETS** turning the type (svf, ladder, z lowpass, z hipass, dynamic); then the filter's envelope.
-**FX** has the track's sends to FX I, FX II and the tape, and its level, then the two effects. **LFO** has the
+**FX** has the track's character (below), then its sends to FX I, FX II and the tape, and its level, then the two
+effects. **LFO** has the
 type and its first three knobs; page 2 its fourth and fifth. A new type starts from its own defaults:
 
 | Type | Page 1 | Page 2 |
@@ -410,6 +412,30 @@ type and its first three knobs; page 2 its fourth and fifth. A new type starts f
 
 The speed knob is synced from 2/1 to 1/64 turned left, and free in Hz turned right. A destination with
 "free" after it runs on without restarting on each note.
+
+### Character
+
+Every voice of a synth track has an effect of its own after the filter, before the sends: its character.
+Each voice is shaped on its own, so a chord driven hard stays a chord. Press **FX**: the Character page shows
+the type, what it does and a picture of it: the curve a sample goes through, or what it does to a wave. The
+faint line is the sound without it. **PRESETS** turns the type. The knobs are type, amount, tone and mix (dry
+to wet); at mix 0 it is off. The factory presets each have their own, so a preset is a whole sound.
+
+<img src="img/screen-character.png" width="240" alt="FX&#x27;s Character page on T2: fold, a sine wavefolder, its curve drawn; knobs type, amount, tone and mix" title="The Character page">
+
+| Type | Amount | Tone |
+| --- | --- | --- |
+| off | | |
+| drive | how hard it saturates (the level stays) | a low-pass after it, 400 Hz to 20 kHz |
+| fold | how far the wave folds over (the level stays) | the bias: off the middle, it folds one side more |
+| crush | how far it falls | which falls: left the sample rate, right the bits, the middle both |
+| ring | how deep the ring modulation | the ratio of the ring's sine to the note, 0.25:1 to 7:1 |
+| tilt | the pivot, 150 Hz to 6 kHz | the tilt: left darker, right brighter, 6 dB each side at the ends |
+| rectify | towards half-wave, then full-wave: an octave up | a low-pass after it |
+
+Lock the amount, tone or mix on a step like any knob (hold the step, press **FX**). The LFO reaches the amount:
+the amp module's fourth knob, "character". A drum track's voices have no character: on a kit the page says
+so.
 
 ## Players
 
@@ -532,8 +558,9 @@ On a sound page, hold **SAVE** and press white key 1 to 16 to keep the track's s
 | ENV | Envelope | attack | decay | sustain | release | play |
 | ENV, SELECT | Filter | cutoff | reso | env | keytrack | play; PRESETS: the type |
 | ENV, SELECT twice | Filter env | attack | decay | sustain | release | play |
-| FX | Sends | fx I | fx II | tape | level | play |
-| FX, SELECT | FX I, FX II | the effect's four | | | | play; PRESETS: the effect |
+| FX | Character | type | amount | tone | mix | play; PRESETS: the type |
+| FX, SELECT | Sends | fx I | fx II | tape | level | play |
+| FX, SELECT twice | FX I, FX II | the effect's four | | | | play; PRESETS: the effect |
 | LFO | LFO | type | the type's three | | | play |
 | LFO, SELECT | LFO 2 | the type's fourth and fifth | | | | play |
 | ARP | Players | player | its first | its second | its third | play, through the player |

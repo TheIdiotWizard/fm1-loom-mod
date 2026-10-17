@@ -5,8 +5,10 @@
  * finite and at a sensible level and dies in its release; weft's knobs each move its spectrum; the six
  * filter types; the voice modes' retrigger rules; the pool's limit and stealing; locks; the LFO
  * (regular vs free, the wobble's envelope and shapes, the drift's unipolar amount, the pump's hold and
- * release); and that splitting a block by voices or by frames changes no sample. Then a benchmark:
- * instructions per sample per voice, 16 voices of each engine (macOS: the task's own instruction count,
+ * release); the character stage (every type bounded and finite, drive and fold keep the level, crush
+ * quantises, ring makes sidebands, mix 0 is a bypass, locks and the LFO reach the amount); and that
+ * splitting a block by voices or by frames changes no sample. Then a benchmark: instructions per sample
+ * per voice, 16 voices of each engine and of each character type (macOS: the task's own instruction count,
  * as fm1-sph's sophie_bench.c; elsewhere clock()).
  *   build/host/synth_test            (tests/host/synth_test.sh builds it) */
 #include <stdio.h>
@@ -339,6 +341,301 @@ static void bench(void)
     }
 }
 
+/* ---- the character stage ---- */
+static const char *const CT_N[NCT] = {"off", "drive", "fold", "crush", "ring", "tilt", "rectify"};
+/* a held note's RMS (left, blocks 30..90) on track 0 as par[0] stands; its samples into buf when given */
+static float held_rms(int note, float *buf, int *finite)
+{
+    int b, i;
+    double e = 0.0;
+    synth_init(S, par);
+    synth_tempo(S, 120.0f);
+    synth_note_on(S, 0, note, 100, 0, 1);
+    for (b = 0; b < 90; b++) {
+        block(N, finite);
+        if (b < 30)
+            continue;
+        for (i = 0; i < N; i++)
+            e += (double)L[i] * (double)L[i];
+        if (buf)
+            memcpy(buf + (b - 30) * N, L, sizeof L);
+    }
+    return (float)sqrt(e / (60.0 * N));
+}
+/* a plain held sound for the stage: an engine's default, the filter open, sustain full */
+static void char_sound(int engine, int type, int amt, int tone, int mix)
+{
+    reset();
+    sound_default(par[0], engine);
+    par[0][TP_FTYPE] = FT_LP12;
+    par[0][TP_CUT] = 127;
+    par[0][TP_RES] = 0;
+    par[0][TP_S] = 127;
+    par[0][TP_VOLUME] = 100;
+    par[0][TP_CTYPE] = (uint8_t)type;
+    par[0][TP_CAMT] = (uint8_t)amt;
+    par[0][TP_CTONE] = (uint8_t)tone;
+    par[0][TP_CMIX] = (uint8_t)mix;
+}
+/* the energy at hz in n samples (Goertzel), relative to the whole */
+static double tone_at(const float *x, int n, double hz)
+{
+    double w = 2.0 * 3.14159265358979 * hz / 44100.0, c = 2.0 * cos(w), s1 = 0.0, s2 = 0.0, e = 0.0, p;
+    int i;
+    for (i = 0; i < n; i++) {
+        double s0 = (double)x[i] * (0.5 - 0.5 * cos(2.0 * 3.14159265358979 * i / n)) + c * s1 - s2;
+        s2 = s1;
+        s1 = s0;
+        e += (double)x[i] * (double)x[i];
+    }
+    p = s1 * s1 + s2 * s2 - c * s1 * s2;
+    return e > 0.0 ? p / (e * n) : 0.0;
+}
+static void char_tests(void)
+{
+    static float buf[60 * N], ref[60 * N];
+    char num[16], unit[8], what[96];
+    int ty, finite = 1, i, ok;
+    float pk, r0, r1;
+    uint8_t p[NTP];
+    /* texts and tables */
+    sound_default(p, EG_STACK);
+    check("character: off by default, mix 100 %", p[TP_CTYPE] == CT_OFF && p[TP_CMIX] == 127);
+    check("character knobs: type amount tone mix", !strcmp(tp_info(TP_CTYPE, 0)->name, "type") &&
+                                                     !strcmp(tp_info(TP_CAMT, 0)->name, "amount") &&
+                                                     !strcmp(tp_info(TP_CTONE, 0)->name, "tone") &&
+                                                     !strcmp(tp_info(TP_CMIX, 0)->name, "mix"));
+    for (ty = 0; ty < NCT; ty++) {
+        tp_text(TP_CTYPE, ty, EG_STACK, num, unit);
+        if (strcmp(num, CT_N[ty]))
+            check("character type names", 0);
+    }
+    p[TP_CTYPE] = CT_RING;
+    tp_text_par(TP_CTONE, 48, p, num, unit);
+    check("ring: tone 48 is the ratio 1.5:1", !strcmp(num, "1.5:1"));
+    p[TP_CTYPE] = CT_DRIVE;
+    tp_text_par(TP_CTONE, 127, p, num, unit);
+    check("drive: tone 127 is 20 kHz (open)", !strcmp(num, "20.0") && !strcmp(unit, "kHz"));
+    tp_text_par(TP_CTONE, 0, p, num, unit);
+    check("drive: tone 0 is a 400 Hz low-pass", !strcmp(num, "400") && !strcmp(unit, "Hz"));
+    p[TP_CTYPE] = CT_TILT;
+    tp_text_par(TP_CAMT, 127, p, num, unit);
+    check("tilt: amount 127 is a 6 kHz pivot", !strcmp(num, "6.0") && !strcmp(unit, "kHz"));
+    p[TP_LTYPE] = LT_WAVE;
+    p[TP_LDEST] = LD_AMP;
+    tp_text_par(TP_LX, 3, p, num, unit);
+    check("the LFO's amp module, knob 4: the character's amount", !strcmp(num, "character"));
+
+    /* every type, the knobs at their ends and the middle, a resonant filter and a stereo engine: finite,
+     * bounded, silent after the release */
+    ok = 1;
+    for (ty = 1; ty < NCT; ty++) {
+        int a, t, e;
+        for (e = 0; e < 2; e++)
+            for (a = 0; a <= 127; a += 127)
+                for (t = 0; t <= 128; t += 64) {
+                    reset();
+                    sound_default(par[0], e ? EG_WEFT : EG_SYNC);
+                    if (e)
+                        par[0][TP_E4] = 100;   /* weft spread: stereo */
+                    par[0][TP_RES] = 127;
+                    par[0][TP_VOLUME] = 127;
+                    par[0][TP_CTYPE] = (uint8_t)ty;
+                    par[0][TP_CAMT] = (uint8_t)a;
+                    par[0][TP_CTONE] = (uint8_t)(t > 127 ? 127 : t);
+                    if (!note_test("character", 0, &pk, 0)) {
+                        printf("    %s amount %d tone %d: peak %.1f dBFS\n", CT_N[ty], a, t, (double)db(pk));
+                        ok = 0;
+                    }
+                }
+    }
+    check("character: every type stays finite, bounded, and dies", ok);
+
+    /* drive and fold keep the level (+-3 dB) at mid amount; and they change the sound */
+    for (ty = CT_DRIVE; ty <= CT_RECTIFY; ty++) {
+        int tone = ty == CT_DRIVE || ty == CT_RECTIFY ? 127 : 64;
+        char_sound(EG_STACK, CT_OFF, 64, tone, 127);
+        par[0][TP_E1] = 0;                       /* a saw */
+        r0 = held_rms(57, ref, &finite);
+        char_sound(EG_STACK, ty, 64, tone, 127);
+        par[0][TP_E1] = 0;
+        if (ty == CT_TILT)
+            par[0][TP_CTONE] = 100;
+        r1 = held_rms(57, buf, &finite);
+        printf("    %-8s at amount 64: %+.1f dB\n", CT_N[ty], (double)(db(r1) - db(r0)));
+        if (ty == CT_DRIVE || ty == CT_FOLD) {
+            sprintf(what, "%s at mid amount keeps the level (+-3 dB)", CT_N[ty]);
+            check(what, fabs((double)(db(r1) - db(r0))) <= 3.0);
+        }
+        ok = 0;
+        for (i = 0; i < 60 * N; i++)
+            ok |= fabs_f(buf[i] - ref[i]) > 1e-3f;
+        sprintf(what, "%s changes the sound", CT_N[ty]);
+        check(what, ok);
+    }
+    for (ty = CT_DRIVE; ty <= CT_FOLD; ty++) {   /* and at full amount, a quiet and a loud input */
+        float lo0, lo1;
+        char_sound(EG_STACK, CT_OFF, 127, 127, 127);
+        par[0][TP_E1] = 0;
+        r0 = held_rms(57, 0, &finite);
+        par[0][TP_CTYPE] = (uint8_t)ty;
+        r1 = held_rms(57, 0, &finite);
+        char_sound(EG_STACK, CT_OFF, 127, 127, 127);
+        par[0][TP_E1] = 0;
+        par[0][TP_CUT] = 40;                     /* (the filter low: a quieter input) */
+        lo0 = held_rms(57, 0, &finite);
+        par[0][TP_CTYPE] = (uint8_t)ty;
+        lo1 = held_rms(57, 0, &finite);
+        printf("    %-8s at amount 127: %+.1f dB (a quiet input %+.1f dB)\n", CT_N[ty], (double)(db(r1) - db(r0)),
+               (double)(db(lo1) - db(lo0)));
+        sprintf(what, "%s at full amount stays within 6 dB", CT_N[ty]);
+        check(what, fabs((double)(db(r1) - db(r0))) <= 6.0);
+    }
+
+    /* crush: the bits (tone 127) leave few levels; the rate (tone 0) holds samples */
+    {
+        int nl = 0, held = 0;
+        float lv[64];
+        char_sound(EG_STACK, CT_CRUSH, 127, 127, 127);
+        par[0][TP_E4] = 0;
+        held_rms(57, buf, &finite);
+        r0 = 0.0f;
+        for (i = 0; i < 60 * N; i++)
+            if (fabs_f(buf[i]) > r0)
+                r0 = fabs_f(buf[i]);
+        for (i = 40 * N; i < 60 * N && nl < 64; i++) {   /* (the gain ramps have settled by here) */
+            int j, seen = 0;
+            for (j = 0; j < nl; j++)
+                seen |= fabs_f(lv[j] - buf[i]) < r0 * 0.01f;
+            if (!seen)
+                lv[nl++] = buf[i];
+        }
+        printf("    crush bits at amount 127: %d levels\n", nl);
+        check("crush (bits) quantises: at most 12 levels", nl <= 12);
+        char_sound(EG_STACK, CT_CRUSH, 127, 0, 127);
+        par[0][TP_E4] = 0;
+        held_rms(57, buf, &finite);
+        for (i = 40 * N + 1; i < 60 * N; i++)
+            held += fabs_f(buf[i] - buf[i - 1]) < r0 * 1e-3f;
+        printf("    crush rate at amount 127: %.0f %% of samples held\n", 100.0 * held / (20.0 * N));
+        check("crush (rate) holds samples: 90 % repeat", held > 18 * N);
+    }
+
+    /* ring: a sine (orbit, bright 0) at A3 times one at 1.5 x: sidebands at 0.5 and 2.5 x, the carrier gone */
+    {
+        double c, lo, hi, f = 220.0;
+        char_sound(EG_ORBIT, CT_RING, 127, 48, 127);
+        par[0][TP_E1] = 0;
+        par[0][TP_E4] = 0;
+        par[0][TP_FTYPE] = FT_DYNAMIC;
+        held_rms(57, buf, &finite);
+        c = tone_at(buf + 20 * N, 32 * N, f);
+        lo = tone_at(buf + 20 * N, 32 * N, f * 0.5);
+        hi = tone_at(buf + 20 * N, 32 * N, f * 2.5);
+        printf("    ring x1.5 on 220 Hz: 220 Hz %.4f, 110 Hz %.4f, 550 Hz %.4f\n", c, lo, hi);
+        check("ring makes sidebands (0.5 and 2.5 x) and takes the carrier", lo > c * 20.0 && hi > c * 20.0);
+    }
+
+    /* a flat tilt (tone 64) passes the voice as it is: the stage's path (filter, stage, outputs) matches the plain
+     * one, mono and stereo, every filter type */
+    {
+        int st, ft;
+        float worst = 0.0f;
+        for (st = 0; st < 2; st++)
+            for (ft = 0; ft < NFT; ft++) {
+                char_sound(EG_STACK, CT_OFF, 64, 64, 127);
+                par[0][TP_E4] = (uint8_t)(st ? 100 : 0);
+                par[0][TP_FTYPE] = (uint8_t)ft;
+                par[0][TP_CUT] = 90;
+                held_rms(57, ref, &finite);
+                par[0][TP_CTYPE] = CT_TILT;
+                held_rms(57, buf, &finite);
+                for (i = 0; i < 60 * N; i++)
+                    if (fabs_f(buf[i] - ref[i]) > worst)
+                        worst = fabs_f(buf[i] - ref[i]);
+            }
+        printf("    a flat tilt against off: %g at most\n", (double)worst);
+        check("a flat tilt matches off (mono, stereo, every filter)", worst < 1e-4f);
+    }
+    /* mix 0: a bypass, sample for sample; mix 127 is not */
+    char_sound(EG_SYNC, CT_OFF, 100, 64, 127);
+    held_rms(60, ref, &finite);
+    char_sound(EG_SYNC, CT_FOLD, 100, 64, 0);
+    held_rms(60, buf, &finite);
+    check("character mix 0 is bit-identical to off", !memcmp(buf, ref, sizeof buf));
+    char_sound(EG_SYNC, CT_FOLD, 100, 64, 127);
+    held_rms(60, buf, &finite);
+    check("character mix 100 % differs", memcmp(buf, ref, sizeof buf) != 0);
+
+    /* a lock on the amount and the LFO on it change the sound */
+    char_sound(EG_SYNC, CT_DRIVE, 0, 127, 127);
+    held_rms(60, ref, &finite);
+    synth_init(S, par);
+    synth_lock(S, 0, TP_CAMT, 127);
+    synth_note_on(S, 0, 60, 100, 0, 1);
+    for (i = 0; i < 60; i++)
+        block(N, &finite);
+    ok = 0;
+    for (i = 0; i < N; i++)
+        ok |= fabs_f(L[i] - ref[29 * N + i]) > 1e-3f;
+    check("a lock on the character's amount changes the sound", ok);
+    char_sound(EG_SYNC, CT_DRIVE, 0, 127, 127);
+    par[0][TP_LTYPE] = LT_WAVE;
+    par[0][TP_LSPEED] = 100;
+    par[0][TP_LAMT] = 127;
+    par[0][TP_LDEST] = LD_AMP + LD_FREE;
+    par[0][TP_LX] = 3;
+    held_rms(60, buf, &finite);
+    check("the LFO on the character's amount changes the sound", memcmp(buf, ref, sizeof buf) != 0);
+    check("character renders stay finite", finite);
+}
+
+/* 16 voices of stack, stereo (spread up) and mono, lp24, through each character type: instructions per sample
+ * per voice */
+static void bench_char(void)
+{
+    int ty, st;
+    double off = 0.0;
+    for (st = 1; st >= 0; st--)
+    for (ty = 0; ty < NCT; ty++) {
+        if (ty == 0)
+            printf("\nbenchmark: the character stage, 16 voices of stack (%s), lp24 (mean / worst block, + over off)\n",
+                   st ? "stereo" : "mono");
+        int t, b, finite = 1;
+        uint64_t total = 0, worst = 0;
+        double m;
+        reset();
+        for (t = 0; t < NTRK; t++) {
+            sound_default(par[t], EG_STACK);
+            par[t][TP_FTYPE] = FT_LP24;
+            par[t][TP_E4] = (uint8_t)(st ? 100 : 0);
+            par[t][TP_CTYPE] = (uint8_t)ty;
+            par[t][TP_CAMT] = 90;
+            par[t][TP_CTONE] = 100;
+        }
+        for (t = 0; t < NVOICE; t++)
+            synth_note_on(S, t % NTRK, 48 + t * 2, 100, 0, (uint32_t)t);
+        for (b = 0; b < 400; b++) {
+            uint64_t i0 = instr_now(), di;
+            block(N, &finite);
+            di = instr_now() - i0;
+            if (b >= 20) {
+                total += di;
+                if (di > worst)
+                    worst = di;
+            }
+        }
+        m = (double)total / (380.0 * N * NVOICE);
+        if (ty == 0)
+            off = m;
+#ifdef __APPLE__
+        printf("  %-10s %6.1f / %6.1f   %+6.1f\n", CT_N[ty], m, (double)worst / (double)(N * NVOICE), m - off);
+#else
+        printf("  %-10s %6.3f us / sample / voice (clock)\n", CT_N[ty], m / (double)CLOCKS_PER_SEC * 1e6);
+#endif
+    }
+}
+
 int main(void)
 {
     int e, k, t, finite = 1, b;
@@ -664,20 +961,21 @@ int main(void)
 
     /* every preset */
     {
-        int ok = 1;
+        int ok = 1, klo = 0, khi = 0;
         float lo = 1.0f, hi = 0.0f;
         for (k = 0; k < NPRESETS; k++) {
             load_preset(0, k);
             if (!note_test(PRESETS[k].name, 0, &pk, 1))
                 ok = 0;
             if (pk < lo)
-                lo = pk;
+                lo = pk, klo = k;
             if (pk > hi)
-                hi = pk;
+                hi = pk, khi = k;
         }
         check("every preset renders a 1 s note: finite, -30..0 dBFS, release ends", ok);
         check("the preset peaks sit within 18 dB of each other", db(hi) - db(lo) < 18.0f);
-        printf("    preset peaks %.1f .. %.1f dBFS\n", (double)db(lo), (double)db(hi));
+        printf("    preset peaks %.1f (%s) .. %.1f (%s) dBFS\n", (double)db(lo), PRESETS[klo].name, (double)db(hi),
+               PRESETS[khi].name);
     }
 
     /* weft: phase distortion; each knob moves the spectrum; bounded and finite to the top note */
@@ -1213,7 +1511,9 @@ int main(void)
         check("ranges and frame splits combined, one prepare", same);
     }
 
+    char_tests();
     bench();
+    bench_char();
     printf("%s\n", bad ? "SYNTH TESTS FAILED" : "all synth tests passed");
     return bad != 0;
 }

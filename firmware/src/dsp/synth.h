@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* LOOM-8 synth: a pool of voices playing eight engines (weft, stack, wavetable, orbit, tines, organ,
- * sync, swarm), each voice with two ADSRs, a state-variable filter, an LFO and sends.
+ * sync, swarm), each voice with two ADSRs, a state-variable filter, a character stage, an LFO and sends.
  *
  * A track's sound is a flat byte array par[NTP] (four modules, four knobs each: engine, envelope, filter,
- * LFO; plus the play page, sends, player and mix). Continuous values are 0..127, switches small integers (ranges in
+ * LFO; plus the play page, sends, the character stage, player and mix). Continuous values are 0..127, switches small integers (ranges in
  * tp_info()). The same index space addresses parameter locks (seq/pattern.h lane_t.param), LFO
  * destinations and MIDI CCs. The drum engine's 11 sounds take TP_DRUM0 + sound * DP_N + DP_*.
  *
@@ -35,6 +35,8 @@ enum {
     TP_LTYPE, TP_LSPEED, TP_LAMT, TP_LDEST, TP_LX,  /* LFO: type (off, wave, wobble, drift, pump), then its four
                                                      * knobs as the comment below the enum says */
     TP_LX2,                                         /* a fifth LFO value: shape (wave, wobble) or envelope (drift) */
+    TP_CTYPE, TP_CAMT, TP_CTONE, TP_CMIX,           /* Character: the voice's own effect after the filter (CT_*),
+                                                     * its amount, tone (per type, below) and mix (dry .. wet) */
     TP_PLAYER, TP_P1, TP_P2, TP_P3, TP_P4,          /* Players: off / arp / strum / hold and its four knobs */
     TP_AP1, TP_AP2, TP_AP3, TP_AP4,                 /* the arp's second page: length, style, glide, stereo */
     TP_LEVEL, TP_PAN,                               /* Mix */
@@ -49,7 +51,7 @@ enum {
  * (randomise every model's knobs per hit, the kick's pitch excepted), length (sustain / release scale). */
 enum { DP_MODEL, DP_K1, DP_K2, DP_K3, DP_K4, DP_RANDOM, DP_PAN, DP_VOLUME, DP_MODE, DP_N };
 #define TP_DRUM(s, k) (TP_DRUM0 + (s) * DP_N + (k))
-#define NTP_SOUND TP_PLAYER                          /* a preset keeps par[0..TP_PLAYER) */
+#define NTP_SOUND TP_PLAYER                          /* a preset keeps par[0..TP_PLAYER): the character too */
 
 enum { VM_POLY, VM_MONO, VM_LEGATO };
 /* filter types: lp24 (two state-variable stages, 24 dB, aggressive), ladder (Moog-like, saturating feedback),
@@ -57,13 +59,25 @@ enum { VM_POLY, VM_MONO, VM_LEGATO };
  * drive, hi cut on the Filter page's four knobs instead of cutoff / res / env / keytrack; on a synth voice a
  * bypass), bp12 (the lp12 stage's band-pass, its peak at unity) */
 enum { FT_LP24, FT_LADDER, FT_LP12, FT_HP12, FT_DYNAMIC, FT_BP12, NFT };
+/* the character stage, per voice after the filter and before the amp and the sends (no memory beyond a few
+ * filter states: cheap). amount / tone per type:
+ *   drive:   a soft (tanh-like) saturation, the gain made up so the level holds; tone = a low-pass after it
+ *            (400 Hz .. 20 kHz: open)
+ *   fold:    a sine wavefolder, gain made up; tone = its bias (64 = symmetric; off centre: even harmonics)
+ *   crush:   fewer bits and a lower sample rate; tone = which falls (0 the rate only, 127 the bits only)
+ *   ring:    a ring modulator, a sine at a ratio of the note (tone: 0.25:1 .. 7:1 in 16 steps); amount = depth
+ *   tilt:    a tilt EQ: amount = its pivot (150 Hz .. 6 kHz), tone = the tilt (below 64 darker, above brighter,
+ *            +-6 dB each side at the ends)
+ *   rectify: towards half-wave (64) and full-wave (127) rectification: an octave up; tone = a low-pass
+ * mix: dry (0) .. wet (127); at 0 the stage is skipped. The LFO reaches the amount (the amp module's knob 4). */
+enum { CT_OFF, CT_DRIVE, CT_FOLD, CT_CRUSH, CT_RING, CT_TILT, CT_RECTIFY, NCT };
 /* the LFO: TP_LSPEED is one knob: 0..7 synced 2/1, 1, 1/2, 1/4, 1/8, 1/16, 1/32, 1/64
  * (counter-clockwise), 8..127 free (clockwise, 0.1..30 Hz). Per type the five values TP_LSPEED / TP_LAMT /
  * TP_LDEST / TP_LX / TP_LX2 mean:
  *   wave:    speed, amount -100..100 % (64 = 0), destination (LD_*: the module synth / envelope / filter / amp,
  *            + LD_FREE for the free-running version), parameter (TP_LX: the module's knob
  *            0..3: the engine's four, attack / decay / sustain / release, cutoff / reso / env / keytrack, volume /
- *            pitch / pan / -), shape (TP_LX2: square, sine, ramp, saw).
+ *            pitch / pan / character (its amount)), shape (TP_LX2: square, sine, ramp, saw).
  *            100 % = the destination knob's whole range; pitch = +-12 semitones.
  *   drift:   speed, amount 0..100 % (unipolar: the offset only adds), destination (LD_*), parameter (TP_LX),
  *            envelope (TP_LX2: fade in / fade out, below)
@@ -101,6 +115,11 @@ void tp_text(int p, int v, int engine, char *num, char *unit);   /* the value as
 const tp_info_t *tp_info_par(int p, const uint8_t *par);
 void tp_text_par(int p, int v, const uint8_t *par, char *num, char *unit);
 void sound_default(uint8_t *par, int engine);       /* par[NTP] for a fresh track of this engine */
+/* the Character page's picture of the stage (no state): per type the curve at u. drive, fold, rectify and off:
+ * the transfer, the output for an input u (-1..1); crush: a cycle of a sine (u 0..1) as it comes out, held and
+ * quantised; ring: two cycles of a sine (u 0..1) ring-modulated (its peak at 1); tilt: the response in dB / 6 from 50 Hz
+ * (u = 0) to 20 kHz (u = 1). The mix is in it. */
+float char_picture(const uint8_t *par, float u);
 static inline int tp_bend_semi(int v) { return v >= 8 ? 12 : v; }   /* TP_BEND as semitones */
 
 /* factory presets: the sound part of par[] */

@@ -1455,6 +1455,16 @@ static void knob(int k, int32_t e)
             set_tp(trk, p, proj.trk[trk].par[p] + (int)e);
         return;
     }
+    if (ui.page == P_CHARACTER) {                /* the instrument's (an effect track selected: the last one played) */
+        trk = inst_trk();
+        p = tp_page_param(P_CHARACTER, k, trk);
+        if (p < 0)
+            return;
+        set_tp(trk, p, proj.trk[trk].par[p] + (int)e);
+        if (seq.rec && playing() && trk == sel_trk())
+            seq_rec_knob(&seq, trk, p, proj.trk[trk].par[p]);
+        return;
+    }
     if (is_aux(trk) && ui.page != P_MIX) {
         aux_knob(trk, k, e);
         return;
@@ -1493,6 +1503,14 @@ static void presets(int32_t e)
         break;
     case P_FX1: case P_FX2:
         fx_pick(ui.page == P_FX1 ? AUX_FX1 : AUX_FX2, d);
+        break;
+    case P_CHARACTER:                            /* the character's type */
+        trk = inst_trk();
+        if (!is_drum(trk)) {
+            const uint8_t *par = proj.trk[trk].par;
+            set_tp(trk, TP_CTYPE, (par[TP_CTYPE] + d + NCT) % NCT);
+            say("CHARACTER", tp_info_par(TP_CTYPE, par)->names[par[TP_CTYPE] % NCT]);
+        }
         break;
     case P_FILTER:                               /* the filter type */
         if (!is_aux(trk)) {
@@ -2067,7 +2085,8 @@ static void input(void)
             }
             if (ui.held && ui.page == P_STEPS && (i == B_EDIT || i == B_ENV || i == B_FX || i == B_LFO) &&
                 !is_aux(sel_trk())) {
-                ui.lockpg = (uint8_t)(1 + (i == B_EDIT ? P_ENGINE : i == B_ENV ? P_ENV : i == B_FX ? P_SENDS : P_LFO));
+                ui.lockpg = (uint8_t)(1 + (i == B_EDIT ? P_ENGINE : i == B_ENV ? P_ENV
+                                           : i == B_FX ? (is_drum(sel_trk()) ? P_SENDS : P_CHARACTER) : P_LFO));
                 ui.held_used = 1;
                 ui.touched = -1;
                 ui.btn_used |= m;
@@ -2125,7 +2144,11 @@ static void input(void)
         return;
     if ((e = ev[EN_SELECT]) != 0 && ui.lockpg) {  /* the lock editor: the module's other pages (the track's own) */
         int g = page_group(ui.lockpg - 1), f = PAGE_BTN[g].first, n = group_n(g), pg = ui.lockpg - 1 - f;
-        n = PAGE_BTN[g].btn == B_FX ? 1 : n;
+        if (PAGE_BTN[g].btn == B_FX) {           /* the track's own: Character and Sends (a kit: Sends) */
+            f = is_drum(sel_trk()) ? P_SENDS : P_CHARACTER;
+            n = is_drum(sel_trk()) ? 1 : 2;
+            pg = ui.lockpg - 1 - f;
+        }
         pg = ((pg + (e > 0 ? 1 : -1)) % n + n) % n;
         ui.lockpg = (uint8_t)(f + pg + 1);
         e = 0;
