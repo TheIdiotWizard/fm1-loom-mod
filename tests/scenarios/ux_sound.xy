@@ -39,8 +39,8 @@ tapkey b1
 wait 60
 shot d12_snare_selected.png
 spin K1 6
-expect par1.54 106
-expect par1.45 100
+expect par1.54 85
+expect par1.45 82
 wait 60
 shot d13_snare_pitch.png
 turn SELECT 1

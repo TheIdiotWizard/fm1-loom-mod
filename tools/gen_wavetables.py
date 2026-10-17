@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-"""The wavetable engine's tables: the OP-XY's nine (basic, buzz, crush, drawbars, fibonacci, fractal,
-geometric, primes, zap), 16 frames x 256 int16 samples each (72 KB in flash).
+"""The wavetable engine's nine tables (shapes, nasal, grit, vocal, spiral, fold, octaves, glass,
+chirp), 16 frames x 256 int16 samples each (72 KB in flash).
 
     tools/gen_wavetables.py build/gen/wavetables.h
 
 Every frame is built from a harmonic recipe or drawn in the time domain and then band-limited to
 NHARM harmonics through a plain 256-point DFT (no numpy), so the device plays them with a linear
 read and no gross aliasing below about C6. Frames are peak-normalised so the position knob does
-not change the level. The header defines the table (synth.c includes it once). Each table's
-character follows its name:
-  basic      sine -> triangle -> saw -> square, the classic shapes in a row
-  buzz       a saw with a resonant peak climbing the harmonics: nasal, then buzzing
-  crush      a sine quantised to fewer steps and sample-held: digital grit
-  drawbars   organ registrations, thin to full
-  fibonacci  partials at the Fibonacci numbers 1 2 3 5 8 13 21 34, one more each frame
-  fractal    a self-similar triangle (a triangle plus half-size copies at double rate, deeper each frame)
-  geometric  octave stacks 1 2 4 8 16 32 in a geometric series, from a near sine to equal octaves
-  primes     the fundamental plus partials at the primes, one more each frame
-  zap        a chirp inside the cycle, high to low, steeper each frame"""
+not change the level. The header defines the table (synth.c includes it once; synth.c WTNAME_N
+names them in this order). Each table's character follows its name:
+  shapes   sine -> triangle -> saw -> square, the classic shapes in a row
+  nasal    a saw with a resonant peak climbing the harmonics: nasal, then buzzing
+  grit     a sine quantised to fewer steps and sample-held: digital grit
+  vocal    a saw's harmonics through two formant peaks, the vowels a -> e -> i -> o -> u
+  spiral   partials at the Fibonacci numbers 1 2 3 5 8 13 21 34, one more each frame
+  fold     a sine through a wavefolder, its gain rising from 1x to 6x
+  octaves  octave stacks 1 2 4 8 16 32 in a geometric series, from a near sine to equal octaves
+  glass    the fundamental plus partials at the primes, one more each frame
+  chirp    a chirp inside the cycle, high to low, steeper each frame"""
 import math
 import sys
 
@@ -27,7 +27,7 @@ FRAMES = 16
 NHARM = 40
 TWO_PI = 2.0 * math.pi
 
-TABLES = ["basic", "buzz", "crush", "drawbars", "fibonacci", "fractal", "geometric", "primes", "zap"]
+TABLES = ["shapes", "nasal", "grit", "vocal", "spiral", "fold", "octaves", "glass", "chirp"]
 
 
 def from_harmonics(amp, phase=None):
@@ -93,7 +93,7 @@ def square_amp():
 
 
 # -------------------------------------------------------------------- the tables ---
-def t_basic(f):
+def t_shapes(f):
     """sine -> triangle -> saw -> square over the 16 frames"""
     sine = [1.0] + [0.0] * (NHARM - 1)
     shapes = [sine, tri_amp(), saw_amp(), square_amp()]
@@ -103,7 +103,7 @@ def t_basic(f):
     return from_harmonics([lerp(shapes[i0][k], shapes[i0 + 1][k], w) for k in range(NHARM)])
 
 
-def t_buzz(f):
+def t_nasal(f):
     """a saw whose spectrum carries a resonant peak, climbing from the 2nd to the 28th harmonic"""
     u = f / (FRAMES - 1)
     c = lerp(2.0, 28.0, u)
@@ -115,7 +115,7 @@ def t_buzz(f):
     return from_harmonics(amp)
 
 
-def t_crush(f):
+def t_grit(f):
     """a sine quantised to fewer and fewer steps, then sample-and-held: aliasing by design, tamed by the DFT"""
     levels = max(2, int(round(lerp(64, 2, f / (FRAMES - 1)))))
     hold = 1 + f // 2
@@ -127,26 +127,37 @@ def t_crush(f):
     return bandlimit(x)
 
 
-ORGAN = [[8, 0, 0, 0, 0, 0, 0, 0, 0], [8, 8, 0, 0, 0, 0, 0, 0, 0], [8, 8, 8, 0, 0, 0, 0, 0, 0], [8, 0, 8, 0, 0, 0, 8, 0, 0],
-         [8, 8, 8, 8, 0, 0, 0, 0, 0], [8, 6, 8, 6, 4, 0, 0, 0, 0], [8, 8, 8, 8, 8, 8, 8, 8, 8], [0, 0, 8, 8, 8, 8, 8, 8, 8]]
-ORGAN_RATIO = [1, 3, 2, 4, 6, 8, 10, 12, 16]        # 8' 5 1/3' 4' 2 2/3' 2' 1 3/5' 1 1/3' 1' relative to 8'
+# the vowels' first two formants (Hz, an adult voice's averages): a e i o u
+VOWELS = [(730.0, 1090.0), (530.0, 1840.0), (270.0, 2290.0), (570.0, 840.0), (300.0, 870.0)]
+VOCAL_F0 = 130.0                                     # the formants sit where they belong at C3
 
 
-def t_drawbars(f):
-    u = f / (FRAMES - 1) * (len(ORGAN) - 1)
-    i0 = min(int(u), len(ORGAN) - 2)
+def formant(hz, centre, bw):
+    """a resonance's weight: 1 at its centre, half at +-bw, falling as 1 / distance^2 past it (a
+    two-pole's power), so the peak stands out of the saw's slope"""
+    return 1.0 / (1.0 + ((hz - centre) / bw) ** 2)
+
+
+def t_vocal(f):
+    """a saw's harmonics weighted by two formant peaks that glide a -> e -> i -> o -> u over the frames
+    (log-frequency steps between the vowels); harmonic n sits at n x VOCAL_F0"""
+    u = f / (FRAMES - 1) * (len(VOWELS) - 1)
+    i0 = min(int(u), len(VOWELS) - 2)
     w = u - i0
-    amp = [0.0] * NHARM
-    for j, r in enumerate(ORGAN_RATIO):
-        if r - 1 < NHARM:
-            amp[r - 1] += lerp(ORGAN[i0][j], ORGAN[i0 + 1][j], w) / 8.0
+    f1 = math.exp(lerp(math.log(VOWELS[i0][0]), math.log(VOWELS[i0 + 1][0]), w))
+    f2 = math.exp(lerp(math.log(VOWELS[i0][1]), math.log(VOWELS[i0 + 1][1]), w))
+    amp = []
+    for k in range(NHARM):
+        n = k + 1
+        hz = n * VOCAL_F0
+        amp.append((1.0 / n) * (0.03 + formant(hz, f1, 110.0) + formant(hz, f2, 160.0)))
     return from_harmonics(amp)
 
 
 FIB = [1, 2, 3, 5, 8, 13, 21, 34]
 
 
-def t_fibonacci(f):
+def t_spiral(f):
     """partials at the Fibonacci numbers; frame f has the first 1 + f * 7 / 15 of them (the last fading in)"""
     cnt = 1.0 + f * 7.0 / (FRAMES - 1)
     amp = [0.0] * NHARM
@@ -157,26 +168,18 @@ def t_fibonacci(f):
     return from_harmonics(amp, [0.61 * j * j for j in range(NHARM)])
 
 
-def t_fractal(f):
-    """a triangle plus copies at twice the rate and a fraction of the size, deeper each frame"""
-    depth = 1.0 + f * 6.0 / (FRAMES - 1)
-    x = []
-    for i in range(N):
-        t = i / N
-        s = 0.0
-        lvl = 0
-        while lvl < 8:
-            g = min(1.0, max(0.0, depth - lvl))
-            if g <= 0.0:
-                break
-            tt = (t * (2 ** lvl)) % 1.0
-            s += g * (0.55 ** lvl) * (4.0 * abs(tt - 0.5) - 1.0)
-            lvl += 1
-        x.append(s)
-    return bandlimit(x)
+def fold(x):
+    """a triangle wavefolder: x inside +-1 passes, past it reflects back (and again), never leaving +-1"""
+    return 1.0 - 4.0 * abs(((x + 1.0) / 4.0) % 1.0 - 0.5)
 
 
-def t_geometric(f):
+def t_fold(f):
+    """a sine through the wavefolder, the gain into it rising from 1x (the sine itself) to 6x"""
+    gain = lerp(1.0, 6.0, f / (FRAMES - 1))
+    return bandlimit([fold(gain * math.sin(TWO_PI * i / N)) for i in range(N)])
+
+
+def t_octaves(f):
     """octaves 1 2 4 8 16 32 with amplitudes r^k: r from 0.08 (a sine with a whisper of its octave) to 1"""
     r = lerp(0.08, 1.0, f / (FRAMES - 1))
     amp = [0.0] * NHARM
@@ -190,7 +193,7 @@ def t_geometric(f):
 PRIMES = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37]
 
 
-def t_primes(f):
+def t_glass(f):
     """the fundamental plus partials at the primes, 0 .. 12 of them over the frames"""
     cnt = f * 12.0 / (FRAMES - 1)
     amp = [0.0] * NHARM
@@ -202,7 +205,7 @@ def t_primes(f):
     return from_harmonics(amp, [0.37 * k * k for k in range(NHARM)])
 
 
-def t_zap(f):
+def t_chirp(f):
     """a chirp inside each cycle: the phase runs fast at the start and slow at the end, steeper each frame"""
     k = lerp(0.0, 11.0, f / (FRAMES - 1))
     x = []
@@ -213,7 +216,7 @@ def t_zap(f):
     return bandlimit(x)
 
 
-GEN = [t_basic, t_buzz, t_crush, t_drawbars, t_fibonacci, t_fractal, t_geometric, t_primes, t_zap]
+GEN = [t_shapes, t_nasal, t_grit, t_vocal, t_spiral, t_fold, t_octaves, t_glass, t_chirp]
 
 
 def main():

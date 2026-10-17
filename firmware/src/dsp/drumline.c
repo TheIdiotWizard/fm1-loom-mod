@@ -1,24 +1,24 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* LOOM-8 drumline (drumline.h): the OP-XY's ten drum models, analytic, on NDVOICE voices.
+/* LOOM-8 drumline (drumline.h): the kit engine's ten drum models, analytic, on NDVOICE voices.
  *
  * Every sound is a few oscillators, a noise source and a filter or two, shaped by exponential
  * envelopes (env *= k a sample): no samples, no tables, so a kit costs nothing in flash and a voice
- * stays well under 80 instructions a sample. The kick, snare, hi-hat, clap, congas and tom descend
+ * stays well under 80 instructions a sample. The kick, snare, hat, clap, conga and tom descend
  * from X0X's 909 / 808 ports (drum909.c, drum808.c): the kick's pitch drop and click, the snare's two
  * detuned sines over band-passed noise, the hat's six square waves through high-passes, the clap's
- * four bursts; the shaker, tambourine, resonator and fm are our own.
+ * four bursts; the shaker, tambourine, string (Karplus-Strong) and fm are our own.
  *
  * Each key of the kit is a model instance: par[TP_DRUM(key, DP_MODEL)] picks the model, DP_K1..K4
  * are the model's own four knobs (drumline.h DM_KNOB, read at the hit), DP_RANDOM varies those four
  * a little differently every hit, DP_PAN and DP_VOLUME (-30..+20 dB) place it, DP_MODE says how it
- * plays (one-shot, gated, loop, choke groups). The track's par[TP_A..TP_R] are the drumline envelope
- * the notebook calls funk / attack / random / length: a delay before the hit, a fade-in, a
- * track-wide randomisation (the kick's pitch excepted) and a scale on every model's length.
+ * plays (one-shot, gated, loop, choke groups). The track's par[TP_A..TP_R] are the drumline envelope,
+ * lag / attack / random / length: a delay before the hit, a fade-in, a track-wide randomisation (the
+ * kick's pitch excepted) and a scale on every model's length.
  *
- * Levels: "Drumline operates with a balanced gain per key": every model is trimmed so that its
- * defaults at velocity 127 and volume 0 dB peak around -6 dBFS. The key's DP_VOLUME, DP_PAN and the
- * hit's velocity are applied here; the track's TP_SEND1/2/T scale the three send buffers (mono, pre
- * track fader, pre filter). The track's TP_LEVEL and TP_PAN (and the punch-in mute) belong to the
+ * Levels: a balanced gain per key: every model is trimmed (SPEC[].trim) so that its defaults at
+ * velocity 127 and volume 0 dB peak between -12 and -6 dBFS, the kick and snare on top (-6), the hats
+ * and the shaker under them. The key's DP_VOLUME, DP_PAN and the hit's velocity are applied here;
+ * the track's TP_SEND1/2/T scale the three send buffers (mono, pre track fader, pre filter). The track's TP_LEVEL and TP_PAN (and the punch-in mute) belong to the
  * engine layer, which applies them to all five buffers after drumline_render. Pan, volume and the
  * sends are re-read every SY_CHUNK samples and ramped across the chunk, so a knob turn is heard
  * without zipper noise. The dynamic filter (drumline_filter, FT_DYNAMIC) runs on the summed dry
@@ -34,55 +34,64 @@
 #define SR SY_SR
 #define CR SY_CHUNK                   /* pan / volume / sends re-read this often */
 #define SUB 32                        /* a voice renders this many at once into a 128 B stack buffer */
-#define RESO_LEN 512                  /* a resonator string, int16: 86 Hz at the longest */
-#define NRESO 2                       /* strings: resonator sounds past two steal the older's */
+#define RESO_LEN 512                  /* a string's delay line, int16: 86 Hz at the longest */
+#define NRESO 2                       /* strings: string sounds past two steal the older's line */
+_Static_assert((RESO_LEN & (RESO_LEN - 1)) == 0, "a string's line wraps by a mask");
 
-const char *const DM_NAME[NDM] = {"kick", "snare", "hi-hat", "clap", "shaker", "tambourine", "resonator",
-                                  "congas", "tom", "fm"};
+const char *const DM_NAME[NDM] = {"kick", "snare", "hat", "clap", "shaker", "tambourine", "string",
+                                  "conga", "tom", "fm"};
 const char *const DM_KNOB[NDM][4] = {
-    [DM_KICK] = {"pitch", "length", "punch", "tone"},    [DM_SNARE] = {"pitch", "length", "snare", "punch"},
-    [DM_HIHAT] = {"pitch", "length", "era", "tone"},     [DM_CLAP] = {"tone", "length", "spread", "contour"},
-    [DM_SHAKER] = {"color", "length", "attack", "onset"}, [DM_TAMB] = {"tone", "length", "shake", "ring"},
-    [DM_RESO] = {"pitch", "length", "tone", "strike"},   [DM_CONGA] = {"pitch", "length", "slap", "mush"},
+    [DM_KICK] = {"pitch", "length", "punch", "tone"},    [DM_SNARE] = {"pitch", "length", "wires", "punch"},
+    [DM_HIHAT] = {"pitch", "length", "metal", "focus"},  [DM_CLAP] = {"tone", "length", "spread", "tail"},
+    [DM_SHAKER] = {"color", "length", "swell", "return"}, [DM_TAMB] = {"tone", "length", "jingle", "hiss"},
+    [DM_RESO] = {"pitch", "length", "bright", "pluck"},  [DM_CONGA] = {"pitch", "length", "slide", "drive"},
     [DM_TOM] = {"pitch", "length", "sweep", "rate"},     [DM_FM] = {"pitch", "length", "mod", "feedback"},
 };
-/* the notebook's printed defaults (00..99) * 1.28 */
+/* the kit tuned to C (the pitch knobs, from start()'s mappings; measured by tests/host/drumline_test.c):
+ *   kick   82: 16 Hz x 2^(82/127 x 2.5)       = 49.0 Hz  G1      length 42: -60 dB at about 0.17 s
+ *   snare  79: 90 Hz x 2^(79/127 x 1.8)       = 195.6 Hz G3      wires 84 (was 64)
+ *   hat    93: the 808's six metal oscillators x 2^((93/127 - 0.73) x 2) = x 1.003 (+5 cents)
+ *   tom    70: 50 Hz x 2^(70/127 x 2.5)       = 130.0 Hz C3      (100: 195.7 Hz G3, the high tom)
+ *   conga 109: 90 Hz x 2^(109/127 x 1.8)      = 262.6 Hz C4
+ *   string 36: 60 Hz x 2^(36/127 x 4)         = 131.7 Hz C3      (a knob step is 38 cents here)
+ *   fm    103: 55 Hz x 2^(round(103/127 x 48) / 12) = 55 x 2^(39/12) = 523.3 Hz C5
+ * Each model's DM_DEFAULT is its key's row below (the tom: the low tom's); the tambourine has no key. */
 const uint8_t DM_DEFAULT[NDM][4] = {
-    [DM_KICK] = {100, 40, 64, 64},  [DM_SNARE] = {100, 40, 64, 64}, [DM_HIHAT] = {93, 23, 64, 88},
-    [DM_CLAP] = {100, 64, 64, 38},  [DM_SHAKER] = {31, 64, 64, 101}, [DM_TAMB] = {93, 23, 64, 88},
-    [DM_RESO] = {69, 54, 78, 122},  [DM_CONGA] = {100, 46, 64, 0},  [DM_TOM] = {101, 46, 38, 64},
-    [DM_FM] = {93, 100, 46, 15},
+    [DM_KICK] = {82, 42, 64, 64},   [DM_SNARE] = {79, 40, 84, 64},  [DM_HIHAT] = {93, 23, 64, 88},
+    [DM_CLAP] = {100, 64, 64, 38},  [DM_SHAKER] = {31, 64, 64, 101}, [DM_TAMB] = {80, 34, 72, 56},
+    [DM_RESO] = {36, 70, 70, 100},  [DM_CONGA] = {109, 46, 64, 0},  [DM_TOM] = {70, 46, 38, 64},
+    [DM_FM] = {103, 100, 46, 15},
 };
 const char *const PM_NAME[NPM] = {"one-shot", "gated", "loop", "choke 1", "choke 2", "choke 3"};
 const char *const DL_SOUND_NAME[DL_NSOUND] = {"kick", "snare", "hat", "open", "clap", "ltom", "htom", "conga",
-                                              "shaker", "tamb", "fm"};
+                                              "shaker", "string", "fm"};
 /* the default kit up the eleven black keys: kick, snare, closed hat, open hat (the same model with a long
- * length, choke group 1 with the closed), clap, low tom, high tom, congas, shaker, tambourine, fm. The
- * resonator has no key of its own: turn any key's model knob to it.
+ * length, choke group 1 with the closed), clap, low tom, high tom, conga, shaker, string, fm. The
+ * tambourine has no key of its own: turn any key's model knob to it.
  * DP_MODEL, DP_K1..K4, DP_RANDOM, DP_PAN, DP_VOLUME (76 = 0 dB), DP_MODE */
 #define VOL0 76
 const uint8_t DL_DEFAULT_KIT[DL_NSOUND][9] = {
-    {DM_KICK, 100, 40, 64, 64, 0, 64, VOL0, PM_ONESHOT},
-    {DM_SNARE, 100, 40, 64, 64, 0, 64, VOL0, PM_ONESHOT},
+    {DM_KICK, 82, 42, 64, 64, 0, 64, VOL0, PM_ONESHOT},
+    {DM_SNARE, 79, 40, 84, 64, 0, 64, VOL0, PM_ONESHOT},
     {DM_HIHAT, 93, 23, 64, 88, 0, 74, VOL0, PM_CHOKE1},
-    {DM_HIHAT, 93, 80, 64, 88, 0, 74, VOL0, PM_CHOKE1},
+    {DM_HIHAT, 93, 88, 64, 88, 0, 74, VOL0, PM_CHOKE1},
     {DM_CLAP, 100, 64, 64, 38, 0, 54, VOL0, PM_ONESHOT},
-    {DM_TOM, 60, 46, 38, 64, 0, 44, VOL0, PM_ONESHOT},
-    {DM_TOM, 101, 46, 38, 64, 0, 84, VOL0, PM_ONESHOT},
-    {DM_CONGA, 100, 46, 64, 0, 0, 54, VOL0, PM_ONESHOT},
+    {DM_TOM, 70, 46, 38, 64, 0, 44, VOL0, PM_ONESHOT},
+    {DM_TOM, 100, 46, 38, 64, 0, 84, VOL0, PM_ONESHOT},
+    {DM_CONGA, 109, 46, 64, 0, 0, 54, VOL0, PM_ONESHOT},
     {DM_SHAKER, 31, 64, 64, 101, 0, 80, VOL0, PM_ONESHOT},
-    {DM_TAMB, 93, 23, 64, 88, 0, 50, VOL0, PM_ONESHOT},
-    {DM_FM, 93, 100, 46, 15, 0, 64, VOL0, PM_ONESHOT},
+    {DM_RESO, 36, 70, 70, 100, 0, 50, VOL0, PM_ONESHOT},
+    {DM_FM, 103, 100, 46, 15, 0, 64, VOL0, PM_ONESHOT},
 };
 volatile uint8_t drumline_hitv[DL_NSOUND];
 
 /* a model's length range, seconds to -60 dB at the length knob's ends, and its trim (the balanced gain) */
 typedef struct { float dec_lo, dec_hi, trim; } dm_spec_t;
 static const dm_spec_t SPEC[NDM] = {
-    [DM_KICK] = {0.05f, 1.5f, 0.55f},   [DM_SNARE] = {0.06f, 1.0f, 0.4f},  [DM_HIHAT] = {0.02f, 2.5f, 2.2f},
-    [DM_CLAP] = {0.05f, 1.2f, 0.65f},    [DM_SHAKER] = {0.02f, 0.6f, 0.85f},  [DM_TAMB] = {0.03f, 1.5f, 1.5f},
-    [DM_RESO] = {0.05f, 2.5f, 0.5f},    [DM_CONGA] = {0.05f, 0.9f, 0.55f},  [DM_TOM] = {0.08f, 1.5f, 0.55f},
-    [DM_FM] = {0.03f, 1.5f, 0.6f},
+    [DM_KICK] = {0.05f, 1.5f, 0.7f},    [DM_SNARE] = {0.06f, 1.0f, 0.336f}, [DM_HIHAT] = {0.02f, 2.5f, 1.8f},
+    [DM_CLAP] = {0.05f, 1.2f, 0.6f},     [DM_SHAKER] = {0.02f, 0.6f, 0.67f},  [DM_TAMB] = {0.03f, 1.5f, 1.5f},
+    [DM_RESO] = {0.05f, 2.5f, 0.585f},  [DM_CONGA] = {0.05f, 0.9f, 0.55f},  [DM_TOM] = {0.08f, 1.5f, 0.47f},
+    [DM_FM] = {0.03f, 1.5f, 0.535f},
 };
 /* the 808's six metal oscillators (sc808: 205.3, 304.4, 369.6, 522.7, 540, 800 Hz) and the tambourine's
  * jingles: six inharmonic partials of a small brass disc */
@@ -90,13 +99,13 @@ static const float METAL_HZ[6] = {205.3f, 304.4f, 369.6f, 522.7f, 540.0f, 800.0f
 static const float JINGLE_HZ[6] = {4120.0f, 5230.0f, 6010.0f, 7340.0f, 8560.0f, 9870.0f};
 
 typedef struct {
-    uint8_t on, sound, model, line;   /* line: the resonator's string, 0..NRESO-1 */
+    uint8_t on, sound, model, line;   /* line: the string model's delay line, 0..NRESO-1 */
     uint8_t mode, held, hvel, hflags; /* the play mode; the key is still down; the hit, for a loop's restart */
     int8_t hpitch;
     uint8_t pad[3];
     uint32_t age, rng;
     int32_t cnt, bursts;              /* the clap / shaker: samples to the next burst, bursts left */
-    int32_t wait;                     /* funk: samples of silence before the hit starts */
+    int32_t wait;                     /* lag: samples of silence before the hit starts */
     float att, attk;                  /* attack: the fade-in gain and its step a sample */
     float env, k;                     /* the amplitude envelope and its per-sample multiplier */
     float env2, k2;                   /* a second envelope: click, body, burst, attack, FM index */
@@ -108,7 +117,7 @@ typedef struct {
     float gl, gr, gs1, gs2, gst;      /* gains now: left, right, the three sends (set each chunk) */
     float dgl, dgr;                   /* left and right ramp toward the chunk's targets */
     uint32_t mp[6], mi[6];            /* the hat's / tambourine's six square phases and increments */
-    int32_t len, w;                   /* the resonator: string length, write position */
+    int32_t len, w;                   /* the string: its length, write position */
     float fr, lp, fb, damp, pk;       /* its fractional length, loop filter, feedback, damping, peak */
 } dvoice_t;
 
@@ -250,9 +259,9 @@ static float knob(const uint8_t *p, int i, float amt, uint32_t *rng)
     return x;
 }
 
-/* the hit itself, on a voice already chosen: with_funk = the envelope's delay applies (not on a loop's
+/* the hit itself, on a voice already chosen: with_lag = the envelope's delay applies (not on a loop's
  * restart) */
-static void start(drumline_t *d, dvoice_t *v, int sound, int vel, int pitch_semi, int flags, int with_funk)
+static void start(drumline_t *d, dvoice_t *v, int sound, int vel, int pitch_semi, int flags, int with_lag)
 {
     const uint8_t *par = d->par, *p = par + TP_DRUM(sound, 0);
     const dm_spec_t *sp;
@@ -321,8 +330,8 @@ static void start(drumline_t *d, dvoice_t *v, int sound, int vel, int pitch_semi
     v->env2 = 1.0f;
     v->k2 = v->k;
     v->g = (float)vel * (1.0f / 127.0f) * sp->trim;   /* the velocity: a gain; the chunk adds volume / pan */
-    /* the track envelope: funk = the start waits 0..60 ms, attack = a fade-in of 0..100 ms */
-    v->wait = with_funk ? (int32_t)((float)par[TP_A] * (0.060f / 127.0f) * SR) : 0;
+    /* the track envelope: lag = the start waits 0..60 ms, attack = a fade-in of 0..100 ms */
+    v->wait = with_lag ? (int32_t)((float)par[TP_A] * (0.060f / 127.0f) * SR) : 0;
     {
         float at = (float)par[TP_D] * (0.100f / 127.0f) * SR;
         v->att = at < 1.0f ? 1.0f : 0.0f;
@@ -342,7 +351,7 @@ static void start(drumline_t *d, dvoice_t *v, int sound, int vel, int pitch_semi
         v->b = 0.6f * k3;                             /* click level */
         v->c1 = lp_c(200.0f * fm_exp2f(6.0f * k4));
         break;
-    case DM_SNARE:                                    /* two sines (1 : 1.58) over band-passed noise: snare =
+    case DM_SNARE:                                    /* two sines (1 : 1.58) over band-passed noise: wires =
                                                        * the wires' share, punch = the drop and the drive */
         hz = 90.0f * fm_exp2f(k1 * 1.8f + semi * (1.0f / 12.0f));
         v->inc2 = hz * 1.58f / SR;
@@ -354,8 +363,8 @@ static void start(drumline_t *d, dvoice_t *v, int sound, int vel, int pitch_semi
         v->b = 0.15f + 1.1f * k3;                     /* the wires */
         reso_set(v, 2000.0f, 2500.0f);
         break;
-    case DM_HIHAT: {                                  /* era: noise (left) to the six squares and their
-                                                       * ring-mod (right); tone: the high-passed bell (left)
+    case DM_HIHAT: {                                  /* metal: noise (left) to the six squares and their
+                                                       * ring-mod (right); focus: the high-passed shimmer (left)
                                                        * to a bandpass focus (right) */
         float ratio = fm_exp2f((k1 - 0.73f) * 2.0f + semi * (1.0f / 12.0f));
         for (i = 0; i < 6; i++) {
@@ -371,7 +380,7 @@ static void start(drumline_t *d, dvoice_t *v, int sound, int vel, int pitch_semi
         break;
     }
     case DM_CLAP:                                     /* four bursts, spread = their spacing and their
-                                                       * length, then a tail whose level is the contour */
+                                                       * length, then a tail (its level and its band) */
         hz = 400.0f * fm_exp2f(k1 * 2.3f + semi * (1.0f / 12.0f));
         v->k2 = dec_k(0.005f + 0.015f * k3);
         v->cnt = (int32_t)((0.005f + 0.012f * k3) * SR);
@@ -381,16 +390,16 @@ static void start(drumline_t *d, dvoice_t *v, int sound, int vel, int pitch_semi
         reso_set(v, hz, 900.0f + 600.0f * k4);
         break;
     case DM_SHAKER:                                   /* noise through a resonator (color), a fade-in
-                                                       * (attack), then the shake back (onset = how soon) */
+                                                       * (swell), then the shake back (return = how soon) */
         hz = 2000.0f * fm_exp2f(k1 * 2.2f + semi * (1.0f / 12.0f));
-        v->k2 = dec_k(0.002f + 0.06f * k3);           /* the attack: 2 .. 60 ms */
+        v->k2 = dec_k(0.002f + 0.06f * k3);           /* the swell: 2 .. 60 ms */
         v->cnt = (int32_t)(0.2f * fm_exp2f(-3.0f * k4) * SR);
         v->bursts = 1;
         reso_set(v, hz, 2500.0f - 1500.0f * k1);
         v->g *= 1.0f + 0.5f * k1;                     /* a narrow band is quieter in RMS, peakier */
         break;
-    case DM_TAMB: {                                   /* jingles: six high partials (shake = how long they
-                                                       * ring) and a high-passed noise (ring = its share and
+    case DM_TAMB: {                                   /* jingles: six high partials (jingle = how long they
+                                                       * ring, their share) and a high-passed noise (hiss = its share and
                                                        * its ring-out); tone = brightness */
         float ratio = fm_exp2f((k1 - 0.73f) * 0.8f + semi * (1.0f / 12.0f));
         for (i = 0; i < 6; i++) {
@@ -404,8 +413,8 @@ static void start(drumline_t *d, dvoice_t *v, int sound, int vel, int pitch_semi
         v->b = 0.3f + 0.7f * k3;                      /* the partials' share */
         break;
     }
-    case DM_RESO: {                                   /* a noise burst into a Karplus-Strong string: tone =
-                                                       * the loop's damping, strike = the burst's length,
+    case DM_RESO: {                                   /* a noise burst into a Karplus-Strong string: bright =
+                                                       * the loop's damping, pluck = the burst's length,
                                                        * level and brightness */
         float len;
         hz = 60.0f * fm_exp2f(k1 * 4.0f + semi * (1.0f / 12.0f));
@@ -419,15 +428,15 @@ static void start(drumline_t *d, dvoice_t *v, int sound, int vel, int pitch_semi
         v->fb = fm_exp2f(-9.966f / (dec * hz));       /* -60 dB after dec seconds of round trips */
         if (v->fb > 0.999f)
             v->fb = 0.999f;
-        v->damp = 0.15f + 0.85f * k3;                 /* the loop's low-pass: tone = brightness */
+        v->damp = 0.15f + 0.85f * k3;                 /* the loop's low-pass: bright */
         v->k2 = dec_k(fm_maxf(0.004f, (1.5f + 3.0f * k4) * len / SR));
         v->a = 0.5f + 0.5f * k4;                      /* the burst's level */
         v->c1 = lp_c(2000.0f * fm_exp2f(3.0f * k4));  /* and its brightness */
         v->pk = 1.0f;
         break;
     }
-    case DM_CONGA:                                    /* a pitch slide (slap: how far and how fast) with a
-                                                       * second partial, through a soft clip (mush) */
+    case DM_CONGA:                                    /* a pitch slide (slide: how far and how fast) with a
+                                                       * second partial, through a soft clip (drive) */
         hz = 90.0f * fm_exp2f(k1 * 1.8f + semi * (1.0f / 12.0f));
         v->inc2 = hz * 2.4f / SR;
         v->pda = 0.1f + 1.4f * k3;
@@ -633,24 +642,34 @@ static void render_voice(dvoice_t *v, int16_t *line, float *t, int m)
     case DM_RESO: {
         int32_t w = v->w, len = v->len;
         float fr = v->fr, lp = v->lp, fb = v->fb, damp = v->damp, pk = 0.0f, bl = v->a, c = v->c1, f1 = v->f1;
-        for (i = 0; i < m; i++) {
-            int32_t r0 = w - len, r1 = r0 - 1;
-            float a, b, y, x;
-            if (r0 < 0) r0 += RESO_LEN;
-            if (r1 < 0) r1 += RESO_LEN;
-            a = (float)line[r0];
-            b = (float)line[r1];
-            y = (a + (b - a) * fr) * (1.0f / 16384.0f);
-            lp += damp * (y - lp);                    /* the loop's low-pass: the string darkens */
-            f1 += c * (noise(&rng) - f1);             /* the strike: a burst, bright or soft */
-            x = f1 * env2 * bl + lp * fb;
-            x *= 16384.0f;
-            line[w] = (int16_t)(x > 32767.0f ? 32767.0f : x < -32767.0f ? -32767.0f : x);
-            if (++w >= RESO_LEN)
-                w = 0;
-            t[i] = y * 1.4f * g;
-            pk = fm_maxf(pk, fm_fabsf(y));
-            env2 *= k2;
+        if (env2 > 1e-5f) {                           /* the strike still sounding */
+            for (i = 0; i < m; i++) {
+                int32_t r0 = (w - len) & (RESO_LEN - 1), r1 = (r0 - 1) & (RESO_LEN - 1);
+                float a = (float)line[r0], b = (float)line[r1], y, x;
+                y = (a + (b - a) * fr) * (1.0f / 16384.0f);
+                lp += damp * (y - lp);                /* the loop's low-pass: the string darkens */
+                f1 += c * (noise(&rng) - f1);         /* the strike: a burst, bright or soft */
+                x = (f1 * env2 * bl + lp * fb) * 16384.0f;
+                line[w] = (int16_t)(x > 32767.0f ? 32767.0f : x < -32767.0f ? -32767.0f : x);
+                w = (w + 1) & (RESO_LEN - 1);
+                t[i] = y * 1.4f * g;
+                pk = fm_maxf(pk, fm_fabsf(y));
+                env2 *= k2;
+            }
+        } else {                                      /* past -100 dB: the string rings on its own. The
+                                                       * line holds |values| <= 32767, so |y| and the
+                                                       * low-pass stay under 2 and lp * fb * 16384 fits an
+                                                       * int16 without the clamp */
+            for (i = 0; i < m; i++) {
+                int32_t r0 = (w - len) & (RESO_LEN - 1), r1 = (r0 - 1) & (RESO_LEN - 1);
+                float a = (float)line[r0], b = (float)line[r1], y;
+                y = (a + (b - a) * fr) * (1.0f / 16384.0f);
+                lp += damp * (y - lp);
+                line[w] = (int16_t)(lp * fb * 16384.0f);
+                w = (w + 1) & (RESO_LEN - 1);
+                t[i] = y * 1.4f * g;
+                pk = fm_maxf(pk, fm_fabsf(y));
+            }
         }
         v->w = w;
         v->lp = fm_flush(lp);
@@ -784,7 +803,7 @@ void drumline_filter(drumline_t *d, int type, int locut, int comp, int drive, in
     f->hi_on = (uint8_t)(hicut < 127);
     f->drv_on = (uint8_t)(drive > 0);
     /* low cut 20 Hz .. 2 kHz, hi cut 300 Hz .. 20 kHz; each one-pole's cutoff is raised a little so that
-     * the pair in series is -3 dB at the printed frequency */
+     * the pair in series is -3 dB at the frequency shown */
     f->lc = lp_c(20.0f * fm_exp2f((float)locut * (6.64f / 127.0f)) * 0.64f);
     f->hc = lp_c(300.0f * fm_exp2f((float)hicut * (6.06f / 127.0f)) * 1.55f);
     /* the compressor: the threshold falls to -24 dB, the ratio rises to 10:1, with make-up gain */
@@ -891,7 +910,7 @@ void drumline_render(drumline_t *d, float *l, float *r, float *s1, float *s2, fl
                 int from = 0;
                 if (!v->on)
                     continue;
-                if (v->wait > 0) {                    /* funk: the hit has not started yet */
+                if (v->wait > 0) {                    /* lag: the hit has not started yet */
                     if (v->wait >= mm) {
                         v->wait -= mm;
                         continue;

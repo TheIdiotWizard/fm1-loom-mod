@@ -2238,7 +2238,7 @@ static void pic_drumline(int32_t x0, int32_t y0, int32_t w, int32_t h, const uin
     (void)f;
     for (int k = 0; k < DL_NSOUND; k++) {
         int32_t x = x0 + (k % 6) * pw + 2, y = y0 + (k / 6) * ph + 2, hit = eng_drum_hit[k];
-        static const char *const PAD[NDM] = {"kick", "snare", "hat", "clap", "shakr", "tamb", "reso", "conga", "tom", "fm"};
+        static const char *const PAD[NDM] = {"kick", "snare", "hat", "clap", "shakr", "tamb", "strng", "conga", "tom", "fm"};
         const char *nm = PAD[p[TP_DRUM(k, DP_MODEL)] % NDM];
         char t[4];
         cv_round(x, y, pw - 4, ph - 4, 4, hit > 40 ? K_NOW : k == ui.dsound ? K_PANEL2 : K_PANEL);

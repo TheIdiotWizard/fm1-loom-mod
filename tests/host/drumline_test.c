@@ -3,7 +3,7 @@
  * -20..0 dBFS at volume 0 dB and velocity 127, falls to silence within its length; every model with
  * its four knobs at their ends stays finite and in range; the play modes (gated stops on release,
  * loop repeats while held, choke groups cut); the key's random and the track's random vary hits;
- * the track envelope's funk delays the onset, attack fades in, length scales; the dynamic filter
+ * the track envelope's lag delays the onset, attack fades in, length scales; the dynamic filter
  * bounds its output and bypasses on the other types; volume in dB, pan, sends; eight voices at once
  * stay bounded; and the cost in instructions a sample (macOS: proc_pid_rusage). Each key's hit is
  * written to build/host/drum_<name>.wav for inspection (nothing here plays audio).
@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#include <math.h>
 #include "drumline.h"
 #include "synth.h"
 #include "fastmath.h"
@@ -44,7 +45,7 @@ static uint8_t dbuf[DRUMLINE_BYTES] __attribute__((aligned(8)));
 static drumline_t *dl = (drumline_t *)dbuf;
 static float L[BLK], R[BLK], S1[BLK], S2[BLK], ST[BLK];
 
-/* the project's neutral drum envelope: funk 0, attack 0, random 0, length 64 (1x) */
+/* the project's neutral drum envelope: lag 0, attack 0, random 0, length 64 (1x) */
 static void kit_default(void)
 {
     int s, k;
@@ -119,12 +120,13 @@ static void wav_close(FILE *f)
 }
 
 /* one hit of a key: its peak, the time it falls under -60 dB of the peak, the time it stops, the first
- * sample above -40 dBFS */
-typedef struct { float peak, t60, tend, t_on; } hit_t;
+ * sample above -40 dBFS, the RMS of the mono mix (as the WAV) from the start to the -60 dB point */
+typedef struct { float peak, t60, tend, t_on, rms; } hit_t;
 static hit_t one_hit(int sound, int vel, int pitch, int sg, int lt, FILE *wav)
 {
     int b, i, nb = SR * 12 / BLK, last_loud = 0, first = -1;
     float pk = 0.0f;
+    double sq = 0.0, sq_loud = 0.0;
     hit_t h;
     drumline_init(dl, par);
     drumline_hit(dl, sound, vel, pitch, sg, lt);
@@ -133,11 +135,14 @@ static hit_t one_hit(int sound, int vel, int pitch, int sg, int lt, FILE *wav)
         render();
         wav_put(wav, L, R, BLK);
         for (i = 0; i < BLK; i++) {
-            float a = fm_maxf(fm_fabsf(L[i]), fm_fabsf(R[i]));
+            float a = fm_maxf(fm_fabsf(L[i]), fm_fabsf(R[i])), mono = (L[i] + R[i]) * 0.7071f;
+            sq += (double)(mono * mono);
             if (a > pk)
                 pk = a;
-            if (a > pk * 0.001f)
+            if (a > pk * 0.001f) {
                 last_loud = b * BLK + i;
+                sq_loud = sq;
+            }
             if (first < 0 && a > 0.01f)
                 first = b * BLK + i;
         }
@@ -149,9 +154,43 @@ static hit_t one_hit(int sound, int vel, int pitch, int sg, int lt, FILE *wav)
     h.peak = pk;
     h.t60 = (float)last_loud / (float)SR;
     h.t_on = first < 0 ? -1.0f : (float)first / (float)SR;
+    h.rms = (float)sqrt(sq_loud / (double)(last_loud + 1));
     return h;
 }
 static float dbfs(float x) { return 20.0f * fm_log2f(x + 1e-9f) * 0.30103f; }
+
+/* a key's pitch: its hit alone (the mono mix) from t0 to t1 seconds, through a Hann window, and the
+ * strongest frequency within -4 .. +4 semitones of the target, found in steps of a cent (a DFT at each:
+ * double, this is the host) */
+#define PMAX (SR / 2)
+static float pbuf[PMAX];
+static float pitch_of(int sound, float t0, float t1, float target)
+{
+    int b, i, n = 0, i0 = (int)(t0 * SR), i1 = (int)(t1 * SR), c, best = 0;
+    double bestm = -1.0;
+    drumline_init(dl, par);
+    drumline_hit(dl, sound, 127, 0, 0, 0);
+    for (b = 0; b * BLK < i1 && b * BLK < PMAX; b++) {
+        render();
+        for (i = 0; i < BLK; i++, n++)
+            if (n >= i0 && n < i1)
+                pbuf[n - i0] = (L[i] + R[i]) * 0.7071f;
+    }
+    n = i1 - i0;
+    for (c = -400; c <= 400; c++) {
+        double f = (double)target * pow(2.0, (double)c / 1200.0), re = 0.0, im = 0.0, w = 6.283185307179586 * f / SR;
+        for (i = 0; i < n; i++) {
+            double h = 0.5 - 0.5 * cos(6.283185307179586 * (double)i / (double)(n - 1)), x = (double)pbuf[i] * h;
+            re += x * cos(w * (double)i);
+            im -= x * sin(w * (double)i);
+        }
+        if (re * re + im * im > bestm) {
+            bestm = re * re + im * im;
+            best = c;
+        }
+    }
+    return target * (float)pow(2.0, (double)best / 1200.0);
+}
 
 int main(void)
 {
@@ -160,23 +199,109 @@ int main(void)
     char name[96];
     kit_default();
 
-    printf("-- the default kit, volume 0 dB, velocity 127 (peak dBFS, -60 dB at, ends at)\n");
-    for (s = 0; s < DL_NSOUND; s++) {
-        FILE *w;
-        float db;
-        snprintf(name, sizeof name, "build/host/drum_%s.wav", DL_SOUND_NAME[s]);
-        wav_open(&w, name);
-        h = one_hit(s, 127, 0, 0, 0, w);
-        wav_close(w);
-        db = dbfs(h.peak);
-        snprintf(name, sizeof name, "  %-7s %-10s %6.1f dBFS  %5.2f s  %5.2f s", DL_SOUND_NAME[s],
-                 DM_NAME[DL_DEFAULT_KIT[s][0]], (double)db, (double)h.t60, (double)h.tend);
-        check(name, !nan_seen && db >= -20.0f && db <= 0.0f && h.tend > 0.0f && h.t60 < 4.0f);
+    printf("-- the default kit, volume 0 dB, velocity 127 (peak dBFS, RMS dBFS to -60 dB, -60 dB at, ends at)\n");
+    {
+        float kpk[DL_NSOUND];
+        for (s = 0; s < DL_NSOUND; s++) {
+            FILE *w;
+            float db;
+            snprintf(name, sizeof name, "build/host/drum_%s.wav", DL_SOUND_NAME[s]);
+            wav_open(&w, name);
+            h = one_hit(s, 127, 0, 0, 0, w);
+            wav_close(w);
+            db = dbfs(h.peak);
+            kpk[s] = db;
+            snprintf(name, sizeof name, "  %-7s %-7s %6.1f dBFS %6.1f rms  %5.2f s  %5.2f s", DL_SOUND_NAME[s],
+                     DM_NAME[DL_DEFAULT_KIT[s][0]], (double)db, (double)dbfs(h.rms), (double)h.t60, (double)h.tend);
+            check(name, !nan_seen && db >= -20.0f && db <= 0.0f && h.tend > 0.0f && h.t60 < 4.0f);
+        }
+        {
+            float top = fm_minf(kpk[0], kpk[1]), rest = -99.0f;
+            for (s = 2; s < DL_NSOUND; s++)
+                rest = fm_maxf(rest, kpk[s]);
+            snprintf(name, sizeof name, "  balanced: kick %.1f, snare %.1f, the rest up to %.1f, hats %.1f / %.1f dBFS",
+                     (double)kpk[0], (double)kpk[1], (double)rest, (double)kpk[2], (double)kpk[3]);
+            check(name, top >= rest - 0.5f && kpk[2] <= top - 2.0f && kpk[3] <= top - 2.0f &&
+                        fm_fabsf(kpk[0] - kpk[1]) < 2.0f);
+        }
+        snprintf(name, sizeof name, "  the kick's length: -60 dB at %.2f s (0.15 .. 0.22)", (double)one_hit(0, 127, 0, 0, 0, 0).t60);
+        check(name, one_hit(0, 127, 0, 0, 0, 0).t60 > 0.15f && one_hit(0, 127, 0, 0, 0, 0).t60 < 0.22f);
+        check("the open hat rings longer than the closed (x3)", one_hit(3, 127, 0, 0, 0, 0).t60 > 3.0f * one_hit(2, 127, 0, 0, 0, 0).t60);
     }
     check("no NaN anywhere", !nan_seen);
     check("the default kit's hats share choke group 1",
           DL_DEFAULT_KIT[2][DP_MODE] == PM_CHOKE1 && DL_DEFAULT_KIT[3][DP_MODE] == PM_CHOKE1 &&
           DL_DEFAULT_KIT[2][DP_MODEL] == DM_HIHAT && DL_DEFAULT_KIT[3][DP_MODEL] == DM_HIHAT);
+    check("the kit's key 10 is a string, the tambourine has no key",
+          DL_DEFAULT_KIT[9][DP_MODEL] == DM_RESO && !strcmp(DL_SOUND_NAME[9], "string"));
+
+    printf("-- the kit is tuned to C: each pitched key's strongest frequency near its note (within 25 cents)\n");
+    {
+        /* the snare's body is gone in 70 ms, too short to measure under its wires: it is measured with its
+         * pitch as in the kit, the length at 127 and the wires at 0 (the pitch does not depend on them) */
+        static const struct { int key; float t0, t1, hz; const char *note; } PT[] = {
+            {0, 0.040f, 0.160f, 49.00f, "G1"},  {1, 0.030f, 0.300f, 196.00f, "G3"}, {5, 0.060f, 0.200f, 130.81f, "C3"},
+            {6, 0.060f, 0.200f, 196.00f, "G3"}, {7, 0.030f, 0.120f, 261.63f, "C4"}, {9, 0.050f, 0.300f, 130.81f, "C3"},
+            {10, 0.250f, 0.450f, 523.25f, "C5"}};
+        for (i = 0; i < (int)(sizeof PT / sizeof PT[0]); i++) {
+            float hz;
+            if (PT[i].key == 1) {
+                par[TP_DRUM(1, DP_K2)] = 127;
+                par[TP_DRUM(1, DP_K3)] = 0;
+            }
+            hz = pitch_of(PT[i].key, PT[i].t0, PT[i].t1, PT[i].hz);
+            par[TP_DRUM(1, DP_K2)] = DL_DEFAULT_KIT[1][DP_K2];
+            par[TP_DRUM(1, DP_K3)] = DL_DEFAULT_KIT[1][DP_K3];
+            float cents = 1200.0f * fm_log2f(hz / PT[i].hz);
+            snprintf(name, sizeof name, "  %-7s %-3s %7.2f Hz measured (%7.2f Hz, %+5.1f cents)", DL_SOUND_NAME[PT[i].key],
+                     PT[i].note, (double)hz, (double)PT[i].hz, (double)cents);
+            check(name, fm_fabsf(cents) <= 25.0f);
+        }
+        /* the hats: the 808's six metal oscillators times 2^((k1 - 0.73) x 2), so k1 = 93 is the 808's own set */
+        {
+            float ratio = fm_exp2f(((float)DL_DEFAULT_KIT[2][DP_K1] / 127.0f - 0.73f) * 2.0f);
+            snprintf(name, sizeof name, "  the hats' metal at x %.4f the 808's (%+.1f cents; 540 Hz -> %.1f Hz)", (double)ratio,
+                     (double)(1200.0f * fm_log2f(ratio)), (double)(540.0f * ratio));
+            check(name, fm_fabsf(1200.0f * fm_log2f(ratio)) < 10.0f && DL_DEFAULT_KIT[2][DP_K1] == DL_DEFAULT_KIT[3][DP_K1]);
+        }
+    }
+
+    printf("-- a short beat of the default kit (build/host/drum_beat.wav: two bars of 16ths at 120 BPM)\n");
+    {
+        /* per step, the keys that hit: bit k = key k */
+        static const uint16_t BEAT[32] = {
+            0x001 | 0x004 | 0x200, 0x100, 0x004 | 0x100, 0x100, 0x002 | 0x004 | 0x100, 0x100, 0x004 | 0x100, 0x080,
+            0x001 | 0x004, 0x100, 0x001 | 0x004 | 0x100, 0x400, 0x002 | 0x010 | 0x004, 0x100, 0x008, 0x080,
+            0x001 | 0x004, 0x100, 0x004 | 0x100, 0x100, 0x002 | 0x004, 0x100, 0x004 | 0x100, 0x200,
+            0x001 | 0x004, 0x100, 0x001 | 0x040, 0x040, 0x002 | 0x010 | 0x020, 0x020, 0x008 | 0x020, 0x080};
+        int step, nstep = SR * 60 / 120 / 4 / BLK, b, j;
+        FILE *w;
+        float pk = 0.0f;
+        double sq = 0.0;
+        long nsamp = 0;
+        wav_open(&w, "build/host/drum_beat.wav");
+        drumline_init(dl, par);
+        for (step = 0; step < 32 + 8; step++) {
+            if (step < 32)
+                for (j = 0; j < DL_NSOUND; j++)
+                    if (BEAT[step] >> j & 1)
+                        drumline_hit(dl, j, j == 8 ? 70 : (j == 2 && (step & 3)) ? 90 : 127, 0, 0, 0);
+            for (b = 0; b < nstep; b++) {
+                render();
+                wav_put(w, L, R, BLK);
+                for (i = 0; i < BLK; i++) {
+                    float mono = (L[i] + R[i]) * 0.7071f;
+                    pk = fm_maxf(pk, fm_maxf(fm_fabsf(L[i]), fm_fabsf(R[i])));
+                    sq += (double)(mono * mono);
+                    nsamp++;
+                }
+            }
+        }
+        wav_close(w);
+        snprintf(name, sizeof name, "  the beat: peak %.1f dBFS, RMS %.1f dBFS, under 0 dBFS", (double)dbfs(pk),
+                 (double)dbfs((float)sqrt(sq / (double)nsamp)));
+        check(name, pk < 1.0f && !nan_seen);
+    }
 
     printf("-- every model: its defaults, then each knob at 0 and 127 (finite, -20..0 dBFS at the defaults, in range\n");
     printf("   at the ends; length 0 ends within 1.5 s, 127 within 12 s)\n");
@@ -430,7 +555,7 @@ int main(void)
                 p1 = fm_maxf(p1, fm_fabsf((float)(zc1 - zc0)));
             }
             snprintf(name, sizeof name, "  track random: the kick's pitch holds (zero crossings %d, off by at most %.0f)", zc0, (double)p1);
-            check(name, zc0 > 50 && p1 <= 2.0f);
+            check(name, zc0 > 35 && p1 <= 2.0f);
             par[TP_S] = 0;
             par[TP_DRUM(0, DP_K3)] = DL_DEFAULT_KIT[0][DP_K3];
             par[TP_DRUM(0, DP_K2)] = DL_DEFAULT_KIT[0][DP_K2];
@@ -438,7 +563,7 @@ int main(void)
         (void)t3;
     }
 
-    printf("-- the track envelope: funk, attack, length\n");
+    printf("-- the track envelope: lag, attack, length\n");
     {
         float on0, on1, t0;
         h = one_hit(1, 127, 0, 0, 0, 0);
@@ -447,7 +572,7 @@ int main(void)
         par[TP_A] = 127;
         h2 = one_hit(1, 127, 0, 0, 0, 0);
         on1 = h2.t_on;
-        snprintf(name, sizeof name, "  funk 127: the snare starts %.1f ms later (55..65)", (double)((on1 - on0) * 1000.0f));
+        snprintf(name, sizeof name, "  lag 127: the snare starts %.1f ms later (55..65)", (double)((on1 - on0) * 1000.0f));
         check(name, on1 - on0 > 0.055f && on1 - on0 < 0.065f && h2.peak > 0.1f);
         par[TP_A] = 0;
         {
@@ -583,7 +708,7 @@ int main(void)
             render();
         check("drumline_choke silences everything within 60 ms", !drumline_sounding(dl));
         check("drumline_hitv shows the last hit", drumline_hitv[0] == 255);
-        /* two resonators share the two strings; a third takes the older's */
+        /* two string keys share the two delay lines; a third takes the older's */
         for (s = 0; s < 3; s++)
             key_model(s, DM_RESO);
         drumline_init(dl, par);
@@ -595,7 +720,7 @@ int main(void)
         lpk = (float)drumline_sounding(dl);
         for (b = 0; b < 200; b++)
             render();
-        check("three resonators: finite, the third steals a string", !nan_seen && lpk > 0.0f);
+        check("three strings: finite, the third steals a delay line", !nan_seen && lpk > 0.0f);
         kit_default();
     }
 
