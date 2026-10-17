@@ -12,7 +12,7 @@
 #ifndef XY_VERSION                      /* a release build passes its own (tools/build.py --release) */
 #define XY_VERSION "DEV"
 #endif
-#define PROJ_MAGIC 0x31595858u          /* "XXY1" */
+#define PROJ_MAGIC 0x384D4F4Cu          /* "LOM8" (was "XXY1": XY-1's projects start fresh) */
 #define PROJ_FORMAT 1u
 #define NPROJ 4                         /* project slots in flash */
 #define NUSER_PRESETS 16

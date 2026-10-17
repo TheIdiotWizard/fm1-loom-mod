@@ -19,14 +19,14 @@ typedef struct {
 } theme_t;
 /* the themes (Setup: THEME; the project keeps it in rsv[1]); the first is the default */
 static const theme_t THEMES[] = {
-    {"blueprint", RGB(16, 48, 104), RGB(24, 62, 128), RGB(40, 84, 156), RGB(60, 100, 170), RGB(110, 140, 200),
-     RGB(170, 195, 235), RGB(240, 246, 255), RGB(130, 160, 215), RGB(255, 110, 90), RGB(255, 255, 255),
-     {RGB(255, 150, 190), RGB(120, 240, 230), RGB(255, 200, 80), RGB(180, 240, 120), RGB(255, 170, 110),
-      RGB(210, 180, 255), RGB(240, 120, 120), RGB(200, 230, 200)}, 7, 11},
     {"tape deck", RGB(24, 18, 14), RGB(44, 34, 26), RGB(70, 56, 42), RGB(74, 60, 46), RGB(120, 100, 80),
      RGB(190, 170, 140), RGB(244, 230, 200), RGB(150, 130, 104), RGB(230, 70, 40), RGB(240, 220, 180),
      {RGB(230, 180, 50), RGB(214, 96, 48), RGB(160, 170, 70), RGB(70, 170, 160), RGB(110, 150, 200), RGB(180, 110, 150),
       RGB(210, 170, 120), RGB(150, 190, 150)}, 6, 9},
+    {"blueprint", RGB(16, 48, 104), RGB(24, 62, 128), RGB(40, 84, 156), RGB(60, 100, 170), RGB(110, 140, 200),
+     RGB(170, 195, 235), RGB(240, 246, 255), RGB(130, 160, 215), RGB(255, 110, 90), RGB(255, 255, 255),
+     {RGB(255, 150, 190), RGB(120, 240, 230), RGB(255, 200, 80), RGB(180, 240, 120), RGB(255, 170, 110),
+      RGB(210, 180, 255), RGB(240, 120, 120), RGB(200, 230, 200)}, 7, 11},
 };
 #define NTHEMES (sizeof THEMES / sizeof THEMES[0])
 static const theme_t *theme = &THEMES[0];

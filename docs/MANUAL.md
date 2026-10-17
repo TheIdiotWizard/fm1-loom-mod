@@ -181,14 +181,15 @@ From top to bottom, the screen has five parts.
 - **The tag line** says where you are: the track and its engine, the pattern and the scene, such as
   "T3 stack › P2 › S1". The dots at the right say which of the button's pages you're on.
 - **The knob strip** shows the four knobs' names and values, each with a bar in the track's colour. The
-  knob you just turned shows white.
+  knob you just turned shows in the text colour.
 - **The two bottom lines** say what the encoders and the keys do here.
 
-The screen is dark, and every instrument track has its own colour: T1 pink, T2 teal, T3 yellow, T4 blue,
-T5 orange, T6 green, T7 violet, T8 sand. A track's steps with notes are its colour, dimmed; what sounds now is
-its colour, bright: the step playing, the scene playing, a meter. On Arrange and Mix every track keeps its
-colour, so you can tell them apart at a glance. White outlines are you: the held step, the cursor, the knob
-you turned. Red is only for recording and for locks.
+The screen comes in two themes (Setup, THEME): **tape deck**, warm brown-black with cream text, and
+**blueprint**, deep blue with white lines. In both, every instrument track has its own colour; in tape deck
+T1 mustard, T2 rust, T3 olive, T4 teal, T5 blue, T6 plum, T7 tan, T8 sage. A track's steps with notes are
+its colour, dimmed; what sounds now is its colour, bright: the step playing, the scene playing, a meter. On
+Arrange and Mix every track keeps its colour, so you can tell them apart at a glance. Cream (or white)
+outlines are you: the held step, the cursor, the knob you turned. Red is only for recording and for locks.
 
 ### Messages
 
@@ -483,7 +484,7 @@ Hold **HOME** and press a black key to mute. The knobs are the sends to FX I and
 level. Turn **SELECT** for Master EQ (low, mid, high and a blend from flat to the EQ), Master drive (gain,
 clip, tone, blend), and Master out (the drums' level, the melodic tracks' level, the compressor and the
 output level). Setup has the lights, MIDI clock and notes out, and one or two cores; its **SEL** list loads
-a project, starts a new one, and sets the USB audio level and the count-in. Status shows the audio load, the
+a project, starts a new one, and sets the USB audio level, the count-in and the theme (tape deck or blueprint). Status shows the audio load, the
 voices and the second core.
 
 <img src="img/screen-mix.png" width="240" alt="Mix: a meter for each track while playing; knobs fx I, fx II, pan and level" title="The mixer"> <img src="img/screen-sends.png" width="240" alt="FX&#x27;s Sends page: the track&#x27;s sends to FX I (delay), FX II (reverb) and the tape, and its level" title="The sends"> <img src="img/screen-master.png" width="240" alt="Master EQ: low, mid, high and the blend from flat to the EQ" title="Master EQ"> <img src="img/screen-status.png" width="240" alt="Status: audio load, peak, voices, the second core, guard trips and dropouts" title="Status">
