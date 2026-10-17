@@ -14,6 +14,14 @@
 #include "../dsp/fastmath.h"
 
 #define POOL XY_POOL
+#if XY_RAM_DSP
+/* the FX and the master run from RAM in this build (tools/size_fns.py RAM_DSP): out of a direct call's
+ * reach from the XIP window, so they are called through a pointer the compiler cannot fold */
+static inline void *dsp_far(void *p) { void *volatile q = p; return q; }
+#define DSP_FAR(fn) ((__typeof__(&fn))dsp_far((void *)&fn))
+#else
+#define DSP_FAR(fn) fn
+#endif
 
 /* time per stage of the render, in plat_cycles() units: running totals (wrapping; the Status page
  * takes differences) and the frames rendered */
@@ -783,7 +791,7 @@ static void render_sub(uint32_t n)
             float g = (float)epar[AUX_FX1 + k][TP_LEVEL] * (float)epar[AUX_FX1 + k][TP_LEVEL] * (1.0f / 10000.0f);
             zerof(tl, n);
             zerof(tr, n);
-            fx_process(FXS(k), k ? s2 : s1, tl, tr, n);
+            DSP_FAR(fx_process)(FXS(k), k ? s2 : s1, tl, tr, n);
             glide_set(&ret_glide[k][0], g);
             glide_set(&ret_glide[k][1], g);
             add_glide(mel_l, tl, &ret_glide[k][0], n);
@@ -830,7 +838,7 @@ void engine_render(int32_t *out_lr, uint32_t n, uint32_t gain_q12)
         render_sub(k);
         {
             PROF_T(pm);
-            master_process(MST, perc_l, perc_r, mel_l, mel_r, mix_l + done, mix_r + done, k);
+            DSP_FAR(master_process)(MST, perc_l, perc_r, mel_l, mel_r, mix_l + done, mix_r + done, k);
             PROF_ADD(PR_MST, pm);
         }
         {

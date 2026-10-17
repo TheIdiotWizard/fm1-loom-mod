@@ -19,6 +19,13 @@ or a setting change (and the UI's text), never once a sample or a block. The sam
 Code built for size computes the same samples: the FPU is single precision only and no fused multiply-add
 or reassociation is allowed at any level (-ffp-contract=off); only its speed differs.
 
+XY_RAM_DSP=1 also places the effects' and the master's code (RAM_DSP) in .ram_dsp: RAM beside .ram_text
+(app.ld RAMTEXT, 24 KB), copied there at boot (main_fm1.c), out of the XIP cache's way. A direct call
+does not reach from the XIP window to that RAM (R_PI32V2_LONG_JUMP_23M2: 4 MB) or back, so the set is
+closed (RAM_INLINE: what both sides call is inlined into each) and engine.c calls in through a pointer
+(DSP_FAR); the linker refuses any call that was missed. An experiment for the device
+(tools/measure_load.sh): off by default.
+
     size_fns.py IN.ll OUT.ll [UNIT]        (XY_SIZE=0: copy unchanged)"""
 import os
 import re
@@ -41,6 +48,10 @@ COLD = {
                   "rec_key_on", "restart", "track_reset", "seq_rec_pos", "deg_to_note", "seq_cue_pattern",
                   "arp_stop", "keys_all_off"],
 }
+# XY_RAM_DSP=1: the two FX slots' and the master's per-sample code, closed under calls (~20 KB; the 24 KB
+# RAMTEXT region holds .ram_text's ~3 KB and .c1_text besides)
+RAM_DSP = ["fx_process", "do_spu", "spu_interp", "master_process", "ts_gs_side", "ts_wf_side", "ts_block_pole"]
+RAM_INLINE = ["fx_states", "zero16"]
 ROOTS = re.compile(r"^(?:\w+_irq|fm1_fault_c|fm1_fatal_common|core2_job)$")
 DEF = re.compile(r"^(?:static\s+|inline\s+|const\s+|unsigned\s+|signed\s+|struct\s+\w+\s+|__attribute__\s*\(\(.*?\)\)\s*)*"
                  r"(?:void|int|char|float|uint\d+_t|int\d+_t|size_t|\w+_t)\s*\**\s*([A-Za-z_]\w*)\s*\(", re.M)
@@ -89,6 +100,38 @@ def reachable(funcs, glob):
     return seen
 
 
+def ram_place(ir, names, inl, groups, made):
+    """the named definitions into section .ram_dsp; the inl ones, and whatever else this file defines that
+    the placed ones call, always inlined (a group of their own), so the placed code calls only itself"""
+    extra = {}
+    funcs = ir_bodies(ir)[0]
+    todo = [n for n in names if n in funcs]
+    inl = set(inl)
+    while todo:
+        for c in re.findall(r"call [^@\n]*@\"?([\w.]+)\"?\(", funcs[todo.pop()][1]):
+            if c in funcs and c not in names and c not in inl and not c.startswith("llvm."):
+                inl.add(c)
+                todo.append(c)
+
+    def place(m):
+        line = m.group(0)
+        n = IR_DEF.match(line).group(1)
+        if n in inl:
+            g = re.search(r" #(\d+) ", line).group(1)
+            if g not in extra:
+                extra[g] = 1 + max([int(x) for x in groups] + list(made.values()) + list(extra.values()))
+            line = line.replace(f" #{g} ", f" #{extra[g]} ", 1)
+        if n in names and " section " not in line:
+            line = line[:-1].rstrip() + ' section ".ram_dsp" {'
+        return line
+    ir = re.sub(r"^define [^\n]* #\d+ [^\n]*\{$", place, ir, flags=re.M)
+    for g, new in extra.items():
+        src = re.search(r"^attributes #%s = \{ (.*) \}$" % g, ir, re.M).group(1)
+        src = " ".join(a for a in src.split() if a not in ("noinline", "minsize", "optnone", "inlinehint"))
+        ir += f"\nattributes #{new} = {{ alwaysinline {src} }}\n"
+    return ir
+
+
 def main(src, dst, unit=None):
     ir = Path(src).read_text()
     if os.environ.get("XY_SIZE") == "0":
@@ -123,6 +166,9 @@ def main(src, dst, unit=None):
             nxt += 1
         return m.group(0)[:m.start(1) - m.start(0)] + str(made[g]) + m.group(0)[m.end(1) - m.start(0):]
     ir = re.sub(r"^define [^\n]* #(\d+) [^\n]*\{$", mark, ir, flags=re.M)
+    ram = os.environ.get("XY_RAM_DSP", "")
+    if ram and ram != "0":
+        ir = ram_place(ir, set(RAM_DSP), set(RAM_INLINE), groups, made)
     for g, new in made.items():
         a = groups[g] if "optsize" in groups[g].split() else "optsize " + groups[g]
         if unit and "noinline" not in a.split():
