@@ -2354,7 +2354,7 @@ static void draw_punch(void)
             e = s_cat(e, PUNCH_NAME[fx & 15]);
     }
     if (!n)
-        s_cat(t, "hold a key: duck, loops, echo, fills, filter...");
+        s_cat(t, "hold a key: mute, stutter, echo, build...");
     text_fit(10, 4, n ? &FONT_B : &FONT_S, t, 220, n ? K_NOW : K_DIM);
     cv_text(10, 24, &FONT_XS, "drums", K_DIM);
     text_r(230, 24, &FONT_XS, "melodic", K_DIM);
@@ -2363,7 +2363,7 @@ static void draw_punch(void)
         int fx = punch_of_key(WHITE_K[k]);
         int on = fx >= 0 && (fx < PX_MEL ? (dm >> fx & 1u) : (mm >> (fx - PX_MEL) & 1u));
         cv_round(x, 40, 13, 60, 2, on ? K_NOW : fx < 0 ? K_PANEL : K_PANEL2);
-        if (fx >= 0 && k < 7) {                      /* the drum octave's initials: d l l e f f r */
+        if (fx >= 0 && k < 7) {                      /* the drum octave's initials: m s r e b f j */
             char ini[2] = {PUNCH_NAME[fx & 15][0], 0};
             text_c(x + 6, 102, &FONT_XS, ini, K_DIM);
         }

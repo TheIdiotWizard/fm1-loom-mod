@@ -45,7 +45,7 @@ void engine_scene(int scene, int cued);                  /* a scene: now (seq_se
 
 /* drum tracks (engine drumline): the Filter page's five values reach drumline_filter(). With TP_FTYPE
  * FT_DYNAMIC the knobs mean low cut = TP_CUT, compression = TP_RES, drive = TP_FENV, hi cut = TP_KTRK; any
- * other type turns the dynamic filter off. The punch filter (PX_FILTER) on a drum track forces the dynamic
+ * other type turns the dynamic filter off. The wobble throw (PX_WOBBLE) on a drum track forces the dynamic
  * filter on with its low cut raised (PUNCH_HP), the other three as the knobs (or neutral when the track's
  * type is not dynamic), and sets perf_t.hp for the synth's sake. */
 #define PUNCH_HP 90

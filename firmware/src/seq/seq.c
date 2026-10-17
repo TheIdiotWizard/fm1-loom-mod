@@ -28,9 +28,9 @@
  * mirrors the timing: early instead of late, narrow instead of wide). The random types roll each hit
  * within their table's range.
  *
- * Punch-in FX that change the sequence run here (duck, the loops, echo, the fills, pitch, short and
- * long); the engine gets the union of held and sequenced FX through the sink (and seq_punch_mask per
- * track) and does the rest (filter / vibrato, stereo). */
+ * Throws (punch-in FX) that change the sequence run here (mute, stutter, repeat, echo, the fills, octave,
+ * chop and ring); the engine gets the union of held and sequenced FX through the sink (and seq_punch_mask per
+ * track) and does the rest (wobble, pan). */
 #include "seq.h"
 
 #define NEVER 0xFFFFFFFFu
@@ -47,49 +47,48 @@
 static const uint8_t TS_HALVES[NTS] = {1, 2, 4, 6, 8, 10, 12, 16, 32};
 static const uint8_t SC_VEL[9] = {4, 8, 16, 32, 64, 100, 112, 127, 0};
 static const uint8_t GM_DRUM[NDRUM] = {36, 38, 42, 46, 39, 45, 50, 63, 70, 67, 75};
-/* grooves (the notebook p. 26): for each type a timing offset in ticks (PPS = 24 a sixteenth, late when
- * positive) and a velocity offset for each sixteenth of the bar, at the full amount (99). For the types in
- * GROOVE_RND_T / GROOVE_RND_V the table entry is a range: the hit rolls a value in -x..x. Shuffle at +50 puts
- * the upbeats a quarter sixteenth late (the old swing 75 %); at +99 half a sixteenth. */
+/* grooves: for each type a timing offset in ticks (PPS = 24 a sixteenth, late when positive) and a velocity
+ * offset for each sixteenth of the bar (0-based: 0 = beat 1, 2 = its "and", 4 = beat 2 ...), at the full amount
+ * (99). For the types in GROOVE_RND_T / GROOVE_RND_V the table entry is a range: the hit rolls a value in -x..x.
+ * Swing at +50 puts the upbeats a quarter sixteenth late (the old swing 75 %); at +99 half a sixteenth. */
 static const int8_t GROOVE_T[NGROOVE][16] = {
-    {0, 12, 0, 12, 0, 12, 0, 12, 0, 12, 0, 12, 0, 12, 0, 12},     /* shuffle: every upbeat */
-    {0, 6, 0, 4, 0, 6, 0, 4, 0, 6, 0, 4, 0, 6, 0, 4},             /* half shuffle: lighter */
-    {0, 4, 2, 4, 1, 4, 2, 4, 1, 4, 2, 4, 1, 4, 2, 4},             /* danish: random, the downbeat on the grid */
-    {0, 0, 0, 0, -3, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0},            /* bombora: 2 early, 4 late = a wider 2-4 */
-    {4, 6, 4, 6, 4, 6, 4, 6, 4, 6, 4, 6, 4, 6, 4, 6},             /* wobbly: random, every beat */
-    {2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3},             /* gaussian: a subtle random wobble */
-    {0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1},             /* accents: subtle off grid */
-    {0, 1, 0, 1, 2, 1, 0, 1, 0, 1, 0, 1, 2, 1, 0, 1},             /* island nod: 2 and 4 laid back */
-    {0, -2, 5, -2, 0, -2, 5, -2, 0, -2, 5, -2, 0, -2, 5, -2},     /* disfunk: the "e" pushed, the "and" pulled */
-    {5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5},             /* rollover: random push and pull */
-    {0, 4, 0, 4, 0, 4, 0, 4, 0, 4, 0, 4, 0, 4, 0, 4},             /* prophetic: a subtle shuffle */
+    {0, 12, 0, 12, 0, 12, 0, 12, 0, 12, 0, 12, 0, 12, 0, 12},     /* swing: every upbeat */
+    {0, 6, 0, 4, 0, 6, 0, 4, 0, 6, 0, 4, 0, 6, 0, 4},             /* lilt: lighter */
+    {0, 0, 8, 0, 0, 0, -4, 0, 0, 0, 8, 0, 0, 0, -4, 0},           /* weave: the "and" of 1 and 3 late, of 2 and 4 early */
+    {0, 0, 0, 0, -2, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0},            /* stretch: 2 a touch early, 4 later: an uneven lean */
+    {4, 6, 4, 6, 4, 6, 4, 6, 4, 6, 4, 6, 4, 6, 4, 6},             /* drunk: random, every beat */
+    {2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3},             /* jitter: a subtle random wobble */
+    {0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1},             /* accent: subtle off grid */
+    {0, 1, 0, 1, 2, 1, 0, 1, 0, 1, 0, 1, 2, 1, 0, 1},             /* lazy: 2 and 4 laid back */
+    {0, -2, 5, -2, 0, -2, 5, -2, 0, -2, 5, -2, 0, -2, 5, -2},     /* push pull: the "e" pushed, the "and" pulled */
+    {5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5},             /* sway: random push and pull */
+    {0, 4, 0, 4, 0, 4, 0, 4, 0, 4, 0, 4, 0, 4, 0, 4},             /* swell: a subtle swing */
 };
 static const int8_t GROOVE_V[NGROOVE][16] = {
-    {0},                                                          /* shuffle: velocity unchanged */
-    {4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4},             /* half shuffle: variable */
-    {12, 10, 10, 10, 10, 10, 10, 10, 12, 10, 10, 10, 10, 10, 10, 10},   /* danish: high, random (the downbeats +12) */
-    {2, 2, 2, 2, 8, 2, 2, 2, 2, 2, 2, 2, 8, 2, 2, 2},             /* bombora: generally higher, 2 and 4 more */
-    {20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20},   /* wobbly: aggressive random */
-    {24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24},   /* gaussian: a wide random range */
-    {20, -6, -6, -6, 10, -6, -6, -6, 20, -6, -6, -6, 10, -6, -6, -6},   /* accents: the key beats */
-    {-10, -16, -10, -16, -10, -16, -10, -16, -10, -16, -10, -16, -10, -16, -10, -16},   /* island nod: low */
-    {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},   /* disfunk: high random variation */
-    {8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8},             /* rollover: some random variation */
-    {-20, -7, 7, 20, -20, -7, 7, 20, -20, -7, 7, 20, -20, -7, 7, 20},   /* prophetic: ramps across the beat */
+    {0},                                                          /* swing: velocity unchanged */
+    {4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4},             /* lilt: variable */
+    {0, 0, 6, 0, 0, 0, -6, 0, 0, 0, 6, 0, 0, 0, -6, 0},           /* weave: the late ones over, the early ones under */
+    {0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0},           /* stretch: 2 and 4 louder */
+    {20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20},   /* drunk: aggressive random */
+    {24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24},   /* jitter: a wide random range */
+    {20, -6, -6, -6, 10, -6, -6, -6, 20, -6, -6, -6, 10, -6, -6, -6},   /* accent: the key beats */
+    {-10, -16, -10, -16, -10, -16, -10, -16, -10, -16, -10, -16, -10, -16, -10, -16},   /* lazy: low */
+    {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},   /* push pull: high random variation */
+    {8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8},             /* sway: some random variation */
+    {-20, -7, 7, 20, -20, -7, 7, 20, -20, -7, 7, 20, -20, -7, 7, 20},   /* swell: ramps across the beat */
 };
-#define GROOVE_RND_T ((1u << GR_DANISH) | (1u << GR_WOBBLY) | (1u << GR_GAUSS) | (1u << GR_ROLLOVER))
-#define GROOVE_RND_V ((1u << GR_HALF) | (1u << GR_DANISH) | (1u << GR_WOBBLY) | (1u << GR_GAUSS) | \
-                      (1u << GR_DISFUNK) | (1u << GR_ROLLOVER))
+#define GROOVE_RND_T ((1u << GR_DRUNK) | (1u << GR_JITTER) | (1u << GR_SWAY))
+#define GROOVE_RND_V ((1u << GR_LILT) | (1u << GR_DRUNK) | (1u << GR_JITTER) | (1u << GR_PUSHPULL) | (1u << GR_SWAY))
 static const int8_t SIN32[32] = {0, 25, 49, 71, 90, 106, 117, 125, 127, 125, 117, 106, 90, 71, 49, 25,
                                  0, -25, -49, -71, -90, -106, -117, -125, -127, -125, -117, -106, -90, -71, -49, -25};
 /* the arp's speeds: the period in sixteenths as NUM / DEN */
 static const uint8_t ARP_NUM[9] = {4, 8, 2, 4, 1, 2, 1, 1, 1}, ARP_DEN[9] = {1, 3, 1, 3, 1, 3, 2, 3, 4};
 
-const char *const PUNCH_NAME[NPUNCH] = {"duck", "loop 1", "loop 2", "echo", "fill 1", "fill 2", "rnd fill",
-                                        "filter", "stereo", "pitch", "short", "long"};
+const char *const PUNCH_NAME[NPUNCH] = {"mute", "stutter", "repeat", "echo", "build", "floor", "jumble",
+                                        "wobble", "pan", "octave", "chop", "ring"};
 /* an octave's keys in chromatic order (F F# G G# A A# B C C# D D# E) to their effect */
-static const uint8_t KEY2PX[12] = {PX_DUCK, PX_FILTER, PX_LOOP1, PX_STEREO, PX_LOOP2, PX_PITCH, PX_ECHO,
-                                   PX_FILL1, PX_SHORT, PX_FILL2, PX_LONG, PX_RNDFILL};
+static const uint8_t KEY2PX[12] = {PX_MUTE, PX_WOBBLE, PX_STUTTER, PX_PAN, PX_REPEAT, PX_OCTAVE, PX_ECHO,
+                                   PX_BUILD, PX_CHOP, PX_FLOOR, PX_RING, PX_JUMBLE};
 const char *const BS_NAME[NBS] = {"major", "minor", "dorian", "mixolyd", "lydian", "phrygian", "harm min",
                                   "penta", "penta min", "chrom"};
 const uint16_t BRAIN_SCALE[NBS] = {
@@ -319,7 +318,7 @@ uint32_t seq_punch_mask(const seq_t *s, int trk)
     return m;
 }
 
-static int punch_muted(const seq_t *s, int t) { return fx_on(s, t, PX_DUCK); }
+static int punch_muted(const seq_t *s, int t) { return fx_on(s, t, PX_MUTE); }
 
 /* the sixteenth of the bar a step of track t falls on (its scale), or -1 between sixteenths */
 static int step_six(const tpat_t *p, int step)
@@ -553,7 +552,7 @@ static void emit_drum(seq_t *s, int t, int sound, int vel, uint32_t tag, uint32_
     if (sound < 0 || sound >= NDRUM)
         return;
     if (o->drum)
-        o->drum(o->ctx, t, sound, vel, fx_on(s, t, PX_PITCH) ? 12 : 0, fx_on(s, t, PX_SHORT), fx_on(s, t, PX_LONG));
+        o->drum(o->ctx, t, sound, vel, fx_on(s, t, PX_OCTAVE) ? 12 : 0, fx_on(s, t, PX_CHOP), fx_on(s, t, PX_RING));
     if (s->send_notes && s->par[t][TP_CHAN]) {
         midi_on(s, t, GM_DRUM[sound], vel, o);
         midi_off(s, t, GM_DRUM[sound], o);
@@ -604,9 +603,9 @@ static void fire_notes(seq_t *s, int t, const step_t *st, int p, uint32_t L, int
                 emit_drum(s, t, st->note[i] - 1, vel, TAG_STEP | (uint32_t)(ratchet * 1024), len_q8, o);
         return;
     }
-    if (fx_on(s, t, PX_SHORT))
+    if (fx_on(s, t, PX_CHOP))
         len_q8 = L / 4u;
-    else if (fx_on(s, t, PX_LONG))
+    else if (fx_on(s, t, PX_RING))
         len_q8 = L * 2u;
     if (act[SC_HOLD])
         len_q8 = len_q8 > L * (tr->stall + 1u) ? len_q8 : L * (tr->stall + 1u);
@@ -637,7 +636,7 @@ static void fire_notes(seq_t *s, int t, const step_t *st, int p, uint32_t L, int
             note = tonal(s, t, note, tv);
         if (s->par[t][TP_BRAIN])
             brain_hear(s, note);
-        if (fx_on(s, t, PX_PITCH))
+        if (fx_on(s, t, PX_OCTAVE))
             note -= 12;
         note = clamp_note(note);
         tag = TAG_STEP | (uint32_t)(p * 16 + i + ratchet * 1024);
@@ -1243,10 +1242,10 @@ static void fire_fills(seq_t *s, const seq_sink_t *o)
             continue;
         if (is_drum(s, t)) {
             uint32_t half = six_q8(s) / 2u;
-            if (fx_on(s, t, PX_FILL1)) {              /* snares: eighths, then sixteenths */
+            if (fx_on(s, t, PX_BUILD)) {              /* snares: eighths, then sixteenths */
                 if (b >= 8 || !(b & 1))
                     emit_drum(s, t, 1, echo_vel(s, t, b >= 8 ? 110 : 100), TAG_FILL, half, o);
-            } else if (fx_on(s, t, PX_FILL2)) {       /* a kick on the beats, hats in sixteenths */
+            } else if (fx_on(s, t, PX_FLOOR)) {       /* a kick on the beats, hats in sixteenths */
                 if (!(b & 3))
                     emit_drum(s, t, 0, echo_vel(s, t, 110), TAG_FILL, half, o);
                 emit_drum(s, t, 2, echo_vel(s, t, 90), TAG_FILL, half, o);
@@ -1261,9 +1260,9 @@ static void fire_fills(seq_t *s, const seq_sink_t *o)
         if (!tr->nfill)
             continue;
         vel = FILL_VEL;
-        if (fx_on(s, t, PX_FILL1)) {                  /* climbing */
+        if (fx_on(s, t, PX_BUILD)) {                  /* climbing */
             note = tr->fill_notes[tr->fill_i++ % tr->nfill];
-        } else if (fx_on(s, t, PX_FILL2)) {           /* low, high, next low, next high ... */
+        } else if (fx_on(s, t, PX_FLOOR)) {           /* low, high, next low, next high ... */
             int i = tr->fill_i++ % tr->nfill;
             note = (i & 1) ? tr->fill_notes[tr->nfill - 1 - i / 2] : tr->fill_notes[i / 2];
         } else {
@@ -1274,7 +1273,7 @@ static void fire_fills(seq_t *s, const seq_sink_t *o)
             vel = 70 + (int)(r >> 10) % 41;
         }
         note = scale_snap(brain_note(s, t, note), s->brain_key, s->brain_scale);
-        if (fx_on(s, t, PX_PITCH))
+        if (fx_on(s, t, PX_OCTAVE))
             note -= 12;
         note = clamp_note(note);
         emit_note(s, t, note, echo_vel(s, t, vel), 0, TAG_FILL | (uint32_t)note, six_q8(s) / 2u, o);
@@ -1864,10 +1863,10 @@ static void punch_update(seq_t *s, const seq_sink_t *o)
     }
     for (t = 0; t < NTRK; t++) {
         seq_trk_t *tr = &s->t[t];
-        int lp = fx_on(s, t, PX_LOOP1) || fx_on(s, t, PX_LOOP2) || fx_on(s, t, PX_ECHO);
-        int fl = fx_on(s, t, PX_FILL1) || fx_on(s, t, PX_FILL2) || fx_on(s, t, PX_RNDFILL);
+        int lp = fx_on(s, t, PX_STUTTER) || fx_on(s, t, PX_REPEAT) || fx_on(s, t, PX_ECHO);
+        int fl = fx_on(s, t, PX_BUILD) || fx_on(s, t, PX_FLOOR) || fx_on(s, t, PX_JUMBLE);
         if (lp) {
-            int six = fx_on(s, t, PX_LOOP2) && !fx_on(s, t, PX_LOOP1) && !fx_on(s, t, PX_ECHO) ? 4 : 2, steps;
+            int six = fx_on(s, t, PX_REPEAT) && !fx_on(s, t, PX_STUTTER) && !fx_on(s, t, PX_ECHO) ? 4 : 2, steps;
             if (!tr->loop_on) {       /* the punch-in point: the step playing */
                 tr->loop_on = 1;
                 tr->loop_from = tr->started ? tr->pos : 0;
@@ -1878,7 +1877,7 @@ static void punch_update(seq_t *s, const seq_sink_t *o)
         } else
             tr->loop_on = 0;
         if (fl) {
-            int kind = fx_on(s, t, PX_FILL1) ? 1 : fx_on(s, t, PX_FILL2) ? 2 : 3;
+            int kind = fx_on(s, t, PX_BUILD) ? 1 : fx_on(s, t, PX_FLOOR) ? 2 : 3;
             if (!tr->fill_on && !is_drum(s, t))
                 fill_collect(s, t);
             if (!tr->fill_on || kind != tr->fill_kind)

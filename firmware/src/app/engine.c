@@ -475,9 +475,9 @@ static void s_bend(void *x, int trk, int cents)
 }
 /* the live FX state: per track, its group's mask (drum tracks the drum FX, the rest the melodic) into
  * the track's performance state. Both masks arrive as bits PX_* (the sequencer shifts the melodic
- * octave down; eng_punch_mel is the same). Here: duck (mute), filter (drums: the high-pass and a wobble on what is long;
- * melodic: a short vibrato), stereo (the pan LFO), long (the drums' tails). Loops, echo, fills, pitch
- * and the note lengths are the sequencer's own. */
+ * octave down; eng_punch_mel is the same). Here: mute, wobble (drums: the high-pass and a wobble on what is long;
+ * melodic: a short vibrato), pan (the pan LFO), ring (the drums' tails). Stutter, repeat, echo, the fills,
+ * octave and the note lengths are the sequencer's own. */
 static uint32_t punch_d, punch_m;
 static void s_punch(void *x, uint32_t drum_mask, uint32_t mel_mask)
 {
@@ -539,8 +539,8 @@ static void perf_tick(uint32_t n)
         perf_t *p = synth_perf(SY, t);
         int drum = eng_drum[t];
         uint32_t m = drum ? punch_d : punch_m;
-        int mute = (int)((m >> PX_DUCK) & 1u), pan_on = (int)((m >> PX_STEREO) & 1u);
-        int filt = (int)((m >> PX_FILTER) & 1u), tail = (int)((m >> PX_LONG) & 1u), pan;
+        int mute = (int)((m >> PX_MUTE) & 1u), pan_on = (int)((m >> PX_PAN) & 1u);
+        int filt = (int)((m >> PX_WOBBLE) & 1u), tail = (int)((m >> PX_RING) & 1u), pan;
         p->pitch_c = (int16_t)(bend_c[t] + (filt ? (int)(vib * (drum ? PUNCH_VIB_DRUM : PUNCH_VIB_MEL)) : 0));
         p->cut = 0;
         p->hp = (uint8_t)(drum && filt ? PUNCH_HP : 0);
@@ -922,7 +922,7 @@ void engine_init(patterns_t *P, uint8_t (*par)[NTP])
     tape_set(TAPE, epar[AUX_TAPE][TP_E1], epar[AUX_TAPE][TP_E2], epar[AUX_TAPE][TP_E3], epar[AUX_TAPE][TP_E4]);
     master_init(MST);
     seq_init(&seq, P, par);
-    seq.groove_type = (uint8_t)(proj.groove < NGROOVE ? proj.groove : GR_SHUFFLE);
+    seq.groove_type = (uint8_t)(proj.groove < NGROOVE ? proj.groove : GR_SWING);
     seq.brain_link = (uint8_t)(par[AUX_BRAIN][TP_E4] > NTRK ? NTRK : par[AUX_BRAIN][TP_E4]);
     for (t = 0; t < NSEQT; t++)
         eng_step[t] = 0;
