@@ -33,8 +33,6 @@ ENV AMT	envelope amount
 KTRK	key tracking
 keytrack	key tracking
 Master EQ	master equalizer
-LP12	low pass 12
-LP24	low pass 24
 HP	high pass
 BP	band pass
 LFO	L F O
@@ -105,10 +103,13 @@ mel	melodic
 KEYTRK	key tracking
 lowcut	low cut
 hicut	high cut
-z hipass	z high pass
-z lowpass	z low pass
 keytrk	key tracking
 fdbk	feedback
 PRESET #/#	preset # of #
 REST #	rest, step #
 BACK #	back to step #
+lp24	low pass 24
+lp12	low pass 12
+hp12	high pass 12
+bp12	band pass 12
+bounce+	bounce plus
