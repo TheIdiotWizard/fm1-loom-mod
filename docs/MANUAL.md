@@ -59,8 +59,8 @@ to 16 from the left, black keys 1 to 11.
    a chord, let go and press a step, and so on: four steps are a bar of progression.
 
    <img src="img/screen-conductor.png" width="240" alt="The conductor&#x27;s Engine page: C major, degree 0, the tracks that follow lit; knobs mode, key, scale, link" title="The conductor">
-6. **Throws.** Go to any track's **EDIT** page. Hold **HOME** and press a low key: F3 ducks the
-   drums, G3 loops them, B3 echoes, C4 and D4 play fills, E4 a random fill. Hold **HOME** and press a high
+6. **Throws.** Go to any track's **EDIT** page. Hold **HOME** and press a low key: F3 mutes the
+   drums, G3 stutters them, B3 echoes, C4 builds, D4 plays four on the floor, E4 jumbles them. Hold **HOME** and press a high
    key for the same on the melodic tracks. Let go and the pattern comes back.
 
    <img src="img/screen-throws.png" width="240" alt="The throws&#x27; page: the two octaves of the keyboard, drums below and melodic above, with the effect held lit" title="Throws">
@@ -152,7 +152,7 @@ press…" means keep **HOME** down while you press the next thing.
 | **HOME** | Opens Arrange. On Arrange, it opens the Song page. Held, it is the shift key: tricks, throws, undo and redo, the fine tempo, scenes, mutes on Mix. When LOOM-8 asks a question, **HOME** means no. |
 | **SEQ** | Opens Steps. Its page 2 is Bar. Hold it on Steps and the keys play the track and set what a step writes. |
 | **EDIT** | Opens Engine. Its page 2 is Play; on a drum track, the key's model, random, pan and volume. |
-| **ENV** | Opens Envelope (a drum track: funk, attack, random, length), then Filter, then the filter's envelope. |
+| **ENV** | Opens Envelope (a drum track: lag, attack, random, length), then Filter, then the filter's envelope. |
 | **FX** | Opens Sends, the track's sends to FX I, FX II and the tape. Then FX I and FX II, the two effects. |
 | **LFO** | Opens LFO. Its page 2 has the type's fourth and fifth knobs. |
 | **ARP** | Opens Players. With the arp, page 2 is its second set of knobs and page 3 is hold. |
@@ -356,28 +356,29 @@ SCRAMBLE for a random sound, SAVE AS PRESET, RESET SOUND, and whether the track 
 
 ### Kit
 
-A drum track has eleven keys on the black keys, each with a drum model: kick, snare, hi-hat, clap, shaker,
-tambourine, resonator, congas, tom or fm. Press a black key, or turn **PRESETS**, to pick the key the
+A drum track has eleven keys on the black keys, each with a drum model: kick, snare, hat, clap, shaker,
+tambourine, string (a plucked string), conga, tom or fm. The kit is tuned to C: kick G1, snare G3, low tom C3,
+high tom G3, conga C4, string C3, fm C5. Press a black key, or turn **PRESETS**, to pick the key the
 knobs edit. The Engine page's four knobs are the model's own:
 
-<img src="img/screen-drum-engine.png" width="240" alt="Engine on T1 kit: the eleven keys as pads, the snare picked; its knobs pitch, length, snare, punch" title="A drum key&#x27;s knobs"> <img src="img/screen-drum-key.png" width="240" alt="The Key page: the snare&#x27;s model, random, pan and volume" title="The Key page"> <img src="img/screen-drum-envelope.png" width="240" alt="ENV on a drum track: funk, attack, random and length for the whole kit" title="The drum envelope">
+<img src="img/screen-drum-engine.png" width="240" alt="Engine on T1 kit: the eleven keys as pads, the snare picked; its knobs pitch, length, wires, punch" title="A drum key&#x27;s knobs"> <img src="img/screen-drum-key.png" width="240" alt="The Key page: the snare&#x27;s model, random, pan and volume" title="The Key page"> <img src="img/screen-drum-envelope.png" width="240" alt="ENV on a drum track: lag, attack, random and length for the whole kit" title="The drum envelope">
 
 | Model | Knobs |
 | --- | --- |
 | kick | pitch, length, punch, tone |
-| snare | pitch, length, snare, punch |
-| hi-hat | pitch, length, era, tone |
-| clap | tone, length, spread, contour |
-| shaker | color, length, attack, onset |
-| tambourine | tone, length, shake, ring |
-| resonator | pitch, length, tone, strike |
-| congas | pitch, length, slap, mush |
+| snare | pitch, length, wires, punch |
+| hat | pitch, length, metal, focus |
+| clap | tone, length, spread, tail |
+| shaker | color, length, swell, return |
+| tambourine | tone, length, jingle, hiss |
+| string | pitch, length, bright, pluck |
+| conga | pitch, length, slide, drive |
 | tom | pitch, length, sweep, rate |
 | fm | pitch, length, mod, feedback |
 
 On every sound page of a drum track, a black key picks the key the knobs edit. Turn **SELECT** for the
 key's page: the model, random (a variation on every hit), pan and volume in dB; its **SEL** list has the play
-mode: one-shot, gated, loop, or choke groups 1 to 3. **ENV** on a drum track is the kit's envelope: funk
+mode: one-shot, gated, loop, or choke groups 1 to 3. **ENV** on a drum track is the kit's envelope: lag
 (a delay before the hit), attack, random and length. Its Filter page with the dynamic type is low cut,
 compression, drive and hi cut.
 
@@ -427,8 +428,8 @@ from any page.
 
 <img src="img/screen-song.png" width="240" alt="The Song page: S1, S1 and S2 in a row, looping" title="The song">
 
-**KNOB 1** is the tempo (hold **HOME** for tenths), **KNOB 2** the groove type (shuffle, half shuffle,
-danish, bombora, wobbly, gaussian, accents, island nod, disfunk, rollover, prophetic), **KNOB 3** the
+**KNOB 1** is the tempo (hold **HOME** for tenths), **KNOB 2** the groove type (swing, lilt, weave,
+stretch, drunk, jitter, accent, lazy, push pull, sway, swell), **KNOB 3** the
 selected track's groove amount from −99 to 99, and **KNOB 4** the click: off, while recording, or on.
 
 Turn **SELECT** for the Song page. Press a white key to add that scene at the cursor. **KNOB 1** moves the
@@ -440,7 +441,7 @@ scene playing, deletes a slot or clears the song.
 
 Turn **ALGORITHM** past T8. Each aux track has its own page under **EDIT** and its own steps under **SEQ**.
 
-<img src="img/screen-tape.png" width="240" alt="TAPE&#x27;s page: the sixteen segments in a ring; pitch, speed, length and mix" title="The tape"> <img src="img/screen-fx1.png" width="240" alt="FX&#x27;s FX I page: the delay with size, fine, feedback and dry" title="An effect">
+<img src="img/screen-tape.png" width="240" alt="TAPE&#x27;s page: the sixteen segments in a ring; pitch, speed, length and mix" title="The tape"> <img src="img/screen-fx1.png" width="240" alt="FX&#x27;s FX I page: the delay with time, fine, repeats and tone" title="An effect">
 
 - **COND** (the conductor): mode (manual, or auto: the key is detected from the tracks that follow), key, scale and link,
   an instrument track that also plays the conductor's keys. Play a chord on its keys: the tracks that follow
@@ -453,18 +454,18 @@ Turn **ALGORITHM** past T8. Each aux track has its own page under **EDIT** and i
 
 | Key of the octave | Effect |
 | --- | --- |
-| white 1 | duck: silences the group |
-| white 2 | loop 1: a fast loop from where the throw starts |
-| white 3 | loop 2: a slow loop |
+| white 1 | mute: silences the group |
+| white 2 | stutter: a fast loop from where the throw starts |
+| white 3 | repeat: a slow loop |
 | white 4 | echo: the loop repeats and fades |
-| white 5 | fill 1 |
-| white 6 | fill 2 |
-| white 7 | random fill |
-| black 1 | filter: high-passed drums, vibrato on melodic notes |
-| black 2 | stereo: the sounds move across the field |
-| black 3 | pitch: drums an octave up, melodic tracks an octave down |
-| black 4 | short notes |
-| black 5 | long notes |
+| white 5 | build: a fill that builds |
+| white 6 | floor: four on the floor |
+| white 7 | jumble: a random fill |
+| black 1 | warble: high-passed drums, vibrato on melodic notes |
+| black 2 | pan: the sounds move across the field |
+| black 3 | octave: drums an octave up, melodic tracks an octave down |
+| black 4 | chop: short notes |
+| black 5 | ring: long notes |
 
   On any other page, hold **HOME** and press a key: the lower octave works on the track you are on, the
   upper octave on its whole group.
@@ -476,6 +477,17 @@ Turn **ALGORITHM** past T8. Each aux track has its own page under **EDIT** and i
   four knobs. Press **FX** and turn **SELECT** to reach them from any track: **PRESETS** picks the effect, and
   **SEL** has its high-pass, low-pass and, on FX I, the send into FX II. The keys play the track you were on.
   Turned to with **ALGORITHM**, they have the same knobs on **EDIT**.
+
+| Effect | Knobs |
+| --- | --- |
+| chorus | rate, depth, feedback, width |
+| delay | time, fine, repeats, tone (how bright the repeats are) |
+| distortion | drive, edge (soft to hard), low cut, high cut |
+| lofi | rate, bits, smooth, width |
+| phaser | freq, depth, rate, feedback |
+| reverb | size, motion, tone, damp (how fast the tail darkens) |
+
+  The effects return only what they make: the track's own sound stays on the track.
 
 ## Mix and master
 

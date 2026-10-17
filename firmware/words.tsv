@@ -87,11 +87,8 @@ open	open hat
 ltom	low tom
 htom	high tom
 fm	F M
-reso	resonator
-half shuf	half shuffle
 harm min	harmonic minor
 mixolyd	mixolydian
-rnd fill	random fill
 oct up	octave up
 5th up	fifth up
 3rd up	third up
@@ -102,8 +99,8 @@ q #%	quantize # percent
 seg #	segment #
 x1	normal
 tamb	tambourine
+strng	string
 TO FX II	to effects 2
-hi-hat	high hat
 mel	melodic
 KEYTRK	key tracking
 lowcut	low cut
