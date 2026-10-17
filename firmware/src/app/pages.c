@@ -553,7 +553,8 @@ static void draw_header(void)
     int msg = plat_ms() < ui.msg_until, rec = recording(), ext = seq.ext, ask = ui.ask, cnt = seq.count_in;
     uint32_t h = hash_u(2166136261u, ui.page | (uint32_t)msg << 8 | (uint32_t)ui.dirty << 9 | (uint32_t)rec << 11 |
                                          (uint32_t)ext << 12 | (uint32_t)ask << 14 | (uint32_t)proj.tempo_x10 << 16);
-    h = hash_u(h, (uint32_t)cnt | (uint32_t)playing() << 8 | (uint32_t)is_drum(sel_trk()) << 9);
+    h = hash_u(h, (uint32_t)cnt | (uint32_t)playing() << 8 | (uint32_t)is_drum(sel_trk()) << 9 |
+                      (uint32_t)page_trk(ui.page) << 10 | (uint32_t)trk_ink(page_trk(ui.page)) << 16);
     if (msg)
         h = hash_u(h, ui.msg_until ^ (uint32_t)ui.msg_no << 31);
     if (ask)
@@ -588,6 +589,14 @@ static void draw_header(void)
         int32_t w = text_w(&FONT_XS, bn) + 6;
         if (is_drum(sel_trk()) && ui.page == P_PLAY)
             pn = "Key";
+        if (ui.page >= P_STEPS && ui.page <= P_PLAYERS3) {   /* a track's page: the track first, in its colour */
+            int pt = page_trk(ui.page);
+            const char *tn = TRACK_NAME[pt];
+            int32_t tw = text_w(&FONT_XS, tn) + 10;
+            cv_round(x, 4, tw, 17, 8, trk_ink(pt));
+            cv_text(x + 5, cap_y(4, 17, &FONT_XS) - 1, &FONT_XS, tn, K_BG);
+            x += tw + 5;
+        }
         cv_round(x, 4, w, 17, 3, K_DIM);
         cv_round(x + 1, 5, w - 2, 15, 2, K_BG);
         cv_text(x + 3, cap_y(4, 17, &FONT_XS) - 1, &FONT_XS, bn, K_DIM);
