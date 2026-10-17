@@ -880,7 +880,13 @@ static void page_knobs(knob_t *k)
     case P_STEPS:
         if (!is_seqt(trk))
             break;
-        kn(&k[0], "PATTERN", cur_pat(trk) + 1, NPATT);
+        if (playing() && seq.pcue[trk] < NPATT && seq.pcue[trk] != cur_pat(trk)) {   /* cued: "1>2" until the bar */
+            char c[8], *ce = num_s((uint32_t)cur_pat(trk) + 1u, c);
+            *ce++ = '>';
+            num_s((uint32_t)seq.pcue[trk] + 1u, ce);
+            kv(&k[0], "NEXT", c, seq.pcue[trk] + 1, NPATT);
+        } else
+            kn(&k[0], "PATTERN", cur_pat(trk) + 1, NPATT);
         kn(&k[1], "LENGTH", tp->len, NSTEP);
         kname(&k[2], "SCALE", TS_NAME, tp->scale, NTS);
         kn(&k[3], "GROOVE", tp->groove, 0);
@@ -1035,8 +1041,11 @@ static void track_crumb(char *t)
         e = s_cat(e, " ");
         e = s_cat(e, EG_NAME[proj.trk[trk].par[TP_ENGINE] % NENGINE]);
     }
-    if (is_seqt(trk))
+    if (is_seqt(trk)) {
         e = num_s((uint32_t)cur_pat(trk) + 1u, s_cat(e, ">P"));
+        if (playing() && seq.pcue[trk] < NPATT && seq.pcue[trk] != cur_pat(trk))   /* cued: it comes at the bar */
+            e = num_s((uint32_t)seq.pcue[trk] + 1u, s_cat(e, ">next P"));
+    }
     num_s((uint32_t)cur_scene() + 1u, s_cat(e, ">S"));
 }
 static void page_tag(char *t)

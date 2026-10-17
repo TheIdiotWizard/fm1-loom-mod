@@ -2073,6 +2073,19 @@ static void six_tick(seq_t *s, const seq_sink_t *o)
         brain_bar(s);
         if (ch)
             restart(s, ch);
+    } else if (s->step_tick && !(s->step_tick & 15u)) {   /* a bar line (16 sixteenths) inside a longer pattern:
+                                                          * the patterns cued per track switch here, not later */
+        uint32_t ch = 0;
+        for (int t = 0; t < NSEQT; t++)
+            if (s->pcue[t] < NPATT) {
+                if (s->pcue[t] != s->ppat[t]) {
+                    s->ppat[t] = s->pcue[t];
+                    ch |= 1u << t;
+                }
+                s->pcue[t] = 0xFF;
+            }
+        if (ch)
+            restart(s, ch);
     }
     s->bar_fresh = 0;
     s->bar16 = (uint8_t)(s->bar_six & 15);

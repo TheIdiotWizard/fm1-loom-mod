@@ -120,7 +120,7 @@ press…" means keep **HOME** down while you press the next thing.
 | lock a knob on a step | Hold the step and press **EDIT**, **ENV**, **FX** or **LFO**. Turn a knob. **SAVE** clears the step's locks. |
 | see the next bar | Press **OCT+** on Steps. |
 | set the track scale | On the Bar page, press a black key: 1, 2, 3, 4, 5, 6, 8, 16 sixteenths a step, or black key 9 for half a sixteenth. |
-| change the pattern | On Steps, turn **KNOB 1**. |
+| change the pattern | On Steps, turn **KNOB 1**. Playing, it comes at the next bar line: the knob reads NEXT 1>2 and the tag line "next P2" until it does. |
 | weave two patterns | Copy one (**SEL**, COPY PATTERN), go to the other, **SEL**, WEAVE WITH COPIED: **ALGORITHM** picks bars, steps, rhythm or notes. **SEL** does it. |
 | change the sound | Press **EDIT** and turn **PRESETS**: the engine's own sounds, "PRESET 3/8". **SEL** changes the engine. |
 | edit a drum sound | On a drum track, press **EDIT** and press the sound's black key. The knobs are the model's own four. Turn **SELECT** for the model, random, pan and volume; its **SEL** list has the play mode. |

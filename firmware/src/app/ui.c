@@ -1320,13 +1320,20 @@ static void song_knob(int k, int32_t e)
         sg->slot[cur].rep = (uint8_t)clampi(sg->slot[cur].rep + e, 1, 16);
     mark_dirty();
 }
+static int cued_pat(int trk)                     /* the pattern cued to come next, or the one playing */
+{
+    return playing() && seq.pcue[trk] < NPATT ? seq.pcue[trk] : cur_pat(trk);
+}
 static void pattern_pick(int trk, int p)
 {
     p = clampi(p, 0, NPATT - 1);
-    if (p == cur_pat(trk))
+    if (p == cued_pat(trk))
         return;
     pats.scene[cur_scene()].pat[trk] = (uint8_t)p;
-    seq_cue_pattern(&seq, trk, p);
+    if (playing() && p == cur_pat(trk))
+        seq.pcue[trk] = 0xFF;                    /* back to the one playing: nothing to cue */
+    else
+        seq_cue_pattern(&seq, trk, p);
     ui.bar = 0;
     mark_dirty();
 }
@@ -1337,7 +1344,7 @@ static void steps_knob(int k, int32_t e)
     if (!is_seqt(trk))
         return;
     if (k == 0) {
-        pattern_pick(trk, cur_pat(trk) + (int)e);
+        pattern_pick(trk, cued_pat(trk) + (int)e);
         return;
     }
     undo_keep();

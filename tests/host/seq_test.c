@@ -1791,10 +1791,34 @@ static void t_phase(void)
     printf("ok %s\n", cur);
 }
 
+/* a pattern cued on a track switches at the next bar line (16 sixteenths), even when track 1's pattern is
+ * longer (its span is the "bar" for scenes and the song) */
+static void t_cue_bar(void)
+{
+    ev_t *e;
+    cur = "cue-bar";
+    reset();
+    P.pat[0][0].len = 64;                        /* track 1: four bars */
+    for (int i = 0; i < 16; i++)
+        note(1, i, 60, 100);
+    P.pat[1][1].st[0].note[0] = 72, P.pat[1][1].st[0].vel = 100;   /* track 2, pattern 2: one note on step 1 */
+    start();
+    run_to(T16(5) + 100);
+    seq_cue_pattern(&S, 1, 1);
+    run_to(T16(15) + 100);
+    CHECK(S.ppat[1] == 0 && S.pcue[1] == 1);     /* still waiting */
+    run_to(T16(16) + 100);
+    CHECK(S.ppat[1] == 1 && S.pcue[1] == 0xFF);  /* switched at the bar line, from its step 1 */
+    e = step_after(1, T16(16) - 10);
+    CHECK(e && near(e->t, T16(16), 3) && e->a == 0);
+    printf("ok %s\n", cur);
+}
+
 int main(void)
 {
     t_pattern_helpers();
     t_phase();
+    t_cue_bar();
     t_weave();
     t_timing();
     t_scale();
