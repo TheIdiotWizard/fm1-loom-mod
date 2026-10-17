@@ -6,9 +6,8 @@
  * ramps 4 iterations, random 4, portamento 40 %, bend down-up, tonality 4 (fifth up), jump to 13, skips: a
  * cycle of 2 (mode 0: the step plays on the cycle's last pass) */
 const uint8_t SC_DEFAULT[NSC] = {0, 3, 3, 1, 4, 3, 3, 3, 3, 0, 3, 3, SK_VAL(1, 0), SK_VAL(1, 0), SK_VAL(1, 0)};
-const char *const GR_NAME[NGROOVE] = {"shuffle", "half shuf", "danish", "bombora", "wobbly", "gaussian", "accents",
-                                      "island", "disfunk", "rollover", "prophetic"};
-const char *const GR_SHORT[NGROOVE] = {"SH", "HS", "DA", "BO", "WO", "GA", "AC", "IN", "DF", "RO", "PR"};
+const char *const GR_NAME[NGROOVE] = {"swing", "lilt", "weave", "stretch", "drunk", "jitter", "accent", "lazy",
+                                      "push pull", "sway", "swell"};
 
 static void zero(void *p, uint32_t n)
 {

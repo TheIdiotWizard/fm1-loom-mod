@@ -140,7 +140,7 @@ void project_defaults(void)
     proj.name[3] = 0;
     proj.tempo_x10 = 1200;
     proj.swing = 0;                                       /* unused (a reserved byte) */
-    proj.groove = GR_SHUFFLE;                             /* the project's groove type; each track's amount is 0 */
+    proj.groove = GR_SWING;                               /* the project's groove type; each track's amount is 0 */
     proj.metronome = 1;                                   /* while recording */
     proj.lights = 1;
     proj.send_clock = 1;
@@ -202,7 +202,7 @@ static int settings_valid(settings_t *s)
     if (s->tempo_x10 < 400u || s->tempo_x10 > 3000u || s->scene >= NSCENE || s->trk_sel >= NALLTRK)
         return 0;
     if (s->groove >= NGROOVE)
-        s->groove = GR_SHUFFLE;
+        s->groove = GR_SWING;
     s->name[NAME_LEN - 1] = 0;
     for (t = 0; t < NALLTRK; t++) {
         uint8_t *p = s->trk[t].par;

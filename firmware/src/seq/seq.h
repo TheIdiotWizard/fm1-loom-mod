@@ -23,8 +23,8 @@
  * chord, transposed, rolled), hold; the brain shifts routed tracks' notes diatonically (its degree
  * from its keys or its steps; its link track plays its keys in parallel). Punch-in FX are a bit mask
  * per group, from held keys (seq_punch_key, group-wide or aimed at one track) or the punch track's
- * steps; the sequencer runs the ones that change the sequence (duck, the loops, echo, the fills,
- * pitch, short, long) and hands the engine the masks for the rest (filter / vibrato, stereo).
+ * steps; the sequencer runs the ones that change the sequence (mute, stutter, repeat, echo, the fills,
+ * octave, chop, ring) and hands the engine the masks for the rest (wobble, pan).
  *
  * Clock: internal (BPM) or MIDI clock in (24 ppqn, seq_ext_clock); clock and transport out through
  * the sink. Everything the main loop changes is a flag or a byte, picked up at the next block. */
@@ -35,34 +35,35 @@
 #define NTP_ALL NTP                   /* aux tracks use the same parameter array as the instrument tracks */
 
 #define SEQ_FS 44100u
-/* punch-in FX: the OP-XY's twelve, the same in both octaves (the notebook p. 121). White keys 1..7 of an
- * octave: duck, loop 1 (fast), loop 2 (slow), echo, fill 1, fill 2, random fill; its black keys 1..5: filter /
- * vibrato, stereo, pitch, short, long. Bits 0..11 = the lower octave (percussive tracks), 16..27 = the upper
+/* throws (punch-in FX): twelve, the same in both octaves. White keys 1..7 of an octave: mute, stutter (a
+ * two-sixteenth loop), repeat (a four-sixteenth loop), echo (a fading loop), build, floor, jumble (fills); its
+ * black keys 1..5: wobble (a vibrato; on drums a high-pass too), pan (an auto-pan), octave (drums up, melodic
+ * down), chop (short notes), ring (long notes and tails). The bit order is stored in throw steps: keep it. Bits 0..11 = the lower octave (percussive tracks), 16..27 = the upper
  * (melodic tracks). On the FM-1 the lower octave is keys F3..E4, the upper F4..E5 (F5, F#5, G5 idle). */
 #define NPUNCH_FX 32
 #define NPUNCH 12
-enum { PX_DUCK, PX_LOOP1, PX_LOOP2, PX_ECHO, PX_FILL1, PX_FILL2, PX_RNDFILL, PX_FILTER, PX_STEREO, PX_PITCH,
-       PX_SHORT, PX_LONG };
+enum { PX_MUTE, PX_STUTTER, PX_REPEAT, PX_ECHO, PX_BUILD, PX_FLOOR, PX_JUMBLE, PX_WOBBLE, PX_PAN, PX_OCTAVE,
+       PX_CHOP, PX_RING };
 #define PX_MEL 16                     /* + PX_* = the melodic octave's bit */
 #define PX_VALID(fx) ((fx) >= 0 && (fx) < NPUNCH_FX && ((fx) & 15) < NPUNCH)   /* a real bit: 0..11, 16..27 */
-extern const char *const PUNCH_NAME[NPUNCH];          /* "duck", "loop 1", ... */
+extern const char *const PUNCH_NAME[NPUNCH];          /* "mute", "stutter", ... */
 /* a key number 0..26 (F3 = 0) to its punch bit, -1 for the idle keys; and back */
 int punch_of_key(int key);
 int punch_key_of(int fx);
-/* What each effect does here (the engine does filter / vibrato and stereo from the masks):
- *   duck      the group's (or the track's) steps and keys do not sound (mute wins over everything)
- *   loop 1    the step playing at the punch-in and the next ones over two sixteenths repeat while held
- *   loop 2    the same over a beat (four sixteenths)
- *   echo      loop 1's span, its velocity falling to 70 % every pass
- *   fill 1    drums: snares in eighths over the first half of the bar, sixteenths over the second;
+/* What each effect does here (the engine does wobble and pan from the masks):
+ *   mute      the group's (or the track's) steps and keys do not sound (mute wins over everything)
+ *   stutter   the step playing at the punch-in and the next ones over two sixteenths repeat while held
+ *   repeat    the same over a beat (four sixteenths)
+ *   echo      stutter's span, its velocity falling to 70 % every pass
+ *   build     drums: snares in eighths over the first half of the bar, sixteenths over the second;
  *             synths: the pattern's own notes (every distinct note it holds, sorted) climbing in sixteenths
- *   fill 2    drums: a kick on every beat and hats in sixteenths; synths: the notes alternating low / high
- *   rnd fill  drums: a random one of sounds 1..3 on three sixteenths in four; synths: a random pattern note
+ *   floor     drums: a kick on every beat and hats in sixteenths; synths: the notes alternating low / high
+ *   jumble    drums: a random one of sounds 1..3 on three sixteenths in four; synths: a random pattern note
  *             on three sixteenths in four. The fills replace the track's own steps while held, and
  *             play on the bar's sixteenths whatever the track's scale (an empty synth pattern is silent)
- *   pitch     drums an octave up (pitch_semi 12 on the drum call), synths an octave down (the note)
- *   short     drums: short_gate on the drum call; synths: the gate is 25 % of the step
- *   long      drums: long_tail on the drum call; synths: the gate is 200 % of the step
+ *   octave    drums an octave up (pitch_semi 12 on the drum call), synths an octave down (the note)
+ *   chop      drums: short_gate on the drum call; synths: the gate is 25 % of the step
+ *   ring      drums: long_tail on the drum call; synths: the gate is 200 % of the step
  * The PUNCH track's steps hold an effect as note[0] = 1 + its bit: 1..12 the percussive octave, 17..28 the
  * melodic one (the UI writes the same); a step's length is how long it holds. Live recording writes held
  * punch keys there (seq_punch_key with rec on while playing), per-track ones included. */
@@ -136,7 +137,7 @@ typedef struct {                      /* one track's runtime (interrupt only) */
     uint8_t ext_ticks;                /* external clock: ticks into this step */
     uint8_t fill_on;                  /* a punch fill runs: the pattern's steps are silent */
     uint8_t fill_i;                   /* the fill's note counter */
-    uint8_t fill_kind;                /* 1 fill 1, 2 fill 2, 3 random: the counter restarts when it changes */
+    uint8_t fill_kind;                /* 1 build, 2 floor, 3 jumble: the counter restarts when it changes */
     uint8_t nfill;                    /* synth fills: the pattern's distinct notes, sorted */
     uint8_t fill_notes[16];
     uint8_t skip_note;                /* the note live recording just put on step 1: the step does not sound it again */

@@ -65,12 +65,12 @@ typedef struct {
 } step_t;                             /* 12 bytes */
 
 enum { TS_HALF, TS_1, TS_2, TS_3, TS_4, TS_5, TS_6, TS_8, TS_16, NTS };   /* track scale: sixteenths a step */
-/* groove types (the project's, the notebook p. 26): shuffle, half shuffle, danish, bombora, wobbly, gaussian,
- * accents, island nod, disfunk, rollover, prophetic; a track's amount -99..99 scales its timing and velocity
- * tables (negative = early / narrow), the random ones roll per hit */
-enum { GR_SHUFFLE, GR_HALF, GR_DANISH, GR_BOMBORA, GR_WOBBLY, GR_GAUSS, GR_ACCENTS, GR_ISLAND, GR_DISFUNK,
-       GR_ROLLOVER, GR_PROPHETIC, NGROOVE };
-extern const char *const GR_NAME[NGROOVE], *const GR_SHORT[NGROOVE];   /* "shuffle".., "SH".. */
+/* groove types (the project's): swing, lilt, weave, stretch, drunk, jitter, accent, lazy, push pull, sway, swell
+ * (the index is saved with the project: append, never reorder); a track's amount -99..99 scales its timing and
+ * velocity tables (negative = early / narrow), the random ones roll per hit */
+enum { GR_SWING, GR_LILT, GR_WEAVE, GR_STRETCH, GR_DRUNK, GR_JITTER, GR_ACCENT, GR_LAZY, GR_PUSHPULL,
+       GR_SWAY, GR_SWELL, NGROOVE };
+extern const char *const GR_NAME[NGROOVE];   /* "swing", "lilt", .. */
 
 typedef struct {
     step_t st[NSTEP];
