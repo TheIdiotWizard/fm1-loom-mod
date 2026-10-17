@@ -16,16 +16,18 @@
 #define APP_CANVAS_PX (240u * 120u)     /* the tallest band, the main one, is 240 x 120 */
 #define APP_BIG_FONT FONT_B             /* fm1-base's panel screens (OCT- + OCT+ at power-on): a face it has anyway */
 
-/* the store: the panel calibration (the platform's, where every fm1-base firmware keeps it), the user presets in
- * Felucca's settings pair, then NPROJ project slots of PROJ_NOBJ objects each (the settings, then the LZ chunks of
- * the patterns), two 4 KB sectors an object, from 0x97000 up to 0xC1000. The user sample bank is raw flash beside
- * them (dsp/sample.h: 0xCF000..0xDBFFF, plat_data). Free: 0xC1000..0xCEFFF, 0xDE000..0xDFFFF. LOOM-8 was never
- * released: its own platform's map (four slots) is not kept. */
+/* the store, all in the data area: the panel calibration (the platform's, where every fm1-base firmware keeps it),
+ * the user presets at 0xDE000, then NPROJ project slots of PROJ_NOBJ objects each (the settings, then the LZ chunks
+ * of the patterns), two 4 KB sectors an object, from 0x97000 up to 0xC1000. The user sample bank is raw flash
+ * beside them (dsp/sample.h: 0xCF000..0xDBFFF, plat_data). Free: 0xC1000..0xCEFFF (room for a bigger sample bank)
+ * and Felucca's settings pair at 0xFC000. LOOM-8 was never released, so this map did not have to keep its own
+ * platform's (four slots); it does, but for the fourth slot: the same numbers at the same places, so what a
+ * development build saved in slots 1 to 3, the presets and the samples carry over */
 #define NPROJ 3                         /* project slots in flash */
 #define PROJ_NOBJ 7
 enum { OBJ_PANEL, OBJ_PRESETS, OBJ_PROJ0, OBJ_NOBJ = OBJ_PROJ0 + NPROJ * PROJ_NOBJ };
 #define OBJ_PROJ(slot, k) (OBJ_PROJ0 + (slot) * PROJ_NOBJ + (k))
-#define APP_STORE_MAP {0xDC000u, 0xFC000u, \
+#define APP_STORE_MAP {0xDC000u, 0xDE000u, \
     0x97000u, 0x99000u, 0x9B000u, 0x9D000u, 0x9F000u, 0xA1000u, 0xA3000u, \
     0xA5000u, 0xA7000u, 0xA9000u, 0xAB000u, 0xAD000u, 0xAF000u, 0xB1000u, \
     0xB3000u, 0xB5000u, 0xB7000u, 0xB9000u, 0xBB000u, 0xBD000u, 0xBF000u}
