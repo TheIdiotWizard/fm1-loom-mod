@@ -24,7 +24,7 @@
  * from its keys or its steps; its link track plays its keys in parallel). Punch-in FX are a bit mask
  * per group, from held keys (seq_punch_key, group-wide or aimed at one track) or the punch track's
  * steps; the sequencer runs the ones that change the sequence (mute, stutter, repeat, echo, the fills,
- * octave, chop, ring) and hands the engine the masks for the rest (wobble, pan).
+ * octave, chop, ring) and hands the engine the masks for the rest (warble, pan).
  *
  * Clock: internal (BPM) or MIDI clock in (24 ppqn, seq_ext_clock); clock and transport out through
  * the sink. Everything the main loop changes is a flag or a byte, picked up at the next block. */
@@ -37,12 +37,12 @@
 #define SEQ_FS 44100u
 /* throws (punch-in FX): twelve, the same in both octaves. White keys 1..7 of an octave: mute, stutter (a
  * two-sixteenth loop), repeat (a four-sixteenth loop), echo (a fading loop), build, floor, jumble (fills); its
- * black keys 1..5: wobble (a vibrato; on drums a high-pass too), pan (an auto-pan), octave (drums up, melodic
+ * black keys 1..5: warble (a vibrato; on drums a high-pass too), pan (an auto-pan), octave (drums up, melodic
  * down), chop (short notes), ring (long notes and tails). The bit order is stored in throw steps: keep it. Bits 0..11 = the lower octave (percussive tracks), 16..27 = the upper
  * (melodic tracks). On the FM-1 the lower octave is keys F3..E4, the upper F4..E5 (F5, F#5, G5 idle). */
 #define NPUNCH_FX 32
 #define NPUNCH 12
-enum { PX_MUTE, PX_STUTTER, PX_REPEAT, PX_ECHO, PX_BUILD, PX_FLOOR, PX_JUMBLE, PX_WOBBLE, PX_PAN, PX_OCTAVE,
+enum { PX_MUTE, PX_STUTTER, PX_REPEAT, PX_ECHO, PX_BUILD, PX_FLOOR, PX_JUMBLE, PX_WARBLE, PX_PAN, PX_OCTAVE,
        PX_CHOP, PX_RING };
 #define PX_MEL 16                     /* + PX_* = the melodic octave's bit */
 #define PX_VALID(fx) ((fx) >= 0 && (fx) < NPUNCH_FX && ((fx) & 15) < NPUNCH)   /* a real bit: 0..11, 16..27 */
@@ -50,7 +50,7 @@ extern const char *const PUNCH_NAME[NPUNCH];          /* "mute", "stutter", ... 
 /* a key number 0..26 (F3 = 0) to its punch bit, -1 for the idle keys; and back */
 int punch_of_key(int key);
 int punch_key_of(int fx);
-/* What each effect does here (the engine does wobble and pan from the masks):
+/* What each effect does here (the engine does warble and pan from the masks):
  *   mute      the group's (or the track's) steps and keys do not sound (mute wins over everything)
  *   stutter   the step playing at the punch-in and the next ones over two sixteenths repeat while held
  *   repeat    the same over a beat (four sixteenths)

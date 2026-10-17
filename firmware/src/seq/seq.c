@@ -85,9 +85,9 @@ static const int8_t SIN32[32] = {0, 25, 49, 71, 90, 106, 117, 125, 127, 125, 117
 static const uint8_t ARP_NUM[9] = {4, 8, 2, 4, 1, 2, 1, 1, 1}, ARP_DEN[9] = {1, 3, 1, 3, 1, 3, 2, 3, 4};
 
 const char *const PUNCH_NAME[NPUNCH] = {"mute", "stutter", "repeat", "echo", "build", "floor", "jumble",
-                                        "wobble", "pan", "octave", "chop", "ring"};
+                                        "warble", "pan", "octave", "chop", "ring"};
 /* an octave's keys in chromatic order (F F# G G# A A# B C C# D D# E) to their effect */
-static const uint8_t KEY2PX[12] = {PX_MUTE, PX_WOBBLE, PX_STUTTER, PX_PAN, PX_REPEAT, PX_OCTAVE, PX_ECHO,
+static const uint8_t KEY2PX[12] = {PX_MUTE, PX_WARBLE, PX_STUTTER, PX_PAN, PX_REPEAT, PX_OCTAVE, PX_ECHO,
                                    PX_BUILD, PX_CHOP, PX_FLOOR, PX_RING, PX_JUMBLE};
 const char *const BS_NAME[NBS] = {"major", "minor", "dorian", "mixolyd", "lydian", "phrygian", "harm min",
                                   "penta", "penta min", "chrom"};

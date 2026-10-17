@@ -540,7 +540,7 @@ static void perf_tick(uint32_t n)
         int drum = eng_drum[t];
         uint32_t m = drum ? punch_d : punch_m;
         int mute = (int)((m >> PX_MUTE) & 1u), pan_on = (int)((m >> PX_PAN) & 1u);
-        int filt = (int)((m >> PX_WOBBLE) & 1u), tail = (int)((m >> PX_RING) & 1u), pan;
+        int filt = (int)((m >> PX_WARBLE) & 1u), tail = (int)((m >> PX_RING) & 1u), pan;
         p->pitch_c = (int16_t)(bend_c[t] + (filt ? (int)(vib * (drum ? PUNCH_VIB_DRUM : PUNCH_VIB_MEL)) : 0));
         p->cut = 0;
         p->hp = (uint8_t)(drum && filt ? PUNCH_HP : 0);

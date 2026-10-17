@@ -1149,7 +1149,7 @@ static void t_punch_keys(void)
 {
     int k;
     cur = "punch-keys";
-    CHECK(punch_of_key(0) == PX_MUTE && punch_of_key(1) == PX_WOBBLE && punch_of_key(2) == PX_STUTTER &&
+    CHECK(punch_of_key(0) == PX_MUTE && punch_of_key(1) == PX_WARBLE && punch_of_key(2) == PX_STUTTER &&
           punch_of_key(4) == PX_REPEAT && punch_of_key(6) == PX_ECHO && punch_of_key(7) == PX_BUILD &&
           punch_of_key(9) == PX_FLOOR && punch_of_key(11) == PX_JUMBLE);
     CHECK(punch_of_key(3) == PX_PAN && punch_of_key(5) == PX_OCTAVE && punch_of_key(8) == PX_CHOP &&
@@ -1429,10 +1429,10 @@ static void t_pitch_short_long(void)
     CHECK(near(off_of(on_n(0))->t - on_n(0)->t, 2 * L16, 2));                        /* two steps */
     CHECK((nth(E_DRUM, 1, 0)->tag & 2u) == 2u);
     /* filter / vibrato and stereo only reach the engine's masks */
-    seq_punch_key(&S, PX_WOBBLE, 1, -1);
+    seq_punch_key(&S, PX_WARBLE, 1, -1);
     seq_punch_key(&S, PX_MEL + PX_PAN, 1, -1);
     run(10);
-    CHECK(nth(E_PUNCH, -1, count(E_PUNCH, -1) - 1)->a == ((1 << PX_RING) | (1 << PX_WOBBLE)) &&
+    CHECK(nth(E_PUNCH, -1, count(E_PUNCH, -1) - 1)->a == ((1 << PX_RING) | (1 << PX_WARBLE)) &&
           nth(E_PUNCH, -1, count(E_PUNCH, -1) - 1)->b == ((1 << PX_RING) | (1 << PX_PAN)));
     printf("ok %s\n", cur);
 }
