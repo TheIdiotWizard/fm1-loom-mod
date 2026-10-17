@@ -20,6 +20,7 @@
  *   load N                       every block costs N % (the overload guard's input); -1 = measured
  *   steps T PAT                  print track T's pattern PAT: each step's notes, component, condition
  *   step T PAT S NOTE VEL        write one note on step S (NOTE 0 clears the step)
+ *   chord T PAT S LEN N1 N2 [N3 [N4]]  notes together on step S, LEN quarter steps long
  *   scene N                      switch to scene N now
  *   punch KEY on|off             a punch-in key (0..26 = F3..G5, or w0../b0..) held or released, on the group
  *   brainkey N on|off            a key on the BRAIN track (MIDI note N)
@@ -619,9 +620,11 @@ int main(int argc, char **argv)
         ann_frame(HELLO, sizeof HELLO, now_ms);
     }
     while (fgets(line, sizeof line, sc)) {
-        char cmd[32] = {0}, a[256] = {0}, b[64] = {0}, c[64] = {0}, d[64] = {0}, e[64] = {0};
+        char cmd[32] = {0}, a[256] = {0}, b[64] = {0}, c[64] = {0}, d[64] = {0}, e[64] = {0}, f[16] = {0},
+             g[16] = {0}, h[16] = {0};
         lineno++;
-        if (line[0] == '#' || sscanf(line, "%31s %255s %63s %63s %63s %63s", cmd, a, b, c, d, e) < 1)
+        if (line[0] == '#' ||
+            sscanf(line, "%31s %255s %63s %63s %63s %63s %15s %15s %15s", cmd, a, b, c, d, e, f, g, h) < 1)
             continue;
         if (!strcmp(cmd, "wait"))
             run_ms((uint32_t)atoi(a));
@@ -728,6 +731,20 @@ int main(int argc, char **argv)
                 uint8_t n1 = (uint8_t)note;
                 step_set_notes(&tp->st[s], &n1, 1, vel);
             }
+        } else if (!strcmp(cmd, "chord")) {          /* chord T PAT S LEN N1 N2 [N3 [N4]]: notes on one step, LEN quarter steps */
+            tpat_t *tp = pat_of(atoi(a), atoi(b));
+            int s = atoi(c) - 1, n = 0;
+            uint8_t notes[SN];
+            const char *w[4] = {e, f, g, h};
+            for (int i = 0; i < SN; i++)
+                if (w[i][0] && atoi(w[i]) > 0)
+                    notes[n++] = (uint8_t)atoi(w[i]);
+            if (!tp || s < 0 || s >= NSTEP || !n) {
+                printf("line %d: no step %s %s %s\n", lineno, a, b, c);
+                return 2;
+            }
+            step_set_notes(&tp->st[s], notes, n, 90);
+            tp->st[s].len = (uint8_t)atoi(d);
         } else if (!strcmp(cmd, "scene"))
             engine_scene((atoi(a) - 1) & (NSCENE - 1), 0);
         else if (!strcmp(cmd, "punch")) {            /* punch KEY on|off: through the key's punch bit, on the group */
