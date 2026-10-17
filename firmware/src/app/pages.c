@@ -156,7 +156,8 @@ static struct {
     uint8_t ccomp;                                   /* HOME + step: the component the black keys value */
     uint8_t lockpg;                                  /* a step held + EDIT / ENV / FX / LFO: the lock editor's page + 1 */
     uint8_t cursor;                                  /* step record: the step the keys write */
-    uint8_t rec_armed;                               /* REC while stopped: step record */
+    uint8_t rec_armed;                               /* REC held while stopped: step record */
+    uint8_t rec_live;                                /* REC tapped while stopped: PLAY records */
     uint8_t srec_down;                               /* step record: the keys of the chord being written still down */
     uint8_t rec_held, rec_latched;                   /* REC down while playing (momentary); REC + PLAY latched it */
     uint8_t maestro_rec;                             /* REC on Players with maestro: the next chord is recorded */
@@ -437,7 +438,7 @@ static int cur_scene(void) { return seq.scene < NSCENE ? seq.scene : 0; }
 static int cur_pat(int t) { return is_seqt(t) ? seq.ppat[t] % NPATT : 0; }
 static tpat_t *tpat(int t) { return &pats.pat[is_seqt(t) ? t : 0][cur_pat(t)]; }
 static int playing(void) { return seq.playing; }
-static int recording(void) { return seq.rec || seq.rec_wait || ui.rec_armed || ui.maestro_rec; }
+static int recording(void) { return seq.rec || seq.rec_wait || ui.rec_armed || ui.rec_live || ui.maestro_rec; }
 static int step_shown(int i) { return ui.bar * 16 + i; }
 static int home_held(void) { return ui.btn >> B_HOME & 1u; }
 static int pl_type(int t) { return is_aux(t) ? PL_OFF : proj.trk[t].par[TP_PLAYER] % NPL; }
@@ -818,6 +819,16 @@ static void page_knobs(knob_t *k)
     tpat_t *tp = tpat(trk);
     char t[16], *e;
     memset(k, 0, 4 * sizeof k[0]);
+    if ((ui.btn >> B_REC & 1u) && !home_held()) {   /* REC held: the record settings */
+        static const char *const CIN[3] = {"off", "1 bar", "2 bars"};
+        static const char *const MODE[2] = {"overdub", "replace"};
+        kname(&k[0], "CLICK", METRO_NAME, proj.metronome, 3);
+        kname(&k[1], "COUNT", CIN, proj.rsv[0] % 3u, 3);
+        if (is_seqt(trk))
+            kn(&k[2], "QUANT", tp->quant, 100);
+        kname(&k[3], "MODE", MODE, proj.rsv[2] & 1u, 2);
+        return;
+    }
     if (ui.lockpg) {
         lock_knobs(k);
         return;
@@ -1095,6 +1106,10 @@ static void page_footer(char *t)
             upcase(t);
         } else
             s_cat(t, "SEL yes|HOME no");
+        return;
+    }
+    if ((ui.btn >> B_REC & 1u) && !home_held()) {   /* REC held: its knobs, and step record */
+        s_cat(t, playing() ? "KNOBS record settings|PLAY stop" : "KNOBS record settings|SEQ step record");
         return;
     }
     if (ui.card) {
@@ -1445,9 +1460,9 @@ static const struct { uint8_t btn; uint32_t pages; const char *title, *l1, *l2; 
      "Hold SAVE and press a white key: the sound as that user preset."},
     {B_SAVE, PG_ANY, "Save", "Tap to save the project.", "Hold SAVE and press white key 1 to 4 to save to that slot."},
     {B_REC, PG(P_PLAYERS) | PG(P_PLAYERS2) | PG(P_PLAYERS3), "Recording",
-     "With strum, the chord you hold next becomes its chord.", "Else: hold it and play; stopped, a tap arms step record."},
-    {B_REC, PG_ANY, "Recording", "Stopped: a tap, then each key writes a step. OCT+ rests.",
-     "Playing: hold it and play; with PLAY it stays on."},
+     "With strum, the chord you hold next becomes its chord.", "Else a tap arms recording; PLAY records."},
+    {B_REC, PG_ANY, "Recording", "A tap arms it; PLAY records. Playing, a tap punches in or out.",
+     "Held: the knobs set click, count-in, quantise. + SEQ: step record."},
     {B_PLAY, PG(P_SONG), "Play", "Plays the song from slot 1. PLAY again stops.", "HOME + PLAY redoes."},
     {B_PLAY, PG_ANY, "Play", "Starts and stops. Twice quickly: from the top.", "HOME + PLAY redoes."},
     {B_OCTDN, PG_STEPS, "Bar", "Shows the bar before. A step held: nudges it earlier.",
@@ -1638,7 +1653,10 @@ static void list_build(void)
         list_add(ACTION_NAME[A_LOAD_PROJ], slot_t, LK_PICK, A_LOAD_PROJ);
         list_add(ACTION_NAME[A_NEW_PROJ], 0, LK_ACTION, A_NEW_PROJ);
         list_add(ACTION_NAME[A_USB_AUDIO], USBA_NAME[proj.usb_full & 1u], LK_PICK, A_USB_AUDIO);
-        list_add(ACTION_NAME[A_COUNT_IN], ONOFF[proj.rsv[0] & 1u], LK_PICK, A_COUNT_IN);   /* (rsv[0]: the count-in) */
+        {
+            static const char *const CIN[3] = {"off", "1 bar", "2 bars"};
+            list_add(ACTION_NAME[A_COUNT_IN], CIN[proj.rsv[0] % 3u], LK_PICK, A_COUNT_IN);   /* (rsv[0]: the count-in) */
+        }
         list_add(ACTION_NAME[A_THEME], THEME_OF_PROJ()->name, LK_PICK, A_THEME);   /* (rsv[1]: the theme) */
     }
     if (lst.sel >= lst.n)
@@ -1884,6 +1902,7 @@ static void draw_steps(void)
                       (uint32_t)ui.lockpg << 24 | (uint32_t)(seq.rec_wait != 0) << 30);
     h = hash_u(h, ui.cstep | (uint32_t)ui.rem_fx << 16 | (uint32_t)ui.rem_seg << 24 | (uint32_t)(ui.frame / 8 & 1u) << 31);
     h = hash_pat(h, tp);
+    h = hash_s(hash_u(h, proj.trk[trk].par[TP_ENGINE]), proj.trk[trk].name);   /* the sound's name, shown */
     for (int i = 0; i < 4; i++)
         h = hash_u(h, ui.rem[i]);
     h = hash_u(h, lane_count(pats.lane));
@@ -1900,9 +1919,27 @@ static void draw_steps(void)
         h = hash_u(h, step_has_lock(pats.lane, trk, pt, ui.bar * 16 + i));
     if (!begin_main(h))
         return;
-    if (drum)
-        s_cat(s_cat(t, "sound: "), DL_SOUND_NAME[ui.dsound % DL_NSOUND]);
-    else if (trk == AUX_PUNCH) {
+    if (!is_aux(trk)) {                              /* an instrument: its sound first, then what a step takes */
+        char nm[NAME_LEN + 1];
+        int32_t x;
+        for (int i = 0; i < NAME_LEN; i++)
+            nm[i] = proj.trk[trk].name[i];
+        nm[NAME_LEN] = 0;
+        x = text_fit(ST_X + 2, 0, &FONT_XS, nm[0] ? nm : EG_NAME[proj.trk[trk].par[TP_ENGINE] % NENGINE], 96, K_TEXT);
+        if (drum)
+            s_cat(t, DL_SOUND_NAME[ui.dsound % DL_NSOUND]);
+        else {
+            char *e = t;
+            *e = 0;
+            for (int i = 0; i < ui.nrem && i < SN; i++) {
+                if (i)
+                    e = s_cat(e, " ");
+                e = note_name(ui.rem[i], e);
+            }
+        }
+        text_fit(x + 8, 0, &FONT_XS, t, 168 - (x + 8), K_DIM);
+        t[0] = 0;
+    } else if (trk == AUX_PUNCH) {
         char *e = s_cat(t, "fx: ");
         if (ui.rem_fx && PX_VALID(ui.rem_fx - 1))
             s_cat(s_cat(e, PUNCH_NAME[(ui.rem_fx - 1) & 15]), ui.rem_fx - 1 >= PX_MEL ? " (melodic)" : " (drums)");
@@ -1914,14 +1951,15 @@ static void draw_steps(void)
         else
             s_cat(t, "segment: play a key on EDIT first");
     } else {
-        char *e = s_cat(t, trk == AUX_BRAIN ? "chord: " : "notes: ");
+        char *e = s_cat(t, "chord: ");
         for (int i = 0; i < ui.nrem && i < SN; i++) {
             if (i)
                 e = s_cat(e, " ");
             e = note_name(ui.rem[i], e);
         }
     }
-    cv_text(ST_X + 2, 0, &FONT_XS, t, K_DIM);
+    if (t[0])
+        cv_text(ST_X + 2, 0, &FONT_XS, t, K_DIM);
     {
         int nb = (tp->len + 15) / 16, pb = ph / 16;
         for (int b = 0; b < NBAR; b++) {
@@ -2860,7 +2898,7 @@ static void draw_setup(void)
     setup_row(34, "clock", seq.ext ? "MIDI in" : "internal");
     setup_row(50, "MIDI out", proj.send_clock || proj.send_notes ? (proj.send_clock && proj.send_notes ? "clock, notes"
                                                                   : proj.send_clock ? "clock" : "notes") : "off");
-    setup_row(66, "count-in", ONOFF[proj.rsv[0] & 1u]);
+    setup_row(66, "count-in", proj.rsv[0] % 3u == 2u ? "2 bars" : proj.rsv[0] % 3u ? "1 bar" : "off");
     setup_row(82, "theme", THEME_OF_PROJ()->name);
     setup_row(98, "version", XY_VERSION);
     cv_blit(0, MAIN_Y);

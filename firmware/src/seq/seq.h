@@ -237,6 +237,10 @@ typedef struct {
     uint32_t tape_last;               /* samples per sixteenth last sent to the tape */
     uint32_t punch_sent_d, punch_sent_m;
     uint8_t rec_note[8], rec_trk[8], rec_step[8];   /* live record: keys down and the steps they took */
+    volatile uint8_t rec_replace;     /* live record replaces: the steps the playhead passes on rec_target are
+                                       * cleared, unless written in this pass (the UI's MODE) */
+    volatile uint8_t rec_target;      /* the track the keys record into (the UI's) */
+    uint32_t rec_written[NSEQT][2];   /* steps written since the playhead last passed them */
     uint32_t rec_age[8];
 } seq_t;
 

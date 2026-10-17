@@ -35,8 +35,8 @@ to 16 from the left, black keys 1 to 11.
    <img src="img/screen-beat-playing.png" width="240" alt="Steps on T1 kit, playing: kick on 1, 5, 9 and 13, snare on 5 and 13, hats between; a tick for every sound on a step, the playhead lit" title="The beat playing">
 2. **A bass line.** Turn **ALGORITHM** to T2 stack. On the Steps page, hold **SEQ** and play a low note:
    the keys are a keyboard while **SEQ** is down, and the note is remembered. Let go and press white keys 1, 4,
-   7 and 11. Hold **SEQ**, play another note, let go and press white key 14. Or tap **REC** and play the
-   notes one after another: each one goes on the next step. Press **EDIT** and turn **KNOB 1** while it plays
+   7 and 11. Hold **SEQ**, play another note, let go and press white key 14. Or hold **REC**, press **SEQ** and
+   play the notes one after another: each one goes on the next step. Press **EDIT** and turn **KNOB 1** while it plays
    to hear the shape change.
 
    <img src="img/screen-seq-held.png" width="240" alt="Steps on T2 stack with SEQ held: the keys play notes, and the line above the grid says the notes a step will write" title="SEQ held on Steps"> <img src="img/screen-step-record2.png" width="240" alt="Step record on T2: the red cursor on the next step after the notes written so far; the footer says KEYS write, OCT+ rest, OCT- back, REC done" title="Step record">
@@ -127,9 +127,10 @@ press…" means keep **HOME** down while you press the next thing.
 | change the filter | Press **ENV** and turn **SELECT** to Filter. **PRESETS** turns the filter type. |
 | use the effects | Press **FX**: the track's sends. Turn **SELECT** for FX I and FX II; **PRESETS** picks the effect. |
 | play | Press **PLAY**: every track starts from step 1. |
-| record live | Hold **REC** and press **PLAY**. Step 1 blinks red until you play the first key. |
-| record while playing | Hold **REC** and play: it records while you hold it. Hold **REC** and press **PLAY** to keep it on. |
-| record step by step | Stopped, on Steps, tap **REC**. The red cursor starts after the last note; each key (or chord) you play writes it and moves on. **OCT+** leaves a rest, **OCT−** goes back. **REC** again ends. |
+| record live | Tap **REC** (armed), then press **PLAY**: it records from step 1 at once. |
+| record while playing | Tap **REC** to punch in, again to punch out. |
+| set the click, count-in, quantise | Hold **REC** and turn the knobs: CLICK, COUNT, QUANT, MODE (overdub or replace). |
+| record step by step | Stopped, on Steps, hold **REC** and press **SEQ**. The red cursor starts after the last note; each key (or chord) you play writes it and moves on. **OCT+** leaves a rest, **OCT−** goes back. **REC** again ends. |
 | undo | Hold **HOME** and press **REC**. Hold **HOME** and press **PLAY** to redo. |
 | set the tempo | Press **HOME** and turn **KNOB 1**. Hold **HOME** and turn it for tenths. On any page, hold **HOME** and turn **SELECT**. |
 | use a throw | Hold **HOME** and press a key. The lower octave works on the track you are on, the upper octave on its whole group. |
@@ -146,8 +147,8 @@ press…" means keep **HOME** down while you press the next thing.
 
 | Control | What it does |
 | --- | --- |
-| **PLAY** | Starts (every track from step 1) and stops. A track whose scale or length you change stays in phase with the rest. On the Song page, it plays the song. With **REC** held, it starts live recording. |
-| **REC** | Held while playing: records while held. Stopped: a tap arms step record. On Players with strum, it records the chord. |
+| **PLAY** | Starts (every track from step 1) and stops. A track whose scale or length you change stays in phase with the rest. On the Song page, it plays the song. With **REC** armed, it starts live recording. |
+| **REC** | Stopped: a tap arms live recording. Playing: a tap punches in or out. Held: the knobs are the record settings; with **SEQ**, step record. On Players with strum, it records the chord. |
 | **SEL** | Opens a list of this page's settings and actions. With a step held, its notes. When LOOM-8 asks a question, **SEL** means yes. |
 | **HOME** | Opens Arrange. On Arrange, it opens the Song page. Held, it is the shift key: tricks, throws, undo and redo, the fine tempo, scenes, mutes on Mix. When LOOM-8 asks a question, **HOME** means no. |
 | **SEQ** | Opens Steps. Its page 2 is Bar. Hold it on Steps and the keys play the track and set what a step writes. |
@@ -314,20 +315,24 @@ variations; weave a drum pattern's rhythm with a melody's notes for a riff.
 
 ## Recording
 
-- **Live recording**: hold **REC** and press **PLAY**. Step 1 blinks red; recording starts with the first key
-  you play, and the keys write steps as you play, quantised by the Bar page. Press **PLAY** to stop.
-- **While playing**: hold **REC** and play. It records only while you hold **REC**. Hold **REC** and press
-  **PLAY** to keep it on; press **REC** again to turn it off.
-- **Step by step**: stopped, tap **REC**. On Steps the keys become a keyboard and a red cursor marks the
-  step they write, starting after the pattern's last note. A key, or keys held together, writes the step and
-  the cursor moves on when you let go. **OCT+** leaves a rest, **OCT−** goes back a step. On a drum track the
-  sound is added to the step. Tap **REC** again to stop. It works on the sound pages too, with a strip of the
-  bar along the foot of the screen.
+- **Live recording**: tap **REC** to arm it (REC lights), then press **PLAY**. Every track starts from step 1
+  and the keys you play are written as you play them, quantised by QUANT; chords land on one step together.
+  Press **PLAY** to stop.
+- **While playing**: tap **REC** to punch in, tap it again to punch out.
+- **Chords on the conductor**: turn **ALGORITHM** to COND and record the same way. Each chord lands on the
+  nearest step (set its scale to 4 on the Bar page, so a step is a beat), and a new chord replaces the one
+  that was there.
+- **Record settings**: hold **REC**. The knobs become CLICK (off, while recording, on), COUNT (a count-in of
+  off, 1 or 2 bars), QUANT (how far notes are pulled onto the steps) and MODE: overdub adds to the pattern,
+  replace clears the steps the playhead passes as you record over them.
+- **Step by step**: stopped, hold **REC** and press **SEQ**. On Steps the keys become a keyboard and a red
+  cursor marks the step they write, starting after the pattern's last note. A key, or keys held together,
+  writes the step and the cursor moves on when you let go. **OCT+** leaves a rest, **OCT−** goes back a step.
+  On a drum track the sound is added to the step. Tap **REC** to stop. It works on the sound pages too, with
+  a strip of the bar along the foot of the screen.
 - **Throws** you hold while recording are written into the THROW track's pattern.
-- **Count-in**: Setup's list has COUNT-IN. On, live recording starts with a bar of clicks instead of waiting
-  for the first key.
 
-<img src="img/screen-step-record.png" width="240" alt="REC tapped on Steps: the red cursor waits on the step after the last note" title="Step record armed">
+<img src="img/screen-step-record.png" width="240" alt="REC + SEQ on Steps: the red cursor waits on the step after the last note" title="Step record">
 
 Hold **HOME** and press **REC** to undo the last change to the pattern. Hold **HOME** and press **PLAY** to
 redo it. One stage, the selected track's pattern; locks stay as they are.

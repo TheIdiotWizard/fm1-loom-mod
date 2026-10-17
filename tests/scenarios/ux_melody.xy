@@ -30,8 +30,10 @@ expect note 2 1 1 60
 expect note 2 1 3 62
 expect note 2 1 5 64
 expect note 2 1 7 67
-# step record on Steps: the cursor starts after the last note (step 8); keys write and move on
-tap REC
+# step record on Steps (REC + SEQ): the cursor starts after the last note (step 8); keys write and move on
+press REC
+tap SEQ
+release REC
 wait 60
 shot b04_rec_armed.png
 tapkey 12
@@ -60,7 +62,9 @@ shot b06_chord_step.png
 expect note 2 1 12 53
 # step record on EDIT: the strip shows the cursor
 tap EDIT
-tap REC
+press REC
+tap SEQ
+release REC
 wait 60
 shot b07_rec_on_edit.png
 tapkey 12

@@ -1175,6 +1175,13 @@ static void fire_step(seq_t *s, int t, const seq_sink_t *o)
         }
     }
     tp = tpat(s, t);
+    if (s->rec && s->playing && !s->count_in && s->rec_replace && t == s->rec_target &&
+        !(s->rec_written[t][p >> 5] >> (p & 31) & 1u)) {
+        step_t *cl = &s->P->pat[t][s->ppat[t] % NPATT].st[p];   /* replace: what the playhead passes goes, but not what was just played */
+        for (int j = 0; j < SN; j++)
+            cl->note[j] = 0;
+    }
+    s->rec_written[t][p >> 5] &= ~(1u << (p & 31));
     st = &tp->st[p];
     tr->pos = (uint8_t)p;
     tr->grid_h = (uint8_t)ts_halves(tp);
@@ -1640,6 +1647,11 @@ static void rec_key_on(seq_t *s, int t, int note, int vel)
     ticks = ticks * (100 - q) / 100;
     ticks = ticks < -12 ? -12 : ticks > 12 ? 12 : ticks;
     st = &tp->st[p];
+    if (!(s->rec_written[t][p >> 5] >> (p & 31) & 1u) && (t == AUX_BRAIN || (s->rec_replace && t == s->rec_target))) {
+        for (i = 0; i < SN; i++)      /* a new chord on the conductor (or replace): the step's old notes go */
+            st->note[i] = 0;
+    }
+    s->rec_written[t][p >> 5] |= 1u << (p & 31);
     if (step_empty(st)) {
         st->note[0] = (uint8_t)note;
         st->vel = (uint8_t)vel;
@@ -1847,6 +1859,12 @@ static void brain_key_in(seq_t *s, int note, int on, const seq_sink_t *o)
     if (note < 1 || note > 127)
         return;
     phys_set(s->brain_phys, 0, note, on);
+    if (s->rec && s->playing && !s->count_in && !s->rec_wait) {   /* live record: the chords go on its steps */
+        if (on)
+            rec_key_on(s, AUX_BRAIN, note, 100);
+        else
+            rec_key_off(s, AUX_BRAIN, note);
+    }
     if (on) {
         for (w = 0; w < 4 && !root; w++)
             for (i = 0; i < 32; i++)

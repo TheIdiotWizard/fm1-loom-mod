@@ -1,0 +1,56 @@
+# live recording: tap REC to arm, PLAY records at once (no waiting); chords on the conductor land on its
+# beat steps, a new chord replacing the step's old one; REC held shows the record settings
+wait 300
+turn ALGO 8
+expect trk 9
+tap SEQ
+tap REC
+expect playing 0
+tap PLAY
+expect playing 1
+wait 480
+key 0 down
+key 4 down
+key 7 down
+wait 120
+key 0 up
+key 4 up
+key 7 up
+wait 300
+tap PLAY
+expect playing 0
+expect note 9 1 2 53
+# again over it: the new chord replaces the old one on that step
+tap REC
+tap PLAY
+wait 480
+key 2 down
+key 5 down
+key 9 down
+wait 120
+key 2 up
+key 5 up
+key 9 up
+wait 300
+tap PLAY
+expect note 9 1 2 55
+# punch in and out while playing, on T2
+turn ALGO -7
+expect trk 2
+tap PLAY
+tap REC
+wait 200
+tapkey 0
+wait 100
+tap REC
+wait 200
+tap PLAY
+expect playing 0
+# REC held: the record settings on the knobs
+press REC
+turn K1 1
+turn K2 1
+wait 60
+shot rec_knobs.png
+release REC
+expect playing 0

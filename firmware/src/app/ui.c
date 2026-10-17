@@ -354,13 +354,6 @@ static void play_press(void)
     int twice = now - ui.play_t < PLAY_TWICE_MS, rec_down = ui.btn >> B_REC & 1u;
     ui.play_t = now;
     if (playing()) {
-        if (rec_down) {                          /* REC + PLAY while playing: recording stays on */
-            ui.rec_latched = 1;
-            ui.btn_used |= 1u << B_REC;
-            seq_rec(&seq, 1);
-            say("RECORDING", "latched");
-            return;
-        }
         engine_transport(0);
         rec_off();
         return;
@@ -376,32 +369,35 @@ static void play_press(void)
         engine_scene(pats.song.slot[0].scene % NSCENE, 0);
     } else if (!twice)
         seq.song_on = 0;
-    if (rec_down) {                              /* REC + PLAY stopped: live recording, from the first key */
+    if (rec_down || ui.rec_live) {               /* armed (or REC + PLAY): from step 1, recording at once */
         ui.btn_used |= 1u << B_REC;
         ui.rec_armed = 0;
+        ui.rec_live = 0;
         ui.rec_latched = 1;
-        if (proj.rsv[0] & 1u) {                  /* (Setup's count-in option) */
-            seq.count_in = 1;
-            seq_rec(&seq, 1);
+        seq.count_in = (uint8_t)(proj.rsv[0] % 3u);   /* (Setup's / REC's count-in: 0, 1 or 2 bars) */
+        seq_rec(&seq, 1);
+        if (seq.count_in)
             say("COUNT-IN", "then recording");
-        } else {
-            seq_rec(&seq, 2);
-            say("RECORDING", "play to start");
-        }
+        else
+            say("RECORDING", 0);
         engine_transport(3);
         return;
     }
-    if (ui.rec_armed) {
+    if (ui.rec_armed)                            /* step record ends when the transport starts */
         ui.rec_armed = 0;
-        if (proj.rsv[0] & 1u) {
-            seq.count_in = 1;
-            seq_rec(&seq, 1);
-            ui.rec_latched = 1;
-        }
-    }
     engine_transport(3);                         /* from a stop, always from the top: every track's step 1 */
 }
-static void rec_tap(void)                        /* REC released, unused, while stopped */
+static void step_rec_toggle(void)                /* REC + SEQ, stopped: step record on / off */
+{
+    ui.rec_live = 0;
+    ui.rec_armed = (uint8_t)!ui.rec_armed;
+    if (ui.rec_armed) {
+        step_rec_start();
+        say("STEP RECORD", "keys write steps");
+    } else
+        say("RECORD OFF", 0);
+}
+static void rec_tap(void)                        /* REC released, no knob turned while it was held */
 {
     int trk = sel_trk();
     if (ui.maestro_rec) {
@@ -414,34 +410,44 @@ static void rec_tap(void)                        /* REC released, unused, while 
         say("HOLD A CHORD", "for strum");
         return;
     }
-    if (playing())
-        return;
-    ui.rec_armed = (uint8_t)!ui.rec_armed;
-    if (ui.rec_armed) {
-        step_rec_start();
-        say("STEP RECORD", "keys write steps");
-    } else
-        say("RECORD OFF", 0);
-}
-static void rec_down(void)                       /* REC pressed while playing: momentary recording */
-{
-    if (ui.maestro_rec || !playing())
-        return;
-    if (ui.rec_latched) {                        /* latched: a press turns it off */
-        rec_off();
-        say("RECORD OFF", 0);
-        ui.btn_used |= 1u << B_REC;
+    if (playing()) {                             /* a tap while playing: punch in, punch out */
+        if (seq.rec) {
+            rec_off();
+            say("RECORD OFF", 0);
+        } else {
+            ui.rec_latched = 1;
+            seq_rec(&seq, 1);
+            say("RECORDING", 0);
+        }
         return;
     }
-    ui.rec_held = 1;
-    seq_rec(&seq, 1);
-    ui.btn_used |= 1u << B_REC;
+    if (ui.rec_armed) {                          /* a tap in step record: it ends */
+        ui.rec_armed = 0;
+        say("RECORD OFF", 0);
+        return;
+    }
+    ui.rec_live = (uint8_t)!ui.rec_live;         /* a tap, stopped: armed for live recording */
+    say(ui.rec_live ? "ARMED" : "RECORD OFF", ui.rec_live ? "PLAY records" : 0);
 }
-static void rec_up(void)
+/* REC held: the knobs are the record settings (turning one means the release does nothing else) */
+static void rec_knob(int k, int32_t e)
 {
-    if (ui.rec_held && !ui.rec_latched)
-        seq_rec(&seq, 0);
-    ui.rec_held = 0;
+    int trk = sel_trk();
+    ui.btn_used |= 1u << B_REC;
+    if (k == 0) {
+        proj.metronome = (uint8_t)clampi(proj.metronome + e, 0, 2);
+        engine_metronome(proj.metronome);
+    } else if (k == 1)
+        proj.rsv[0] = (uint8_t)clampi(proj.rsv[0] % 3u + e, 0, 2);
+    else if (k == 2) {
+        if (!is_seqt(trk))
+            return;
+        tpat(trk)->quant = (uint8_t)clampi(tpat(trk)->quant + e, 0, 100);
+    } else {
+        proj.rsv[2] = (uint8_t)(e > 0);
+        seq.rec_replace = proj.rsv[2];
+    }
+    mark_dirty();
 }
 
 /* ------------------------------------------------------------ steps --- */
@@ -988,7 +994,7 @@ static void key_down(int k)
     if (p == P_STEPS) {
         if (!is_seqt(trk))
             return;
-        if ((ui.btn >> B_SEQ & 1u) || ui.rec_armed || seq.rec || seq.rec_wait) {   /* a keyboard: SEQ held, recording */
+        if ((ui.btn >> B_SEQ & 1u) || ui.rec_armed || ui.rec_live || seq.rec || seq.rec_wait) {   /* a keyboard: SEQ held, recording */
             keyboard_down(k);
             return;
         }
@@ -1401,6 +1407,10 @@ static void knob(int k, int32_t e)
     int trk = sel_trk(), p;
     e = accel(EN_K1 + k, e);
     touch(k);
+    if ((ui.btn >> B_REC & 1u) && !home_held()) {
+        rec_knob(k, e);
+        return;
+    }
     if (ui.lockpg) {
         lock_knob(k, e);
         return;
@@ -1598,7 +1608,7 @@ static void list_change(int32_t e)
             }
             break;
         case A_COUNT_IN:
-            proj.rsv[0] = (uint8_t)(d > 0);
+            proj.rsv[0] = (uint8_t)clampi(proj.rsv[0] % 3u + d, 0, 2);
             mark_dirty();
             break;
         case A_THEME:
@@ -2033,6 +2043,11 @@ static void input(void)
                 ui.btn_used |= m;
                 continue;
             }
+            if (i == B_SEQ && (ui.btn >> B_REC & 1u) && !playing() && !ui.ask) {   /* REC + SEQ: step record */
+                step_rec_toggle();
+                ui.btn_used |= m | 1u << B_REC;
+                continue;
+            }
             if ((i == B_REC || i == B_PLAY) && home_held() && !ui.ask) {
                 do_undo(i == B_PLAY);
                 ui.btn_used |= m | 1u << B_HOME;
@@ -2051,19 +2066,11 @@ static void input(void)
                 ui.btn_used |= m;
                 continue;
             }
-            if (i == B_REC && playing() && !ui.ask) {
-                rec_down();
-                continue;
-            }
             if (!hold)
                 button_down((int)i);
         } else {
             if (ui.card == i + 1u)
                 ui.card = 0;
-            if (i == B_REC && ui.rec_held) {
-                rec_up();
-                continue;
-            }
             if (hold && !(ui.btn_used & m))
                 button_up((int)i);
         }
@@ -2789,6 +2796,8 @@ void ui_frame(void)
         if (ui.bar * 16 >= tpat(sel_trk())->len)
             ui.bar = 0;
     }
+    seq.rec_target = (uint8_t)(sel_trk() == AUX_BRAIN ? AUX_BRAIN : inst_trk());   /* where live recording writes */
+    seq.rec_replace = (uint8_t)(proj.rsv[2] & 1u);
     ink_follow();
     draw_header();
     draw_page();
