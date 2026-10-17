@@ -1145,3 +1145,10 @@ int drumline_sounding(const drumline_t *d)
             return 1;
     return 0;
 }
+int drumline_voices(const drumline_t *d)
+{
+    int i, n = 0;
+    for (i = 0; i < NDVOICE; i++)
+        n += d->v[i].on != 0;
+    return n;
+}

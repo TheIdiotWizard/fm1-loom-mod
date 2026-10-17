@@ -23,7 +23,10 @@ SECTIONS
     _rt_load = LOADADDR(.ram_text);
     .c1_text : { _c1_start = .; KEEP(*(.c1_text*)) . = ALIGN(4); _c1_end = .; } > RAMTEXT AT > XIP
     _c1_load = LOADADDR(.c1_text);
-    _rt_end = _c1_end;                  /* the guard's RAM code window covers both */
+    /* the audio's hottest code in RAM (XY_RAM_DSP=1 builds, tools/size_fns.py; empty otherwise) */
+    .ram_dsp : { _dsp_start = .; *(.ram_dsp*) . = ALIGN(4); _dsp_end = .; } > RAMTEXT AT > XIP
+    _dsp_load = LOADADDR(.ram_dsp);
+    _rt_end = _dsp_end;                 /* the guard's RAM code window covers all three */
     .data : { . = ALIGN(4); _data_start = .; *(.data*) *(.sdata*) . = ALIGN(4); _data_end = .; } > RAM AT > XIP
     _data_load = LOADADDR(.data);
     .bss (NOLOAD) : { _bss_start = .; *(.bss*) *(.sbss*) *(COMMON) . = ALIGN(4); _bss_end = .; } > RAM

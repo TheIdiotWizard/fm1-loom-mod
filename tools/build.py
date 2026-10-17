@@ -30,6 +30,7 @@ LDR = OUT / "loader"
 sys.path.insert(0, str(SRC / "tools"))
 import fm1pkg_make  # noqa: E402
 import lz4blk  # noqa: E402
+import size_fns  # noqa: E402
 
 APP_XIP = 0x02000120                # app.bin offset 0 in the XIP map; the SPL jumps here
 APP_SLOT = fm1pkg_make.APP_SLOT
@@ -40,7 +41,8 @@ CFLAGS = ["-Os", "-ffunction-sections", "-fno-builtin", "-Wall", "-Wno-unused-fu
 # the AC79's single-precision FPU (the SDK's own flags); no fused multiply-add, so the host
 # build (-ffp-contract=off) computes the same samples
 FPU = ["-mcpu=r3", "-mfprev1", "-ffp-contract=off"]
-# the DSP units and the sequencer: separate units at -O2 (the rest, the unity build firmware/src/main.c, is -Os)
+# the DSP units and the sequencer: separate units at -O2 (the rest, the unity build firmware/src/main.c, is -Os);
+# tools/size_fns.py builds what never runs per sample for size (minsize)
 O2_UNITS = ["dsp/synth.c", "dsp/drumline.c", "dsp/sample.c", "dsp/fx.c", "seq/pattern.c", "seq/seq.c"]
 LINE = re.compile(r"^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2} )+)\s*\t(.*)$")
 
@@ -225,6 +227,8 @@ def build_app():
         v = os.environ.get(flag)    # unset: the default in firmware/src/main.c
         if v in ("0", "1"):
             flags.append(f"-D{flag}={v}")
+    if os.environ.get("XY_RAM_DSP", "0") != "0":  # the FX and the master from RAM (tools/size_fns.py)
+        flags.append("-DXY_RAM_DSP=1")
     flags.append(f'-DFELUCCA_ID="{PRODUCT}"')
     if VERSION:
         flags.append(f'-DXY_VERSION="{VERSION}"')
@@ -233,34 +237,47 @@ def build_app():
              ("cc", "-c", FW / "hal" / "fm1_vec.S", "-o", OUT / "fm1_vec.o"),
              ("cc", "-c", FW / "hal" / "fm1_isr.S", "-o", OUT / "fm1_isr.o"),
              ("cc", "-c", FW / "hal" / "fm1_cpu1.S", "-o", OUT / "fm1_cpu1.o"),
-             ("cc", *flags, "-c", FW / "src" / "main.c", "-o", OUT / "main.o")]
+             ("cc", *flags, "-S", "-emit-llvm", "-Xclang", "-disable-llvm-optzns", "-c", FW / "src" / "main.c",
+              "-o", OUT / "main.ll")]
     objs = [OUT / "crt0.o", OUT / "fm1_vec.o", OUT / "fm1_isr.o", OUT / "fm1_cpu1.o", OUT / "main.o"]
     (OUT / "o2").mkdir(parents=True, exist_ok=True)
-    for u in O2_UNITS:
-        o = OUT / "o2" / (u.replace("/", "_")[:-2] + ".o")
-        units.append(("cc", *o2, "-c", FW / "src" / u, "-o", o))
-        objs.append(o)
+    o2objs = [OUT / "o2" / (u.replace("/", "_")[:-2] + ".o") for u in O2_UNITS]
+    for u, o in zip(O2_UNITS, o2objs):
+        units.append(("cc", *o2, "-S", "-emit-llvm", "-Xclang", "-disable-llvm-optzns", "-c", FW / "src" / u,
+                      "-o", o.with_suffix(".ll")))
+    objs += o2objs
     tc_all(*units)
+    # tools/size_fns.py marks the code that never runs per sample minsize: the unity build's main-loop
+    # code (then optimised at -Os), the DSP units' per-note and per-setting functions (then at -O2)
+    size_fns.main(OUT / "main.ll", OUT / "main_size.ll")
+    for u, o in zip(O2_UNITS, o2objs):
+        size_fns.main(o.with_suffix(".ll"), o.with_suffix(".size.ll"), u)
+    opt = [f for f in flags if not f.startswith(("-I", "-D", "-W"))]
+    tc_all(("cc", *opt, "-c", OUT / "main_size.ll", "-o", OUT / "main.o"),
+           *[("cc", *[f if f != "-Os" else "-O2" for f in opt], "-c", o.with_suffix(".size.ll"), "-o", o)
+             for o in o2objs])
     elf = OUT / "loom.elf"
     # unreferenced functions (each in its own section: -ffunction-sections) are dropped: the DSP keeps
     # mono reference paths for the host tests that the firmware no longer calls
     tc("pi32v2/bin/ld", "--gc-sections", "-e", "_start", "-T", FW / "app.ld", *objs, "-o", elf)
-    for sect in ("text.bin", "data.bin", "ramtext.bin", "c1text.bin"):
+    for sect in ("text.bin", "data.bin", "ramtext.bin", "c1text.bin", "dsptext.bin"):
         (OUT / sect).unlink(missing_ok=True)
     *_, syms, dis, rt = tc_all(("common/bin/objcopy", "-O", "binary", "-j", ".text", elf, OUT / "text.bin"),
                                ("common/bin/objcopy", "-O", "binary", "-j", ".data", elf, OUT / "data.bin"),
                                ("common/bin/objcopy", "-O", "binary", "-j", ".ram_text", elf, OUT / "ramtext.bin"),
                                ("common/bin/objcopy", "-O", "binary", "-j", ".c1_text", elf, OUT / "c1text.bin"),
+                               ("common/bin/objcopy", "-O", "binary", "-j", ".ram_dsp", elf, OUT / "dsptext.bin"),
                                ("common/bin/objdump", "-t", elf),
-                               ("common/bin/objdump", "-d", elf),
-                               ("common/bin/objdump", "-d", "-j", ".ram_text", elf))
+                               ("common/bin/objdump", "-d", "-mcpu=r3", "-mattr=+fprev1", elf),
+                               ("common/bin/objdump", "-d", "-mcpu=r3", "-mattr=+fprev1", "-j", ".ram_text", elf))
     (OUT / "loom.dis").write_text(dis)
 
     def symv(name):
         return int(re.search(r"^([0-9a-f]+) .*\s" + name + r"$", syms, re.M).group(1), 16)
     img = bytearray((OUT / "text.bin").read_bytes())
     # .ram_text and .data follow .text at their load addresses; crt0 copies them by words
-    for sect, lname in (("ramtext.bin", "_rt_load"), ("c1text.bin", "_c1_load"), ("data.bin", "_data_load")):
+    for sect, lname in (("ramtext.bin", "_rt_load"), ("c1text.bin", "_c1_load"), ("dsptext.bin", "_dsp_load"),
+                        ("data.bin", "_data_load")):
         load = symv(lname)
         if load % 4:
             raise SystemExit(f"{lname} {load:#x} is not word aligned")
