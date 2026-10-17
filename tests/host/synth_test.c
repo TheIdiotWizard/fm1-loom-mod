@@ -9,7 +9,9 @@
  * quantises, ring makes sidebands, mix 0 is a bypass, locks and the LFO reach the amount); the sample
  * engine (a sample at its root note plays at its own rate, an octave up twice as fast; one-shot, loop,
  * reverse, pingpong; start and length; an empty slot is silent; bounded everywhere; a user bank built in
- * RAM is read, a bad one refused, a dropped one stops its voices); and that
+ * RAM is read, a bad one refused, a dropped one stops its voices); the slice engine (each note its slice,
+ * wrapping; 4 to 32 slices; the gate; pitch; the tempo with the break's bar; no click at a slice's ends, a mono
+ * retrigger or a legato move; poly; bounded everywhere); and that
  * splitting a block by voices or by frames changes no sample. Then a benchmark: instructions per sample
  * per voice, 16 voices of each engine and of each character type (macOS: the task's own instruction count,
  * as fm1-sph's sophie_bench.c; elsewhere clock()).
@@ -329,14 +331,17 @@ static const int IMA_S[89] = {7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 2
 static const int IMA_I[8] = {-1, -1, -1, -1, 2, 4, 6, 8};
 static void put32(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24); }
 static uint8_t bank[SMP_BANK_SIZE];
-static void bank_sine(float hz, int n, int root)       /* one sample, a sine, as the bank's only entry */
+static float gen_hz;
+static float gen_sine(int i) { return (float)(20000.0 * sin(6.283185307179586 * (double)gen_hz * i / SMP_RATE)); }
+/* one sample (gen(i): its values, int16 scale), as the bank's only entry, its bars stated */
+static void bank_gen(float (*gen)(int), int n, int root, int bars)
 {
     int pred = 0, idx = 0, i;
     uint32_t ck_off = 0, adp_off = (uint32_t)((n + 63) / 64) * 4u, len;
     uint8_t *d = bank + SMP_BANK_HDR, *e = bank + 32;
     memset(bank, 0, sizeof bank);
     for (i = 0; i < n; i++) {
-        int x = (int)(20000.0 * sin(6.283185307179586 * (double)hz * i / SMP_RATE)), step, diff, code = 0, vd;
+        int x = (int)gen(i), step, diff, code = 0, vd;
         if (i % 64 == 0)
             put32(d + ck_off + (uint32_t)(i / 64) * 4u, (uint32_t)(pred & 0xFFFF) | (uint32_t)idx << 16);
         step = IMA_S[idx];
@@ -363,6 +368,12 @@ static void bank_sine(float hz, int n, int root)       /* one sample, a sine, as
     put32(e + 16, ck_off);
     put32(e + 20, (uint32_t)n);
     e[32] = (uint8_t)root;
+    e[34] = (uint8_t)bars;
+}
+static void bank_sine(float hz, int n, int root)       /* one sample, a sine, as the bank's only entry */
+{
+    gen_hz = hz;
+    bank_gen(gen_sine, n, root, 0);
 }
 
 static void sample_tests(void)
@@ -491,6 +502,286 @@ static void sample_tests(void)
     reset();
 }
 
+/* ---- the slice engine ---- */
+#define SL_SEC 2048                              /* the test loop: 8 sections of 2048 samples, section k a sine of */
+static int sl_per(int k) { return 20 + 6 * k; } /* period 20 + 6k samples (at the native rate: twice that in frames) */
+static float gen_sections(int i)
+{
+    int k = i / SL_SEC, p = sl_per(k);
+    return (float)(20000.0 * sin(6.283185307179586 * (double)(i % p) / p));
+}
+static int sl_slice_seen;                        /* synth_slice_now's slice a few blocks in (-1 none) */
+static int32_t sl_pos_seen;
+/* as sample_run, a note held up to secs on track 0 (others may already play); also what synth_slice_now says
+ * 10 blocks in */
+static int slice_run(int note, float secs, int *n_out, int fresh)
+{
+    int finite = 1, n = 0, stop = -1, b, i, nb = (int)(secs * 44100.0f) / 32;
+    if (fresh) {
+        synth_all_off(S, -1);
+        for (b = 0; b < 400 && synth_sounding(S, 0, NVOICE); b++)
+            block(32, &finite);
+    }
+    synth_note_on(S, 0, note, 100, 0, 77);
+    sl_slice_seen = -1;
+    for (b = 0; b < nb; b++) {
+        block(32, &finite);
+        for (i = 0; i < 32; i++)
+            sbuf[n++] = (L[i] + R[i]) * 0.5f;
+        if (b == 10 && !synth_slice_now(S, 0, &sl_slice_seen, &sl_pos_seen))
+            sl_slice_seen = -1;
+        if (stop < 0 && !synth_sounding(S, 0, NVOICE))
+            stop = n;
+    }
+    synth_note_off(S, 0, 77);
+    if (!finite)
+        stop = -2;
+    *n_out = n;
+    return stop;
+}
+static float max_step(const float *x, int n)    /* the largest jump from a sample to the next */
+{
+    float m = 0.0f;
+    int i;
+    for (i = 1; i < n; i++)
+        m = fabs_f(x[i] - x[i - 1]) > m ? fabs_f(x[i] - x[i - 1]) : m;
+    return m;
+}
+static float peak_of(const float *x, int n)
+{
+    float m = 0.0f;
+    int i;
+    for (i = 0; i < n; i++)
+        m = fabs_f(x[i]) > m ? fabs_f(x[i]) : m;
+    return m;
+}
+static void slice_tests(void)
+{
+    int n, stop, k, ok, root = 60;
+    char what[160], num[16], unit[8];
+    const smp_t *brk;
+    float pk;
+    printf("-- the slice engine\n");
+    reset();
+    sound_default(par[0], EG_SLICE);
+    brk = smp_get(par[0][TP_E1]);
+    sprintf(what, "its default: the factory break (%s, %d bar, root %d), 8 slices, pitch 0, gate full",
+            brk ? brk->name : "-", brk ? brk->bars : -1, brk ? brk->root : -1);
+    check(what, brk && !strcmp(brk->name, "break") && brk->bars == 1 && brk->root == 53 &&
+                    sl_count(par[0][TP_E2]) == 8 && par[0][TP_E3] == 64 && par[0][TP_E4] == 127);
+    tp_text(TP_E2, 2, EG_SLICE, num, unit);
+    check("slices 2 shows 16", !strcmp(num, "16"));
+    tp_text(TP_E3, 76, EG_SLICE, num, unit);
+    check("pitch 76 shows +12 st", !strcmp(num, "+12") && !strcmp(unit, "st"));
+    check("pitch spans 40..88 (+-24 st)", tp_info(TP_E3, EG_SLICE)->lo == 40 && tp_info(TP_E3, EG_SLICE)->hi == 88);
+    par[0][TP_A] = 0;
+    par[0][TP_S] = 127;
+    par[0][TP_R] = 127;                          /* the gate decides, not the note */
+    par[0][TP_CUT] = 127;
+    par[0][TP_RES] = 0;
+    par[0][TP_KTRK] = 0;
+    par[0][TP_FTYPE] = FT_LP12;
+    /* a test loop in the user bank: 8 sections, each its own pitch, its own rate (no bars) */
+    bank_gen(gen_sections, 8 * SL_SEC, root, 0);
+    smp_user_attach(bank);
+    check("the test loop: read", smp_user_scan() == 1);
+    par[0][TP_E1] = (uint8_t)smp_factory();
+    par[0][TP_E2] = 1;                           /* 8 slices: a section each */
+    ok = 1;
+    for (k = -2; k < 11; k++) {                  /* below the root, the root, up, and past the eighth: wrapping */
+        int want = ((k % 8) + 8) % 8, p;
+        stop = slice_run(root + k, 0.2f, &n, 1);
+        p = period_of(sbuf + 600, 2048, 30, 140);
+        if (abs(p - 2 * sl_per(want)) > 1 || sl_slice_seen != want || abs(stop - 2 * SL_SEC) > 64) {
+            printf("    note root%+d: period %d (%d), slice %d (%d), ends %d (%d)\n", k, p, 2 * sl_per(want),
+                   sl_slice_seen, want, stop, 2 * SL_SEC);
+            ok = 0;
+        }
+    }
+    check("8 slices: note root+k plays slice k mod 8 (its section's pitch, synth_slice_now), wrapping both ways", ok);
+    ok = 1;
+    for (k = 0; k < SL_NCOUNT; k++) {            /* 4, 8, 16, 32: a slice of 16384 / count samples */
+        int cnt = sl_count(k), len = 8 * SL_SEC / cnt, sl = 3 % cnt, sec = sl * len / SL_SEC, p;
+        par[0][TP_E2] = (uint8_t)k;
+        stop = slice_run(root + 3, 0.5f, &n, 1);
+        p = period_of(sbuf + 200, 600, 30, 140);
+        if (abs(stop - 2 * len) > 64 || abs(p - 2 * sl_per(sec)) > 1 || sl_slice_seen != sl) {
+            printf("    %d slices: ends %d (%d), period %d (%d), slice %d\n", cnt, stop, 2 * len, p, 2 * sl_per(sec), sl_slice_seen);
+            ok = 0;
+        }
+    }
+    check("4 / 8 / 16 / 32 slices: the slice's length and place", ok);
+    par[0][TP_E2] = 1;
+    par[0][TP_E4] = 64;                          /* the gate: about half the slice */
+    stop = slice_run(root + 1, 0.2f, &n, 1);
+    sprintf(what, "gate 64: the slice plays %d frames (%d)", stop, (int)(64.0f / 127.0f * SL_SEC) * 2);
+    check(what, abs(stop - (int)(64.0f / 127.0f * SL_SEC) * 2) < 64);
+    par[0][TP_E4] = 0;
+    stop = slice_run(root + 1, 0.2f, &n, 1);
+    sprintf(what, "gate 0: still a short slice, %d frames (%d)", stop, (int)(0.02f * SL_SEC) * 2);
+    check(what, stop > 0 && abs(stop - (int)(0.02f * SL_SEC) * 2) < 64);
+    par[0][TP_E4] = 127;
+    par[0][TP_E3] = 76;                          /* +12: twice as fast, an octave up */
+    stop = slice_run(root + 2, 0.2f, &n, 1);
+    k = period_of(sbuf + 300, 1024, 15, 80);
+    sprintf(what, "pitch +12: the slice in %d frames (%d), its period %d (%d)", stop, SL_SEC, k, sl_per(2));
+    check(what, abs(stop - SL_SEC) < 64 && abs(k - sl_per(2)) <= 1);
+    par[0][TP_E3] = 64;
+    {   /* no click: the fades at the gate's end, and the switch of a mono retrigger and of legato */
+        float a, jump, tail, head;
+        stop = slice_run(root + 0, 0.2f, &n, 1);
+        a = peak_of(sbuf + 1000, 2000);
+        jump = max_step(sbuf, n);
+        tail = peak_of(sbuf + stop - 24, 24);
+        head = peak_of(sbuf, 4);
+        sprintf(what, "fades: the slice's first frames %.3f, last 24 %.3f of its peak %.3f; no jump over %.3f",
+                (double)head, (double)tail, (double)a, (double)jump);
+        check(what, a > 0.05f && head < 0.15f * a && tail < 0.3f * a && jump < 0.25f * a);
+        par[0][TP_E4] = 50;                      /* cut mid-slice (the sine at full swing there) */
+        stop = slice_run(root + 0, 0.2f, &n, 1);
+        tail = peak_of(sbuf + stop - 24, 24);
+        jump = max_step(sbuf, n);
+        sprintf(what, "a gate cutting mid-slice fades out: last 24 frames %.3f, no jump over %.3f", (double)tail, (double)jump);
+        check(what, tail < 0.3f * a && jump < 0.25f * a);
+        par[0][TP_E4] = 127;
+        {   /* the gate turned down behind the playing position: a fade, then the end */
+            int finite = 1, b, i, gone = -1;
+            synth_all_off(S, -1);
+            for (b = 0; b < 400 && synth_sounding(S, 0, NVOICE); b++)
+                block(32, &finite);
+            n = 0;
+            synth_note_on(S, 0, root + 2, 100, 0, 1);
+            for (b = 0; b < 60; b++) {
+                if (b == 40)
+                    par[0][TP_E4] = 10;
+                block(32, &finite);
+                for (i = 0; i < 32; i++)
+                    sbuf[n++] = L[i];
+                if (gone < 0 && !synth_sounding(S, 0, NVOICE))
+                    gone = n;
+            }
+            synth_note_off(S, 0, 1);
+            par[0][TP_E4] = 127;
+            jump = max_step(sbuf, n);
+            sprintf(what, "the gate turned down mid-slice: it fades and ends (%d frames after), no jump over %.3f",
+                    gone - 40 * 32, (double)jump);
+            check(what, gone > 40 * 32 && gone < 40 * 32 + 200 && jump < 0.25f * a && finite);
+        }
+        par[0][TP_VMODE] = VM_MONO;
+        {
+            int finite = 1, b, i;
+            synth_all_off(S, -1);
+            for (b = 0; b < 400 && synth_sounding(S, 0, NVOICE); b++)
+                block(32, &finite);
+            n = 0;
+            synth_note_on(S, 0, root + 1, 100, 0, 1);
+            for (b = 0; b < 30; b++) {
+                block(32, &finite);
+                for (i = 0; i < 32; i++)
+                    sbuf[n++] = L[i];
+            }
+            synth_note_on(S, 0, root + 5, 100, 0, 2);   /* mono: the new note's slice, faded across */
+            for (b = 0; b < 30; b++) {
+                block(32, &finite);
+                for (i = 0; i < 32; i++)
+                    sbuf[n++] = L[i];
+            }
+            synth_slice_now(S, 0, &k, &sl_pos_seen);
+            jump = max_step(sbuf, n);
+            pk = (float)period_of(sbuf + 30 * 32 + 200, 600, 30, 140);
+            sprintf(what, "mono retrigger: slice %d (5) from its start (period %d, %d), no jump over %.3f", k, (int)pk,
+                    2 * sl_per(5), (double)jump);
+            check(what, k == 5 && abs((int)pk - 2 * sl_per(5)) <= 1 && jump < 0.25f * a && finite &&
+                            sl_pos_seen >= 5 * SL_SEC && sl_pos_seen < 5 * SL_SEC + 500);
+            synth_note_off(S, 0, 1);
+            synth_note_off(S, 0, 2);
+            par[0][TP_VMODE] = VM_LEGATO;
+            synth_all_off(S, -1);
+            for (b = 0; b < 400 && synth_sounding(S, 0, NVOICE); b++)
+                block(32, &finite);
+            n = 0;
+            synth_note_on(S, 0, root + 1, 100, 0, 1);
+            for (b = 0; b < 20; b++) {
+                block(32, &finite);
+                for (i = 0; i < 32; i++)
+                    sbuf[n++] = L[i];
+            }
+            synth_note_on(S, 0, root + 4, 100, 0, 2);   /* legato: slice 4 at the same place, the time running on */
+            for (b = 0; b < 10; b++) {
+                block(32, &finite);
+                for (i = 0; i < 32; i++)
+                    sbuf[n++] = L[i];
+            }
+            synth_slice_now(S, 0, &k, &sl_pos_seen);
+            jump = max_step(sbuf, n);
+            sprintf(what, "legato: slice %d (4), at %d into it after %d frames (%d), no jump over %.3f", k,
+                    (int)(sl_pos_seen - 4 * SL_SEC), n, n / 2, (double)jump);
+            check(what, k == 4 && abs((int)(sl_pos_seen - 4 * SL_SEC) - n / 2) < 40 && jump < 0.25f * a && finite);
+            synth_note_off(S, 0, 1);
+            synth_note_off(S, 0, 2);
+            par[0][TP_VMODE] = VM_POLY;
+            /* poly: two notes, two slices, each its own */
+            synth_all_off(S, -1);
+            for (b = 0; b < 400 && synth_sounding(S, 0, NVOICE); b++)
+                block(32, &finite);
+            synth_note_on(S, 0, root + 2, 100, 0, 1);
+            for (b = 0; b < 10; b++)
+                block(32, &finite);
+            synth_note_on(S, 0, root + 6, 100, 0, 2);
+            for (b = 0; b < 10; b++)
+                block(32, &finite);
+            synth_slice_now(S, 0, &k, &sl_pos_seen);
+            check("poly: two notes play two slices at once (the newest shown)", synth_voices_used(S) == 2 && k == 6);
+            synth_note_off(S, 0, 1);
+            synth_note_off(S, 0, 2);
+        }
+    }
+    smp_user_attach(0);
+    smp_user_scan();
+    /* the tempo: the factory break states 1 bar */
+    par[0][TP_E1] = SMP_BREAK;
+    par[0][TP_E2] = 1;
+    brk = smp_get(SMP_BREAK);
+    {
+        int want120 = (int)(brk->n / 8u) * 2, want90 = (int)((float)want120 * 120.0f / 90.0f), s120, s90, s12;
+        synth_tempo(S, 120.0f);
+        s120 = slice_run(53 + 2, 0.5f, &n, 1);
+        synth_tempo(S, 90.0f);
+        s90 = slice_run(53 + 2, 0.5f, &n, 1);
+        par[0][TP_E3] = 52;                      /* -12 at 90: twice as long again */
+        s12 = slice_run(53 + 2, 0.9f, &n, 1);
+        par[0][TP_E3] = 64;
+        synth_tempo(S, 120.0f);
+        sprintf(what, "tempo: the break's eighth lasts %d frames at 120 BPM (%d), %d at 90 (%d), %d at 90 and -12",
+                s120, want120, s90, want90, s12);
+        check(what, abs(s120 - want120) < 64 && abs(s90 - want90) < 64 && abs(s12 - 2 * want90) < 128);
+    }
+    {   /* bounded and finite: every factory sample and an empty slot, each count, pitch and gate at the ends,
+         * notes 0 and 127 */
+        int sm, c, pi, g, nt;
+        float m = 0.0f;
+        ok = 1;
+        for (sm = 0; sm <= smp_factory(); sm++)
+            for (c = 0; c < SL_NCOUNT; c++)
+                for (pi = 40; pi <= 88; pi += 48)
+                    for (g = 0; g <= 127; g += 127)
+                        for (nt = 0; nt <= 127; nt += 127) {
+                            par[0][TP_E1] = (uint8_t)sm;
+                            par[0][TP_E2] = (uint8_t)c;
+                            par[0][TP_E3] = (uint8_t)pi;
+                            par[0][TP_E4] = (uint8_t)g;
+                            stop = slice_run(nt, 0.1f, &n, 1);
+                            pk = peak_of(sbuf, n);
+                            m = pk > m ? pk : m;
+                            if (stop == -2 || pk > 1.0f)
+                                ok = 0;
+                        }
+        sprintf(what, "every sample x count x pitch / gate ends x note 0 / 127: finite, peak %.2f", (double)m);
+        check(what, ok);
+    }
+    reset();
+}
+
 static void bench(void)
 {
     int e;
@@ -512,6 +803,14 @@ static void bench(void)
                 par[t][TP_E2] = 0;
                 par[t][TP_E3] = 127;
                 par[t][TP_E4] = SM_LOOP;
+            }
+            if (e == EG_SLICE) {                 /* a quarter of the break, two octaves down at 60 BPM: 4 s a voice */
+                par[t][TP_E1] = SMP_BREAK;
+                par[t][TP_E2] = 0;
+                par[t][TP_E3] = 40;
+                par[t][TP_E4] = 127;
+                par[t][TP_S] = 127;
+                synth_tempo(S, 60.0f);
             }
             par[t][TP_LTYPE] = LT_WAVE;
             par[t][TP_LDEST] = LD_FILTER;
@@ -1036,7 +1335,7 @@ int main(void)
     tp_text(TP_PORTA, 50, 0, num, unit);
     check("portamento shows 0..127", !strcmp(num, "50") && !unit[0]);
 
-    check("72 presets, 8 an engine", NPRESETS == 72);
+    check("80 presets, 8 an engine", NPRESETS == 80);
     {   /* names: lower case words, at most 11 characters, each its own; stack's first is a bass */
         int ok = 1, j;
         for (k = 0; k < NPRESETS && ok; k++) {
@@ -1722,6 +2021,7 @@ int main(void)
 
     char_tests();
     sample_tests();
+    slice_tests();
     bench();
     bench_char();
     printf("%s\n", bad ? "SYNTH TESTS FAILED" : "all synth tests passed");

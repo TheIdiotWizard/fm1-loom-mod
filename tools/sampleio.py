@@ -13,7 +13,9 @@ decodes a block of 65 at a time into the voice's cache).
 The user bank (flash 0xCF000, 52 KB): a 1024-byte header, then the data (each sample's checkpoints,
 4-aligned, and its ADPCM). Header: magic "LSMP", version 1, count, data length, CRC-32 of the data, then
 up to 16 entries of 36 bytes: name (12, NUL-padded), ADPCM offset, checkpoint offset (from the data's
-start), samples, loop start, loop end (samples; end 0: none), root note, flags, two spare.
+start), samples, loop start, loop end (samples; end 0: none), root note, flags, bars (a loop of that many
+bars: the slice engine follows the tempo with it; 0 = not stated, as in banks made before it was there),
+one spare.
 """
 import math
 import re
@@ -30,6 +32,7 @@ BANK_MAX_DATA = BANK_SIZE - BANK_HDR
 BANK_N = 16
 BANK_MAGIC = 0x504D534C         # "LSMP"
 NAME_LEN = 12
+BARS_MAX = 16                   # (dsp/sample.h SMP_BARS_MAX)
 
 IMA_STEP = [7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88,
             97, 107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658,
@@ -200,12 +203,15 @@ def clean_name(name):
 
 
 def user_bank(samples):
-    """samples: [(name, int16 list at RATE, root, (loop start, loop end) or None)] -> the bank image
+    """samples: [(name, int16 list at RATE, root, (loop start, loop end) or None[, bars])] -> the bank image
     (header + data, ready for flash 0xCF000), without the padding to BANK_SIZE"""
     if not 1 <= len(samples) <= BANK_N:
         raise ValueError(f"1..{BANK_N} samples in the bank")
     ents, data = [], bytearray()
-    for name, s, root, loop in samples:
+    for name, s, root, loop, *more in samples:
+        bars = more[0] if more else 0
+        if not 0 <= bars <= BARS_MAX:
+            raise ValueError(f"{name}: {bars} bars (0..{BARS_MAX})")
         if not s:
             raise ValueError(f"{name}: no audio")
         adp, ck = ima_encode(s)
@@ -219,8 +225,8 @@ def user_bank(samples):
         le = min(le, len(s))
         if le <= ls:
             ls = le = 0
-        ents.append(struct.pack("<12sIIIIIBB2x", clean_name(name).encode().ljust(NAME_LEN, b"\0"), adp_off, ck_off,
-                                len(s), ls, le, max(0, min(127, root)), 0))
+        ents.append(struct.pack("<12sIIIIIBBBx", clean_name(name).encode().ljust(NAME_LEN, b"\0"), adp_off, ck_off,
+                                len(s), ls, le, max(0, min(127, root)), 0, bars))
     if len(data) > BANK_MAX_DATA:
         raise ValueError(f"too long: {len(data)} B, the bank holds {BANK_MAX_DATA} B "
                          f"(about {BANK_MAX_DATA * 2 * 8 / 9 / RATE:.1f} s in all)")

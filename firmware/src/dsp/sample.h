@@ -25,13 +25,17 @@
 #define SMP_BANK_SIZE 0xD000u             /* 52 KB: 0xCF000 .. 0xDBFFF */
 #define SMP_BANK_HDR 1024u                /* the header; the data follows */
 #define SMP_BANK_MAGIC 0x504D534Cu        /* "LSMP" */
+#define SMP_BREAK 7                       /* the factory break (tools/gen_samples.py): the slice engine's default */
+#define SMP_BARS_MAX 16                   /* a user entry's bars above this: not stated */
 
 typedef struct {
     const uint8_t *adp;                   /* IMA ADPCM, the low nibble first */
     const uint32_t *ck;                   /* a checkpoint a block: (predictor & 0xFFFF) | index << 16 */
     uint32_t n;                           /* samples */
     uint32_t ls, le;                      /* its loop (le 0: none) */
-    uint8_t root;                         /* the MIDI note it plays at its own rate */
+    uint8_t root;                         /* the MIDI note it plays at its own rate (the slice engine: slice 1's) */
+    uint8_t bars;                         /* a loop of this many bars (the slice engine follows the tempo with
+                                           * it), 0: not stated */
     char name[SMP_NAME];
 } smp_t;
 

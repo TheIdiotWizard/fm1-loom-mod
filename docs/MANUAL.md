@@ -128,6 +128,7 @@ press…" means keep **HOME** down while you press the next thing.
 | shape one drum | On a drum track, press **ENV** and press the drum's black key: its own attack, hold, decay and lag. Turn **SELECT** for its filter: **PRESETS** picks low-pass, high-pass or band-pass, the knobs cutoff, resonance, envelope and drive. |
 | play a sample | On a drum track, turn a key's model to sample. On a synth track, **SEL** and ENGINE: sample. The sample knob picks it. |
 | load my own samples | Connect the FM-1 by USB and run `tools/loom_samples.py load kick.wav snare.wav` on the computer. They come after the factory samples, as user 1, user 2 ... |
+| chop a break | On a synth track, **SEL** and ENGINE: slice. Each key plays a slice of the break, F3 the first; write them on the steps in any order. Load your own with `tools/loom_samples.py load "amen.wav@2"` (a loop of 2 bars). |
 | change the filter | Press **ENV** and turn **SELECT** to Filter. **PRESETS** turns the filter type. |
 | give a sound some character | Press **FX**: the Character page. **PRESETS** turns the type (drive, fold, crush, ring, tilt, rectify); the knobs are its amount, tone and mix. |
 | use the effects | Press **FX** and turn **SELECT** to Sends: the track's sends. Turn on for FX I and FX II; **PRESETS** picks the effect. |
@@ -366,6 +367,7 @@ SCRAMBLE for a random sound, SAVE AS PRESET, RESET SOUND, and whether the track 
 | swarm | swarm, am, fm, detune |
 | kit | the shown key's model knobs |
 | sample | sample, start, length, mode |
+| slice | sample, slices, pitch, gate |
 
 ### Kit
 
@@ -425,8 +427,9 @@ fifth takes the oldest's place.
 
 ### Samples
 
-LOOM-8 carries a bank of samples: seven of its own, made for now as placeholders (kick, snare, hat, clap, ah,
-piano, sweep), then sixteen of yours, user 1 to user 16. The sample model on a drum key and the sample engine
+LOOM-8 carries a bank of samples: eight of its own, made for now as placeholders (kick, snare, hat, clap, ah,
+piano, sweep, and break: a bar of drums at 120 BPM for the slice engine), then sixteen of yours, user 1 to
+user 16. The sample model on a drum key and the sample engine
 on a synth track both play them, the knob naming each one.
 
 The **sample** engine plays a sample at the pitch of the note: the sample's root note plays it at its own rate,
@@ -445,12 +448,46 @@ jute keys, jute choir, hessian, hemp bass, sisal sweep, raffia, coir and flax be
 
 <img src="img/screen-sample-engine.png" width="240" alt="Engine on T3 sample: the piano&#x27;s waveform, its root C4, all of it playing once; knobs sample, start, length, mode" title="The sample engine">
 
+### Slice
+
+The **slice** engine cuts a loop (a break) into even slices and plays one a note: the sample's root note plays
+slice 1, the next note up slice 2, and so on, round again after the last (with eight slices, F3 to C4 are
+slices 1 to 8 and C#4 is slice 1 again; below the root they count back from the last). On the keys at their own
+octave, F3 (the lowest key) is slice 1 of the factory break. Written on the steps, the slices replay the break
+(slice k on every other step, for eight slices of a bar) or make a new one from its pieces: any order, repeats,
+gaps. Its knobs:
+
+| Knob | What it does |
+| --- | --- |
+| sample | which loop (the factory break, or one of yours) |
+| slices | 4, 8, 16 or 32 even slices |
+| pitch | 24 semitones either way: down, a slice plays slower and longer than its place; up, faster and shorter |
+| gate | how much of each slice plays, to all of it at 100 %; a short fade at both ends, so a cut never clicks |
+
+A loop that says how many bars it is follows the tempo: its bars last as many bars of the song, so at 90 BPM the
+factory break (a bar at 120) plays slower, each slice still on its steps; the pitch knob goes on top. A sample
+that does not say plays at its own speed (the picture says "own speed"). In poly mode each note plays its slice
+to its gate and overlaps the next; mono cuts the playing slice for the new one (a quick fade, then its start);
+legato moves to the new slice at the same place in it, the time running on. Then the envelopes, filter,
+character and LFO shape it like any engine (the presets keep the filter's keytrack at 0, so every slice sounds
+alike, and a long release, so the gate decides the length rather than the step). Choosing the engine from **SEL**
+takes the track off the conductor: its notes pick slices, and a chord change would move them (FOLLOWS CONDUCTOR
+turns it back on).
+
+The picture shows the loop's waveform cut at the slices, each slice's gated part drawn and what the gate leaves
+out faint, the slice playing lit with a line where it is, a dot on slice 1. Above: the loop's name and bars,
+the count or the slice playing. Its eight presets: loom break (eight slices, straight), chop (sixteen, mono),
+shuttle (thirty-two, driven), heddle (four, an octave down, heavy), treadle (up a fifth, clipped), bobbin
+(short plucked chops), selvedge (thin, high-passed) and warp beam (legato, down, a filter moving with the beat).
+
+<img src="img/screen-slice-engine.png" width="240" alt="Engine on T3 slice: the break&#x27;s waveform cut in eight, slice 5 playing; knobs sample break, slices 8, pitch 0 st, gate 100 %" title="The slice engine">
+
 **Your own samples.** Connect the FM-1 (running LOOM-8) to a computer by USB and run, from the firmware's
 folder:
 
 ```sh
 pip install mido python-rtmidi
-python3 tools/loom_samples.py load kick.wav snare.wav "vox=ah_A3.wav" "pad=pad.wav:57"
+python3 tools/loom_samples.py load kick.wav snare.wav "vox=ah_A3.wav" "pad=pad.wav:57" "amen=amen.wav@1"
 python3 tools/loom_samples.py info
 python3 tools/loom_samples.py erase
 ```
@@ -458,8 +495,11 @@ python3 tools/loom_samples.py erase
 `load` replaces the user samples with the files given, in that order: user 1, user 2... Each WAV (any rate,
 mono or stereo, 8 to 32 bit) is made mono at 22050 Hz and its peak evened out. `NAME=` names it on the screen
 (11 characters; else the file's name); `:ROOT` is the note that plays it at its own pitch on a synth track
-(else a note in the file's name, as "ah_A3", or C4). A loop in the WAV is kept. The bank holds about four
-seconds of sound in all; `loom_samples.py` says when the files are too long. The sound stops for a few seconds
+(else a note in the file's name, as "ah_A3", or C4). A loop in the WAV is kept. `@BARS` says the file is a
+loop of that many bars (1 to 16), for the slice engine: it then follows the tempo, and its root (slice 1) is F3
+unless `:ROOT` says otherwise; the tool prints the tempo the loop has at its own speed. Trim the loop to exactly
+its bars first: the slices are even cuts of the whole file. The bank holds about four seconds of sound in all
+(a bar at 120 BPM is two seconds); `loom_samples.py` says when the files are too long. The sound stops for a few seconds
 while it writes; then the screen says LOADED. A sample a track was playing keeps its place: user 2 is still user
 2, whatever is in it now.
 

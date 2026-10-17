@@ -5,16 +5,19 @@
 """LOOM-8's user sample bank: WAV files into the FM-1's flash over USB-MIDI, beside the factory samples.
 
   loom_samples.py info                          what the bank holds now
-  loom_samples.py load [NAME=]file.wav[:ROOT] ...   replace the bank with these (up to 16)
+  loom_samples.py load [NAME=]file.wav[:ROOT][@BARS] ...   replace the bank with these (up to 16)
   loom_samples.py erase                         empty the bank
-  loom_samples.py build OUT.bin [NAME=]file.wav[:ROOT] ...   no device: the bank's image into OUT.bin
+  loom_samples.py build OUT.bin [NAME=]file.wav[:ROOT][@BARS] ...   no device: the bank's image into OUT.bin
                                                 (the host simulator loads it: "samples OUT.bin")
 
 Each file becomes one sample: mixed to mono, resampled to 22050 Hz, its peak normalised, IMA ADPCM with a
 checkpoint every 64 samples (tools/sampleio.py, as the factory bank). NAME is what the screen shows (lower
 case, 11 characters; default: the file's name); ROOT the MIDI note it plays at its own pitch on a synth
 track (default: a note in the file's name, "piano_C4.wav", else 60 = C4). A loop in the WAV's 'smpl' chunk
-is kept (the sample engine's loop mode plays it). The bank holds 51 KB of data: about 4.1 s of sound in all.
+is kept (the sample engine's loop mode plays it). @BARS says the file is a loop of that many bars (1..16):
+a break for the slice engine, which then plays it at the song's tempo (a 1-bar loop of 2 s fits 120 BPM
+exactly; at 140 BPM it plays faster); its ROOT is slice 1's note, F3 (53, the lowest key) unless given.
+The bank holds 51 KB of data: about 4.1 s of sound in all (a bar at 120 BPM takes 2 s).
 On a track, the sample engine's (and the kit's sample model's) sample knob counts the factory samples first,
 then user 1, user 2 ...: a load replaces them all, in the order given.
 
@@ -43,11 +46,20 @@ def pack7(b):
     return out
 
 
+LOOP_ROOT = 53                                      # a loop's slice 1: F3, the lowest key at the keys' own octave
+
+
 def parse(spec):
-    """"[NAME=]file.wav[:ROOT]" -> (name, int16 samples at 22050 Hz, root, loop)"""
+    """"[NAME=]file.wav[:ROOT][@BARS]" -> (name, int16 samples at 22050 Hz, root, loop, bars)"""
     name = None
     if "=" in spec:
         name, spec = spec.split("=", 1)
+    bars = 0
+    if "@" in spec and spec.rsplit("@", 1)[1].isdigit():
+        spec, b = spec.rsplit("@", 1)
+        bars = int(b)
+        if not 1 <= bars <= sio.BARS_MAX:
+            raise ValueError(f"{spec}: @{bars}: a loop of 1..{sio.BARS_MAX} bars")
     root = None
     if ":" in spec and spec.rsplit(":", 1)[1].isdigit():
         spec, r = spec.rsplit(":", 1)
@@ -59,7 +71,12 @@ def parse(spec):
     if loop:
         loop = (int(loop[0] * sio.RATE / sr), int((loop[1] + 1) * sio.RATE / sr))
     x = sio.resample(x, sr, sio.RATE)
-    return (name or path.stem, sio.to_int16(x), root if root is not None else sio.note_from_name(path.stem), loop)
+    if root is None:
+        root = LOOP_ROOT if bars else sio.note_from_name(path.stem)
+    if bars:
+        print(f"  {name or path.stem}: {bars} bar{'s' if bars > 1 else ''} of {len(x) / sio.RATE:.2f} s = "
+              f"{bars * 240.0 * sio.RATE / len(x):.1f} BPM at its own speed")
+    return (name or path.stem, sio.to_int16(x), root, loop, bars)
 
 
 def build(specs):

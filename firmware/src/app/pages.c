@@ -2427,6 +2427,62 @@ static void pic_sample(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8
     }
 }
 
+/* the slice engine: the loop's waveform cut by its slice lines, each slice's gated part drawn and what the gate
+ * leaves out faint; the slice playing tinted and bright, a line where it plays; a dot on slice 1 (the root's).
+ * Above: the loop's name and bars (or its own speed), the count or the slice playing */
+static void pic_slice(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, int trk)
+{
+    int idx = p[TP_E1] < smp_slots() ? p[TP_E1] : smp_slots() - 1, ns = sl_count(p[TP_E2]), sl = -1, on;
+    const smp_t *sm = smp_get(idx);
+    int32_t wy = y0 + 20, wh = h - 22, cy = wy + wh / 2, pos = 0, px = -1;
+    int32_t gate = (p[TP_E4] > 127 ? 127 : p[TP_E4]) * 1000 / 127;
+    char t[40], *e;
+    if (gate < 20)
+        gate = 20;                                   /* (as the engine: 2 % at least) */
+    if (w > 200)
+        w = 200;
+    if (!sm) {
+        text_c(x0 + w / 2, cy - 16, &FONT_S, smp_name(idx), K_DIM);
+        text_c(x0 + w / 2, cy + 4, &FONT_XS, "empty: tools/loom_samples.py fills it", K_DIM);
+        return;
+    }
+    e = s_cat(t, sm->name);
+    if (sm->bars) {
+        e = num_s(sm->bars, s_cat(e, ", "));
+        e = s_cat(e, sm->bars > 1 ? " bars" : " bar");
+    } else {
+        e = s_cat(e, ", own speed");
+    }
+    text_fit(x0, y0 + 2, &FONT_XS, t, w - 76, K_TEXT);
+    on = engine_slice_now(trk, &sl, &pos) && sl >= 0 && sl < ns;
+    if (on) {
+        e = num_s((uint32_t)sl + 1u, s_cat(t, "slice "));
+        num_s((uint32_t)ns, s_cat(e, " of "));
+        px = (int32_t)((float)pos * (float)w / (float)sm->n);
+    } else {
+        s_cat(num_s((uint32_t)ns, t), " slices");
+    }
+    text_r(x0 + w, y0 + 2, &FONT_XS, t, on ? K_TEXT : K_DIM);
+    smp_columns(idx, sm, w);
+    if (on)
+        cv_rect(x0 + sl * w / ns, wy, (sl + 1) * w / ns - sl * w / ns, wh, K_TINT);
+    cv_rect(x0, cy, w, 1, K_LINE);
+    for (int32_t x = 0; x < w; x++) {
+        int k = x * ns / w;
+        int32_t a = k * w / ns, b = (k + 1) * w / ns, in = (x - a) * 1000 < gate * (b - a);
+        int32_t yl = cy - smp_col_hi[x] * (wh / 2 - 1) / 127, yh = cy - smp_col_lo[x] * (wh / 2 - 1) / 127;
+        cv_rect(x0 + x, yl, 1, yh - yl + 1, !in ? K_FAINT : on && k == sl ? K_NOW : K_DIM);
+    }
+    for (int k = 1; k < ns; k++) {                   /* the cuts: a gap through the wave, a tick above and below */
+        cv_rect(x0 + k * w / ns, wy, 1, wh, K_BG);
+        cv_rect(x0 + k * w / ns, wy, 1, 3, K_LINE);
+        cv_rect(x0 + k * w / ns, wy + wh - 3, 1, 3, K_LINE);
+    }
+    if (px >= 0 && px < w)
+        cv_rect(x0 + px, wy, 1, wh, K_TEXT);
+    cv_round(x0, wy, 6, 6, 3, K_TEXT);              /* slice 1 */
+}
+
 /* the drumline: eleven pads, each key's model, the shown one ringed, hits flashing */
 static void pic_drumline(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
 {
@@ -2455,11 +2511,18 @@ static void draw_engine(void)
     int trk = sel_trk(), eg = proj.trk[trk].par[TP_ENGINE] % NENGINE;
     const uint8_t *p = proj.trk[trk].par;
     uint32_t h = hash_u(hash_u(2166136261u, 0xE0u), (uint32_t)trk | (uint32_t)eg << 4 | (uint32_t)ui.dsound << 8 |
-                                          (eg == EG_SAMPLE ? 0u : (ui.frame / 2) << 12));
+                                          (eg == EG_SAMPLE || eg == EG_SLICE ? 0u : (ui.frame / 2) << 12));
     for (int i = 0; i < 4; i++)
         h = hash_u(h, p[TP_E1 + i]);
-    if (eg == EG_SAMPLE)                             /* (the bank: an upload changes what the picture shows) */
+    if (eg == EG_SAMPLE || eg == EG_SLICE)           /* (the bank: an upload changes what the picture shows) */
         h = hash_u(h, (uint32_t)smp_user_count() << 16 ^ smp_user_bytes());
+    if (eg == EG_SLICE) {                            /* the slice playing and where (a column of the picture) */
+        int sl;
+        int32_t pos;
+        const smp_t *sm = smp_get(p[TP_E1]);
+        if (engine_slice_now(trk, &sl, &pos) && sm)
+            h = hash_u(h, (uint32_t)(sl + 1) | (uint32_t)((float)pos * 200.0f / (float)sm->n) << 8);
+    }
     if (eg == EG_DRUMLINE)
         for (int k = 0; k < DL_NSOUND; k++)
             h = hash_u(h, p[TP_DRUM(k, DP_MODEL)] | (uint32_t)eng_drum_hit[k] << 8);
@@ -2485,6 +2548,7 @@ static void draw_engine(void)
     case EG_SYNC: pic_sync(20, 24, 200, 88, p, ui.frame); break;
     case EG_SWARM: pic_swarm(20, 24, 200, 88, p, ui.frame); break;
     case EG_SAMPLE: pic_sample(20, 24, 200, 88, p); break;
+    case EG_SLICE: pic_slice(20, 24, 200, 88, p, trk); break;
     default: pic_drumline(10, 26, 220, 90, p, ui.frame); break;
     }
     cv_blit(0, MAIN_Y);
