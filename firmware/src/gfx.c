@@ -7,9 +7,10 @@ typedef struct {               /* proportional, see tools/gen_font.py */
     uint8_t h;
     uint8_t pad;               /* bitmap starts this many pixels left of the pen */
     uint8_t first, last;
+    uint8_t rle;               /* 1: the nibbles code runs of 0 and 15 (gen_font.py) */
     const uint8_t *adv;        /* advance per glyph */
-    const uint8_t *bw;         /* bitmap width per glyph (starts FONT_PAD left of the pen) */
-    const uint16_t *off;       /* byte offset of each glyph */
+    const uint8_t (*box)[4];   /* ink box per glyph: x (from FONT_PAD left of the pen), y, w, h */
+    const uint16_t *off;       /* byte offset of each glyph's nibbles */
     const uint8_t *data;
 } felucca_font_t;
 #include "felucca_font.h"
@@ -303,16 +304,24 @@ static int32_t cv_text(int32_t x, int32_t y, const felucca_font_t *f, const char
     int32_t ix0 = 1 << 20, iy0 = 1 << 20, ix1 = -(1 << 20), iy1 = -(1 << 20), clip = 0, shown = 0;
 #endif
     for (; *s; s++) {
-        uint32_t gi = glyph(f, (uint8_t)*s), gx, gy, w, bpr;
-        const uint8_t *gd;
-        w = f->bw[gi];
-        bpr = (w + 1u) / 2u;
-        gd = f->data + f->off[gi];
-        for (gy = 0; gy < f->h; gy++)
+        uint32_t gi = glyph(f, (uint8_t)*s), gx, gy, w, bh, nib = 0, run = 0, a = 0;
+        const uint8_t *gd = f->data + f->off[gi], *bx = f->box[gi];
+        int32_t x0 = x - f->pad + bx[0], y0 = y + bx[1] + cv_oy;
+        w = bx[2];
+        bh = bx[3];
+        for (gy = 0; gy < bh; gy++)
             for (gx = 0; gx < w; gx++) {
-                uint32_t a = gd[gy * bpr + gx / 2u];
-                int32_t px = x - f->pad + (int32_t)gx, py = y + (int32_t)gy + cv_oy;
-                a = (gx & 1u) ? (a & 15u) : (a >> 4);
+                int32_t px = x0 + (int32_t)gx, py = y0 + (int32_t)gy;
+                if (!run) {                          /* the next nibble: a pixel, or a run of them */
+                    a = (nib & 1u) ? gd[nib >> 1] & 15u : gd[nib >> 1] >> 4;
+                    nib++;
+                    run = 1;
+                    if (f->rle && (a == 0 || a == 15u)) {
+                        run += (nib & 1u) ? gd[nib >> 1] & 15u : gd[nib >> 1] >> 4;
+                        nib++;
+                    }
+                }
+                run--;
 #ifdef GFX_AUDIT
                 if (a >= 4u) {                       /* ink that shows (the faintest edge pixels aside) */
                     if (px < ix0) ix0 = px;
