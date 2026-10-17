@@ -21,18 +21,18 @@ tap LFO
 spin K1 2
 spin K4 -30
 spin K1 1
-expect par2.28 2
-expect par2.27 64
+expect par2.27 2
+expect par2.26 64
 wait 60
 shot d09_lfo_random.png
 # (the preset has a character of its own: from off, each type in turn)
-param 2 31 0
+param 2 30 0
 tap FX
 expect page Character
 wait 60
 shot d10a_character_off.png
 turn PRESET 1
-expect par2.31 1
+expect par2.30 1
 wait 60
 shot d10b_drive.png
 spin K2 30
@@ -40,33 +40,33 @@ spin K3 -20
 wait 60
 shot d10c_drive_more.png
 turn PRESET 1
-expect par2.31 2
+expect par2.30 2
 wait 60
 shot d10d_fold.png
 spin K3 30
 wait 60
 shot d10e_fold_bias.png
 turn PRESET 1
-expect par2.31 3
+expect par2.30 3
 wait 60
 shot d10f_crush.png
 turn PRESET 1
-expect par2.31 4
+expect par2.30 4
 wait 60
 shot d10g_ring.png
 turn PRESET 1
-expect par2.31 5
+expect par2.30 5
 wait 60
 shot d10h_tilt.png
 turn PRESET 1
-expect par2.31 6
+expect par2.30 6
 wait 60
 shot d10i_rectify.png
 spin K4 -40
 wait 60
 shot d10j_rectify_half_mix.png
 turn PRESET 1
-expect par2.31 0
+expect par2.30 0
 turn SELECT 1
 expect page Sends
 wait 60
@@ -82,8 +82,8 @@ tapkey b1
 wait 60
 shot d12_snare_selected.png
 spin K1 6
-expect par1.58 85
-expect par1.49 82
+expect par1.57 85
+expect par1.48 82
 wait 60
 shot d13_snare_pitch.png
 turn SELECT 1

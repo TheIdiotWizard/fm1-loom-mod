@@ -114,7 +114,7 @@ typedef struct {
     float f1, f2, f3, f4;             /* filter states */
     float c1, c2, c3;                 /* filter coefficients */
     float a, b, g;                    /* two model amounts and the model's output gain */
-    float gl, gr, gs1, gs2, gst;      /* gains now: left, right, the three sends (set each chunk) */
+    float gl, gr, gs1, gs2;           /* gains now: left, right, the two sends (set each chunk) */
     float dgl, dgr;                   /* left and right ramp toward the chunk's targets */
     uint32_t mp[6], mi[6];            /* the hat's / tambourine's six square phases and increments */
     int32_t len, w;                   /* the string: its length, write position */
@@ -763,22 +763,20 @@ static float volume_lin(int v)
 static void control(const uint8_t *par, dvoice_t *v, int m)
 {
     const uint8_t *p = par + TP_DRUM(v->sound, 0);
-    float a = (float)p[DP_PAN] * (1.0f / 127.0f), lin, l, r, s1, s2, st, im;
+    float a = (float)p[DP_PAN] * (1.0f / 127.0f), lin, l, r, s1, s2, im;
     lin = volume_lin(p[DP_VOLUME]);
     l = lin * fm_sin_turns(0.25f * (1.0f - a));       /* constant power: cos, sin of a quarter turn */
     r = lin * fm_sin_turns(0.25f * a);
     s1 = lin * (float)par[TP_SEND1] * (1.0f / 127.0f);
     s2 = lin * (float)par[TP_SEND2] * (1.0f / 127.0f);
-    st = lin * (float)par[TP_SENDT] * (1.0f / 127.0f);
     if (v->age == 0) {                                /* a fresh voice starts at its gains */
-        v->gl = l; v->gr = r; v->gs1 = s1; v->gs2 = s2; v->gst = st;
+        v->gl = l; v->gr = r; v->gs1 = s1; v->gs2 = s2;
     }
     im = 1.0f / (float)m;
     v->dgl = (l - v->gl) * im;
     v->dgr = (r - v->gr) * im;
     v->gs1 = s1;                                      /* the sends step: a send's zipper is buried in the effect */
     v->gs2 = s2;
-    v->gst = st;
 }
 
 /* ---- the dynamic filter ---- */
@@ -889,7 +887,7 @@ static void dynf_run(dynf_t *f, float *l, float *r, int m)
     }
 }
 
-void drumline_render(drumline_t *d, float *l, float *r, float *s1, float *s2, float *st, uint32_t n)
+void drumline_render(drumline_t *d, float *l, float *r, float *s1, float *s2, uint32_t n)
 {
     uint32_t c;
     for (c = 0; c < n; c += CR) {
@@ -900,13 +898,13 @@ void drumline_render(drumline_t *d, float *l, float *r, float *s1, float *s2, fl
         for (o = 0; o < m; o += SUB) {
             float t[SUB], dl[SUB], dr[SUB];
             int mm = m - o < SUB ? m - o : SUB, i, any = 0;
-            float *p1 = s1 + c + o, *p2 = s2 + c + o, *pt = st + c + o;
+            float *p1 = s1 + c + o, *p2 = s2 + c + o;
             for (i = 0; i < mm; i++)
                 dl[i] = dr[i] = 0.0f;
             for (vi = 0; vi < NDVOICE; vi++) {
                 dvoice_t *v = &d->v[vi];
                 float gl, gr, att, attk;
-                const float gs1 = v->gs1, gs2 = v->gs2, gst = v->gst, dgl = v->dgl, dgr = v->dgr;
+                const float gs1 = v->gs1, gs2 = v->gs2, dgl = v->dgl, dgr = v->dgr;
                 int from = 0;
                 if (!v->on)
                     continue;
@@ -937,7 +935,6 @@ void drumline_render(drumline_t *d, float *l, float *r, float *s1, float *s2, fl
                     dr[i] += x * gr;
                     p1[i] += x * gs1;
                     p2[i] += x * gs2;
-                    pt[i] += x * gst;
                 }
                 v->gl = gl;
                 v->gr = gr;

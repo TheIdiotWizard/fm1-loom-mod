@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* The factory presets for tools/render_presets.sh: for each preset a script for build/host/xy_host that
- * loads it onto track 2 of a new project (the default FX I delay and FX II reverb, the track's tape send
- * as the project sets it) and plays a short phrase: three notes, then a four-note chord held, then its
+ * loads it onto track 2 of a new project (the default FX I delay and FX II reverb) and plays a short phrase: three notes, then a four-note chord held, then its
  * tail; basses an octave down. And the same phrase through the voices alone (dsp/synth.c, dry, the
  * track's level at 100), its peak, RMS and loudest 100 ms in dBFS into OUTDIR/dry.txt: the levels to balance the presets
  * by, before the master's compressor and limiter even them out; the dry phrase itself (mono, 16 bit) into
@@ -16,7 +15,7 @@
 #define N 256
 static uint8_t par[NTRK][NTP];
 static _Alignas(16) uint8_t mem[SYNTH_BYTES];
-static float L[N], R[N], S1[N], S2[N], ST[N];
+static float L[N], R[N], S1[N], S2[N];
 static double acc, peak, win[17], loud;
 static long frames, bad, nblk;
 #define DRY_MAX (44100 * 4)
@@ -33,9 +32,8 @@ static void run(synth_t *s, int ms, int measure)
         memset(R, 0, sizeof R);
         memset(S1, 0, sizeof S1);
         memset(S2, 0, sizeof S2);
-        memset(ST, 0, sizeof ST);
         synth_prepare(s, N);
-        synth_render(s, 0, NVOICE, L, R, S1, S2, ST, N);
+        synth_render(s, 0, NVOICE, L, R, S1, S2, N);
         win[nblk++ % 17] = 0.0;
         for (i = 0; i < N; i++) {
             if (dry_n < DRY_MAX)
@@ -153,7 +151,7 @@ int main(int argc, char **argv)
         fprintf(f, "param 2 %d %d\n", TP_ENGINE, pr->par[TP_ENGINE]);
         fprintf(f, "param 2 %d %d\n", TP_LTYPE, pr->par[TP_LTYPE]);
         for (p = 0; p < NTP_SOUND; p++)
-            if (p != TP_ENGINE && p != TP_LTYPE && p != TP_SENDT)
+            if (p != TP_ENGINE && p != TP_LTYPE)
                 fprintf(f, "param 2 %d %d\n", p, pr->par[p]);
         if (is_bass(pr->name))
             fprintf(f, "tap OCT-\n");

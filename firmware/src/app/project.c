@@ -12,9 +12,9 @@
  * did not change is not written again.
  *
  * Aux tracks keep their settings in the same par[] as the instruments: FX I / II: TP_ENGINE the
- * effect (FXT_*), TP_E1..E4 its four knobs, TP_FENV its high-pass, TP_CUT its low-pass, TP_LEVEL
- * the return, TP_SEND2 of FX I its feed into FX II; TAPE: TP_E1..E4 pitch, speed, length, mix,
- * TP_LEVEL the loop's level; BRAIN: TP_E1..E4 mode, key, scale, degree; PUNCH: TP_E1 latch.
+ * effect (a pick, fx.h: the effect and the reverb's mode), TP_E1..E4 its four knobs, TP_FENV its
+ * high-pass, TP_CUT its low-pass, TP_LEVEL the return, TP_SEND2 of FX I its feed into FX II; BRAIN:
+ * TP_E1..E4 mode, key, scale, degree; PUNCH: TP_E1 latch.
  * Part of the unity build, after app.h and engine.h. */
 #include "app.h"
 #include "engine.h"
@@ -35,7 +35,7 @@ uint8_t proj_slot;
 typedef char raw_fits[(RAW_LEN < 0x100000u) ? 1 : -1];   /* (lz.c packs up to 16 MB; the header's length is a u32) */
 typedef char settings_fit[(sizeof(settings_t) <= PLAT_STORE_MAX) ? 1 : -1];
 typedef char presets_fit[(sizeof user_presets + 4u <= PLAT_STORE_MAX) ? 1 : -1];
-#define PRESETS_FORMAT 3u                /* 3: the character stage (TP_CTYPE..TP_CMIX); 2: engine 0 is weft */
+#define PRESETS_FORMAT 4u                /* 4: no tape send (TP_SENDT); 3: the character stage; 2: engine 0 is weft */
 
 static uint32_t packed_len;             /* the last save's (or load's) packed stream, bytes */
 int project_mem_pct(void) { return (int)((packed_len * 100u + STREAM_CAP - 1u) / STREAM_CAP); }
@@ -96,23 +96,18 @@ static void aux_defaults(void)
             p[k] = 0;
         p[TP_LEVEL] = 100;
         p[TP_PAN] = 64;
-        p[TP_SEND1] = p[TP_SEND2] = p[TP_SENDT] = 0;
+        p[TP_SEND1] = p[TP_SEND2] = 0;
         p[TP_CHAN] = 0;
         p[TP_BRAIN] = 0;
     }
     set_name(&proj.trk[AUX_BRAIN], "conductor");
     set_name(&proj.trk[AUX_PUNCH], "throws");
-    set_name(&proj.trk[AUX_TAPE], "tape");
     set_name(&proj.trk[AUX_FX1], "delay");
     set_name(&proj.trk[AUX_FX2], "reverb");
-    proj.trk[AUX_TAPE].par[TP_E1] = 64;                  /* pitch: x1 (octaves, the middle) */
-    proj.trk[AUX_TAPE].par[TP_E2] = 64;                  /* speed: 100 % */
-    proj.trk[AUX_TAPE].par[TP_E3] = 127;                 /* length: 16 steps */
-    proj.trk[AUX_TAPE].par[TP_E4] = 127;                 /* mix: the loop replaces the dry */
     /* the notebook's default project: FX I a delay, FX II a reverb, each with its printed defaults
      * (fx.h FXT_DEFAULT); the FX I track's second send feeds its return into FX II */
     proj.trk[AUX_FX1].par[TP_ENGINE] = FXT_DELAY;
-    proj.trk[AUX_FX2].par[TP_ENGINE] = FXT_REVERB;
+    proj.trk[AUX_FX2].par[TP_ENGINE] = FXT_REVERB + RV_PLATE;
     for (k = 0; k < 4; k++) {
         proj.trk[AUX_FX1].par[TP_E1 + k] = FXT_DEFAULT[FXT_DELAY][k];
         proj.trk[AUX_FX2].par[TP_E1 + k] = FXT_DEFAULT[FXT_REVERB][k];
@@ -174,15 +169,17 @@ void project_defaults(void)
         tr->par[TP_BRAIN] = t ? 1 : 0;                    /* the melodic tracks follow the brain from the start
                                                            * (the notebook: "several tracks are routed by default") */
         tr->par[TP_CHAN] = 0;
-        tr->par[TP_SENDT] = 127;                          /* every instrument track feeds the tape */
     }
     aux_defaults();
-    /* the master: blends off (neutral), the groups at unity, a touch of compression */
+    /* the master: the EQ's blend off (neutral), a touch of tape colour (drive and the other two at 0: no
+     * gain stage, no wobble, no hiss), the groups at unity, a touch of compression */
     for (k = 0; k < NMS; k++)
         proj.master[k] = 64;
     proj.master[MS_EQ_BLEND] = 0;
-    proj.master[MS_SAT_GAIN] = 0;
-    proj.master[MS_SAT_BLEND] = 0;
+    proj.master[MS_TP_DRIVE] = 0;
+    proj.master[MS_TP_COLOR] = MS_TP_COLOR_DEF;
+    proj.master[MS_TP_WOBBLE] = 0;
+    proj.master[MS_TP_NOISE] = 0;
     proj.master[MS_PERC] = 100;
     proj.master[MS_MEL] = 100;
     proj.master[MS_COMP] = 30;
@@ -209,7 +206,7 @@ static int settings_valid(settings_t *s)
         s->trk[t].name[NAME_LEN - 1] = 0;
         if (t < NTRK && p[TP_ENGINE] >= NENGINE)
             return 0;
-        if (t >= AUX_FX1 && p[TP_ENGINE] >= NFXT)
+        if (t >= AUX_FX1 && p[TP_ENGINE] >= NFXPICK)
             return 0;
         if (t < NTRK)
             for (k = 0; k < NTP; k++) {
@@ -579,7 +576,7 @@ int presets_save(void)
     return save_buf(OBJ_PRESETS, sizeof user_presets + 4u);
 }
 
-/* every value to the engine (boot, load): the tracks, the FX, the tape, the master, the transport */
+/* every value to the engine (boot, load): the tracks, the FX, the master, the transport */
 void project_apply(void)
 {
     int t, k;
@@ -588,10 +585,6 @@ void project_apply(void)
     for (k = 0; k < 2; k++) {
         const uint8_t *p = proj.trk[AUX_FX1 + k].par;
         engine_fx(k, p[TP_ENGINE], p + TP_E1, p[TP_FENV], p[TP_CUT]);
-    }
-    {
-        const uint8_t *p = proj.trk[AUX_TAPE].par;
-        engine_tape_set(p[TP_E1], p[TP_E2], p[TP_E3], p[TP_E4]);
     }
     for (k = 0; k < NMS; k++)
         engine_master(k, proj.master[k]);

@@ -43,7 +43,7 @@ static void check(const char *what, int ok)
 static uint8_t par[NTP];
 static uint8_t dbuf[DRUMLINE_BYTES] __attribute__((aligned(8)));
 static drumline_t *dl = (drumline_t *)dbuf;
-static float L[BLK], R[BLK], S1[BLK], S2[BLK], ST[BLK];
+static float L[BLK], R[BLK], S1[BLK], S2[BLK];
 
 /* the project's neutral drum envelope: lag 0, attack 0, random 0, length 64 (1x) */
 static void kit_default(void)
@@ -59,7 +59,6 @@ static void kit_default(void)
     par[TP_R] = 64;
     par[TP_SEND1] = 64;
     par[TP_SEND2] = 32;
-    par[TP_SENDT] = 127;
 }
 static void key_model(int s, int model)               /* key s plays a model with its defaults */
 {
@@ -74,10 +73,10 @@ static void render(void)
 {
     int i;
     memset(L, 0, sizeof L); memset(R, 0, sizeof R);
-    memset(S1, 0, sizeof S1); memset(S2, 0, sizeof S2); memset(ST, 0, sizeof ST);
-    drumline_render(dl, L, R, S1, S2, ST, BLK);
+    memset(S1, 0, sizeof S1); memset(S2, 0, sizeof S2);
+    drumline_render(dl, L, R, S1, S2, BLK);
     for (i = 0; i < BLK; i++)
-        if (L[i] != L[i] || R[i] != R[i] || S1[i] != S1[i] || S2[i] != S2[i] || ST[i] != ST[i])
+        if (L[i] != L[i] || R[i] != R[i] || S1[i] != S1[i] || S2[i] != S2[i])
             nan_seen = 1;
 }
 static float blk_peak(void)
@@ -377,7 +376,7 @@ int main(void)
               fm_fabsf(dbfs(p30 / p0) + 30.0f) < 0.5f && h2.peak == 0.0f);
     }
     {
-        float sl = 0.0f, sr = 0.0f, s1 = 0.0f, s2 = 0.0f, st = 0.0f;
+        float sl = 0.0f, sr = 0.0f, s1 = 0.0f, s2 = 0.0f;
         int b;
         par[TP_DRUM(0, DP_PAN)] = 127;
         drumline_init(dl, par);
@@ -385,12 +384,11 @@ int main(void)
         for (b = 0; b < 40; b++) {
             render();
             for (i = 0; i < BLK; i++) {
-                sl += L[i] * L[i]; sr += R[i] * R[i]; s1 += S1[i] * S1[i]; s2 += S2[i] * S2[i]; st += ST[i] * ST[i];
+                sl += L[i] * L[i]; sr += R[i] * R[i]; s1 += S1[i] * S1[i]; s2 += S2[i] * S2[i];
             }
         }
         check("pan 127: the right side only", sr > 0.0f && sl < sr * 1e-6f);
-        check("sends follow TP_SEND1 (64) / TP_SEND2 (32) / TP_SENDT (127)",
-              s1 > s2 * 3.5f && s1 < s2 * 4.5f && st > s1 * 3.5f && st < s1 * 4.5f);
+        check("sends follow TP_SEND1 (64) / TP_SEND2 (32)", s1 > s2 * 3.5f && s1 < s2 * 4.5f);
         par[TP_DRUM(0, DP_PAN)] = 64;
     }
 
@@ -726,7 +724,7 @@ int main(void)
 
     printf("-- cost, instructions a sample (each model alone, then eight voices, then with the filter)\n");
     {
-        static float l[256], r[256], a[256], b2[256], c[256];
+        static float l[256], r[256], a[256], b2[256];
         uint64_t i0, di;
         for (m = 0; m < NDM; m++) {
             key_model(0, m);
@@ -734,10 +732,10 @@ int main(void)
             drumline_init(dl, par);
             drumline_hit(dl, 0, 127, 0, 0, 0);
             memset(l, 0, sizeof l);
-            drumline_render(dl, l, r, a, b2, c, 256);
+            drumline_render(dl, l, r, a, b2, 256);
             i0 = instr_now();
-            drumline_render(dl, l, r, a, b2, c, 256);
-            drumline_render(dl, l, r, a, b2, c, 256);
+            drumline_render(dl, l, r, a, b2, 256);
+            drumline_render(dl, l, r, a, b2, 256);
             di = instr_now() - i0;
             printf("  %-10s %5.0f\n", DM_NAME[m], (double)di / 512.0);
         }
@@ -755,7 +753,7 @@ int main(void)
             for (blk = 0; blk < 60; blk++) {
                 memset(l, 0, sizeof l);
                 i0 = instr_now();
-                drumline_render(dl, l, r, a, b2, c, 256);
+                drumline_render(dl, l, r, a, b2, 256);
                 di = instr_now() - i0;
                 if (blk > 4) {
                     total += di;

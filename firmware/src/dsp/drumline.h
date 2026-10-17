@@ -58,6 +58,6 @@ void drumline_choke(drumline_t *d);
 void drumline_filter(drumline_t *d, int type, int locut, int comp, int drive, int hicut);
 /* render n frames: dry L/R (through the dynamic filter when on) and sends (the track's TP_SEND*), added into
  * the buffers. Stack: about 400 bytes (three 32-sample sub-block buffers) */
-void drumline_render(drumline_t *d, float *l, float *r, float *s1, float *s2, float *st, uint32_t n);
+void drumline_render(drumline_t *d, float *l, float *r, float *s1, float *s2, uint32_t n);
 int drumline_sounding(const drumline_t *d);
 extern volatile uint8_t drumline_hitv[DL_NSOUND];      /* the last hit of each sound, 255 = full (UI lets it fall) */

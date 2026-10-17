@@ -8,7 +8,7 @@
  *         n -= k;
  *     }
  *
- * Eleven sequenced tracks (1-8, brain, punch, tape), each on its own pattern (the scene's), with its
+ * Ten sequenced tracks (1-8, brain, punch), each on its own pattern (the scene's), with its
  * own step counter, length and scale. Track 1's pattern defines the bar for scene changes and the
  * song: when it wraps (or every 16 steps if it is shorter), cued scenes start. Time is counted in
  * ticks (PPS a sixteenth) at the tempo, swung and grooved per track.
@@ -87,8 +87,6 @@ typedef struct {
     void (*lock)(void *ctx, int trk, int param, int val);          /* LOCK_NONE = back to the knob */
     void (*bend)(void *ctx, int trk, int cents);                   /* the bend component, each chunk */
     void (*punch)(void *ctx, uint32_t drum_mask, uint32_t mel_mask);   /* the live FX state changed */
-    void (*tape_seg)(void *ctx, int seg, int on);
-    void (*tape_step)(void *ctx, uint32_t samples_per_step);
     void (*midi)(void *ctx, uint8_t status, uint8_t d1, uint8_t d2);
     void (*step)(void *ctx, int trk, int step);                    /* UI playheads */
     void (*scene)(void *ctx, int scene);                           /* a scene started */
@@ -105,11 +103,11 @@ typedef struct {
     uint32_t off_at;                  /* samples left, Q8 (counted down; due under 256) */
     uint32_t tag;
     uint8_t used;
-    uint8_t kind;                     /* OFF_NOTE: sink note_off; OFF_PUNCH: clear a punch_seq bit; OFF_TAPE: a segment off;
+    uint8_t kind;                     /* OFF_NOTE: sink note_off; OFF_PUNCH: clear a punch_seq bit;
                                        * OFF_DRUM: sink drum_off (note = the sound + 1) */
     uint8_t note;                     /* the MIDI note echoed, 0 none */
 } seq_off_t;
-enum { OFF_NOTE, OFF_PUNCH, OFF_TAPE, OFF_DRUM };
+enum { OFF_NOTE, OFF_PUNCH, OFF_DRUM };
 
 typedef struct {                      /* one track's runtime (interrupt only) */
     uint8_t pos;                      /* the step playing */
@@ -218,7 +216,7 @@ typedef struct {
     volatile uint32_t ext_pending;
     volatile uint8_t req_start, req_stop, req_cont, req_from_start;
     uint32_t rng;
-    uint32_t step_tick;               /* sixteenths since start (the metronome, the tape, the arp grid) */
+    uint32_t step_tick;               /* sixteenths since start (the metronome, the arp grid) */
     uint8_t metro_beat;
     /* added runtime */
     volatile uint8_t pcue[NSEQT];     /* a pattern cued per track, 0xFF none */
@@ -234,7 +232,6 @@ typedef struct {
     uint8_t ext_six;                  /* external clock: ticks into the sixteenth */
     uint8_t chunk_cap;                /* a bend or a lock ramp runs: advance in chunks */
     uint8_t brain_seen[4];            /* the BRAIN track's E1..E4 last read */
-    uint32_t tape_last;               /* samples per sixteenth last sent to the tape */
     uint32_t punch_sent_d, punch_sent_m;
     uint8_t rec_note[8], rec_trk[8], rec_step[8];   /* live record: keys down and the steps they took */
     volatile uint8_t rec_replace;     /* live record replaces: the steps the playhead passes on rec_target are
@@ -276,7 +273,6 @@ int punch_group_of(const seq_t *s, int trk);        /* 0 percussive (a drumline 
 uint32_t seq_punch_mask(const seq_t *s, int trk);   /* the 12 PX_* bits in force on track trk now (held keys aimed at
                                                      * it or its group, and the sequenced ones); the engine's per-track
                                                      * view, finer than the two masks the punch sink gets */
-void seq_tape_key(seq_t *s, int seg, int on);
 
 /* live / step recording (main loop) */
 /* on: 0 off; 1 the keys write steps (quantised) while playing (momentary: on while REC is held); 2 the same,

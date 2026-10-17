@@ -55,8 +55,8 @@ static const char *const VSHAPE_N[4] = {"square", "sine", "ramp", "saw"};
 static const char *const TSHAPE_N[5] = {"sine", "saw", "expo", "square", "blip"};
 static const char *const LDEST_N[NLD] = {"synth", "envelope", "filter", "amp", "synth free", "env free", "filter free",
                                          "amp free"};
-static const char *const DUCK_N[12] = {"track 1", "track 2", "track 3", "track 4", "track 5", "track 6", "track 7",
-                                       "track 8", "conductor", "throws", "tape", "metro"};
+static const char *const DUCK_N[11] = {"track 1", "track 2", "track 3", "track 4", "track 5", "track 6", "track 7",
+                                       "track 8", "conductor", "throws", "metro"};
 static const char *const PLAYER_N[NPL] = {"off", "arp", "strum", "hold"};
 static const char *const ARPSPD_N[9] = {"1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/32T", "1/64"};
 static const char *const ARPPAT_N[6] = {"up", "down", "bounce", "bounce+", "played", "random"};
@@ -99,7 +99,7 @@ typedef struct {
     float kq;                         /* 1 / Q */
     float kres;                       /* the ladder's feedback 0..4 */
     float gl, gr;                     /* dry gains (pan, level, volume, velocity, wobble, pump) */
-    float g1, g2, gt;                 /* sends, relative to the dry level */
+    float g1, g2;                     /* sends, relative to the dry level */
     float pitch_off;                  /* cents added to the note (bend, perf, vibrato, an LFO on pitch) */
     float e[4];                       /* the engine knobs 0..1 */
     float ek[4];                      /* the same, raw (the discrete knobs: 1..8, a table index) */
@@ -1558,7 +1558,6 @@ static void voice_chunk(synth_t *s, voice_t *v)
     c->gr = v->pan_r * vg;
     c->g1 = fm_minf((float)(P(s, trk, TP_SEND1) + t->perf.send1), 127.0f) * (1.0f / 127.0f);
     c->g2 = fm_minf((float)(P(s, trk, TP_SEND2) + t->perf.send2), 127.0f) * (1.0f / 127.0f);
-    c->gt = (float)P(s, trk, TP_SENDT) * (1.0f / 127.0f);
     /* pitch: the glide, bend, performance pitch, vibrato, an LFO on the pitch (+-12 semitones at 100 %) */
     v->pitch_cur += (v->pitch - v->pitch_cur) * v->glide_k;
     c->pitch_off = (float)t->bend_c + (float)t->perf.pitch_c + t->lpitch[k] * lenv;
@@ -1664,14 +1663,14 @@ static void voice_subblock(synth_t *s, voice_t *v, int aligned)
  *   bp12:    its band-pass output, scaled by 1 / Q so the peak stays at unity
  *   dynamic: the drum tracks' filter (drumline.c): on a synth voice it is a bypass */
 SY_INLINE void sample_loop(voice_t *v, float *xl, float *xr, float *l, float *r, float *s1, float *s2,
-                               float *st, int k, const int ftype, const int stereo, const int chr)
+                               int k, const int ftype, const int stereo, const int chr)
 {
     const cfg_t *c = &v->c;
     const float a1 = v->a1, a2 = v->a2, a3 = v->a3, b1 = v->b1, b2 = v->b2, b3 = v->b3, kq = c->kq;
     const float es = v->amp_step, sgs = v->sg_step, gls = v->gl_step, grs = v->gr_step;
-    const float g1 = c->g1, g2 = c->g2, gt = c->gt, wide = stereo ? 1.41421356f : 1.0f;
+    const float g1 = c->g1, g2 = c->g2, wide = stereo ? 1.41421356f : 1.0f;
     const float lcomp = 1.0f + b2 * 0.25f;       /* the ladder: its passband falls as the feedback rises */
-    const int sends = g1 > 0.0f || g2 > 0.0f || gt > 0.0f;
+    const int sends = g1 > 0.0f || g2 > 0.0f;
     float f0 = v->f[0], f1 = v->f[1], f2 = v->f[2], f3 = v->f[3], f4 = v->f[4], f5 = v->f[5], f6 = v->f[6], f7 = v->f[7];
     float e = v->amp_cur, sg = v->steal_gain, glc = v->glc, grc = v->grc, pk = 0.0f;
     int j;
@@ -1742,7 +1741,6 @@ SY_INLINE void sample_loop(voice_t *v, float *xl, float *xr, float *l, float *r,
             float mono = (ol + or_) * 0.5f;
             s1[j] += mono * g1;
             s2[j] += mono * g2;
-            st[j] += mono * gt;
         }
         yl = fm_fabsf(yl);
         if (yl > pk)
@@ -1763,12 +1761,12 @@ SY_INLINE void sample_loop(voice_t *v, float *xl, float *xr, float *l, float *r,
 
 /* after the character stage: the ramps and the outputs (sample_loop's second half) */
 SY_INLINE void out_loop(voice_t *v, const float *xl, const float *xr, float *l, float *r, float *s1, float *s2,
-                        float *st, int k, const int stereo)
+                        int k, const int stereo)
 {
     const cfg_t *c = &v->c;
     const float es = v->amp_step, sgs = v->sg_step, gls = v->gl_step, grs = v->gr_step;
-    const float g1 = c->g1, g2 = c->g2, gt = c->gt, wide = stereo ? 1.41421356f : 1.0f;
-    const int sends = g1 > 0.0f || g2 > 0.0f || gt > 0.0f;
+    const float g1 = c->g1, g2 = c->g2, wide = stereo ? 1.41421356f : 1.0f;
+    const int sends = g1 > 0.0f || g2 > 0.0f;
     float e = v->amp_cur, sg = v->steal_gain, glc = v->glc, grc = v->grc, pk = 0.0f;
     int j;
     for (j = 0; j < k; j++) {
@@ -1786,7 +1784,6 @@ SY_INLINE void out_loop(voice_t *v, const float *xl, const float *xr, float *l, 
             float mono = (ol + or_) * 0.5f;
             s1[j] += mono * g1;
             s2[j] += mono * g2;
-            st[j] += mono * gt;
         }
         yl = fm_fabsf(yl);
         if (yl > pk)
@@ -1800,18 +1797,18 @@ SY_INLINE void out_loop(voice_t *v, const float *xl, const float *xr, float *l, 
     if (pk > v->peak)
         v->peak = pk;
 }
-static void out_mono(voice_t *v, const float *xl, float *l, float *r, float *s1, float *s2, float *st, int k)
+static void out_mono(voice_t *v, const float *xl, float *l, float *r, float *s1, float *s2, int k)
 {
-    out_loop(v, xl, xl, l, r, s1, s2, st, k, 0);
+    out_loop(v, xl, xl, l, r, s1, s2, k, 0);
 }
-static void out_stereo(voice_t *v, const float *xl, const float *xr, float *l, float *r, float *s1, float *s2, float *st,
+static void out_stereo(voice_t *v, const float *xl, const float *xr, float *l, float *r, float *s1, float *s2,
                        int k)
 {
-    out_loop(v, xl, xr, l, r, s1, s2, st, k, 1);
+    out_loop(v, xl, xr, l, r, s1, s2, k, 1);
 }
 
 /* m samples (inside a chunk) of one voice into the buffers */
-static void voice_samples(synth_t *s, voice_t *v, float *l, float *r, float *s1, float *s2, float *st, int m)
+static void voice_samples(synth_t *s, voice_t *v, float *l, float *r, float *s1, float *s2, int m)
 {
     float xl[SUB], xr[SUB];
     int i = 0;
@@ -1822,7 +1819,7 @@ static void voice_samples(synth_t *s, voice_t *v, float *l, float *r, float *s1,
         if ((v->pos & (SUB - 1)) == 0 || v->fresh)
             voice_subblock(s, v, (v->pos & (SUB - 1)) == 0);
         eng_run(v, xl, xr, k);
-#define SL(ft, st_, ch) sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, ft, st_, ch)
+#define SL(ft, st_, ch) sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, k, ft, st_, ch)
         if (v->c.ctype == CT_OFF) {
             switch (v->c.ftype * 2 + (v->c.stereo != 0)) {
             case FT_LP24 * 2: SL(FT_LP24, 0, 0); break;
@@ -1854,9 +1851,9 @@ static void voice_samples(synth_t *s, voice_t *v, float *l, float *r, float *s1,
             }
             char_run(v, xl, xr, k);
             if (v->c.stereo)
-                out_stereo(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k);
+                out_stereo(v, xl, xr, l + i, r + i, s1 + i, s2 + i, k);
             else
-                out_mono(v, xl, l + i, r + i, s1 + i, s2 + i, st + i, k);
+                out_mono(v, xl, l + i, r + i, s1 + i, s2 + i, k);
         }
 #undef SL
         i += k;
@@ -1864,7 +1861,7 @@ static void voice_samples(synth_t *s, voice_t *v, float *l, float *r, float *s1,
     }
 }
 
-void synth_render(synth_t *s, int v0, int v1, float *l, float *r, float *s1, float *s2, float *st, uint32_t n)
+void synth_render(synth_t *s, int v0, int v1, float *l, float *r, float *s1, float *s2, uint32_t n)
 {
     int vi;
     if (v0 < 0)
@@ -1881,7 +1878,7 @@ void synth_render(synth_t *s, int v0, int v1, float *l, float *r, float *s1, flo
             if (v->pos == 0)
                 voice_chunk(s, v);
             if (v_sounding(v))
-                voice_samples(s, v, l + i, r + i, s1 + i, s2 + i, st + i, (int)m);
+                voice_samples(s, v, l + i, r + i, s1 + i, s2 + i, (int)m);
             else
                 v->pos = (uint16_t)(v->pos + m);
             if (v->pos >= SY_CHUNK)
@@ -1920,7 +1917,7 @@ static const tp_info_t FIXED[NTP_SOUND + 13] = {
     {"cutoff", 0, 127, 110, PK_HZ, 0},                  {"reso", 0, 127, 20, PK_PCT, 0},
     {"env", 0, 127, 64, PK_BIP, 0},                     {"keytrack", 0, 127, 64, PK_PCT, 0},
     {"type", 0, NFT - 1, FT_LP24, PK_NAMES, FTYPE_N},    {"fx I", 0, 127, 0, PK_PCT, 0},
-    {"fx II", 0, 127, 0, PK_PCT, 0},                    {"tape", 0, 127, 127, PK_PCT, 0},
+    {"fx II", 0, 127, 0, PK_PCT, 0},
     {"type", 0, NLT - 1, LT_OFF, PK_NAMES, LTYPE_N},    {"speed", 0, 127, 3, PK_HZ_SYNC, 0},
     {"amount", 0, 127, 64, PK_BIP, 0},                  {"dest", 0, NLD - 1, LD_FILTER, PK_NAMES, LDEST_N},
     {"param", 0, 3, 0, PK_NUM, 0},                      {"shape", 0, 3, 1, PK_NAMES, VSHAPE_N},
@@ -1950,7 +1947,7 @@ static const tp_info_t NONE_P = {"-", 0, 0, 0, PK_NUM, 0};
 static const tp_info_t STRUM_P[4] = {{"roll", 0, 63, 30, PK_NUM, 0}, {"pattern", 0, 3, 0, PK_NAMES, MPAT_N},
                                        {"-", 0, 0, 0, PK_NUM, 0}, {"hold", 0, 1, 0, PK_SWITCH, 0}};
 /* the LFO's knobs per type (synth.h): speed / amount / dest / x / x2 */
-static const tp_info_t LFO_SPEED_DUCK = {"source", 0, 11, 0, PK_NAMES, DUCK_N};
+static const tp_info_t LFO_SPEED_DUCK = {"source", 0, DUCK_METRO, 0, PK_NAMES, DUCK_N};
 static const tp_info_t LFO_AMT[NLT] = {{"-", 0, 0, 0, PK_NUM, 0}, {"amount", 0, 127, 64, PK_BIP, 0},
                                        {"vibrato", 0, 127, 64, PK_BIP, 0}, {"amount", 0, 127, 64, PK_PCT, 0},
                                        {"amount", 0, 127, 80, PK_PCT, 0}};
@@ -2230,11 +2227,10 @@ void sound_default(uint8_t *par, int engine)
 }
 
 /* -------------------------------------------------------------- presets --- */
-/* ENGINE E1 E2 E3 E4 | MODE PORTA BEND VOL | A D S R | FA FD FS FR | CUT RES FENV KTRK TYPE | S1 S2 ST |
+/* ENGINE E1 E2 E3 E4 | MODE PORTA BEND VOL | A D S R | FA FD FS FR | CUT RES FENV KTRK TYPE | S1 S2 |
  * LTYPE LSPEED LAMT LDEST LX LX2 | CTYPE CAMT CTONE CMIX (the character: every preset a whole sound, its own
  * effect in it). Eight an engine, the first of each the engine's sound in a new project
- * (and what choosing the engine loads). The tape send is 127, as a new project's tracks have it (loading a
- * preset keeps the track's own anyway: ui.c load_preset). The LFO fields follow synth.h: wave / drift:
+ * (and what choosing the engine loads). The LFO fields follow synth.h: wave / drift:
  * amount, module, knob, shape (or envelope); wobble: vibrato, volume, envelope, shape. Speeds: 0..7 synced
  * (3 = 1/4), above free: 20 is about 0.16 Hz, 40 0.45 Hz, 60 1.2 Hz, 80 3 Hz, 92 5.6 Hz.
  * Times: 32 is about 10 ms, 64 100 ms, 80 330 ms, 96 1.1 s, 110 3 s. Cutoff: 59 is 800 Hz, 80 2.2 kHz,
@@ -2245,7 +2241,7 @@ void sound_default(uint8_t *par, int engine)
 #define LFO_(lt, ls, la, ld, lx, lx2) lt, ls, la, ld, lx, lx2
 #define CH_(ct, ca, cto, cm) ct, ca, cto, cm
 #define PR(nm, eng, e1, e2, e3, e4, vm, po, vol, a, d, su, r, fa, fd, fs, fr, cut, res, fenv, kt, ft, s1, s2, lfo, ch) \
-    {nm, {eng, e1, e2, e3, e4, vm, po, 2, vol, a, d, su, r, fa, fd, fs, fr, cut, res, fenv, kt, ft, s1, s2, 127, LFO_ lfo, \
+    {nm, {eng, e1, e2, e3, e4, vm, po, 2, vol, a, d, su, r, fa, fd, fs, fr, cut, res, fenv, kt, ft, s1, s2, LFO_ lfo, \
           CH_ ch}}
 #define NOLFO (LT_OFF, 3, 64, LD_FILTER, 0, 1)
 #define NOCH (CT_OFF, 64, 64, 127)                         /* the character stage: off (type, amount, tone, mix) */
