@@ -170,10 +170,26 @@ static void set_tp(int trk, int p, int v)
         mark_dirty();
         return;
     }
+    if (is_drum(trk) && p >= TP_DRUM0 && (p - TP_DRUM0) % DP_N == DP_MODEL) {   /* another model on a key: its
+                                                                                * own knobs from its defaults */
+        int key = (p - TP_DRUM0) / DP_N;
+        engine_set(trk, p, v);
+        for (int k = 0; k < 4; k++) {
+            par[TP_DRUM(key, DP_K1 + k)] = DM_DEFAULT[v % NDM][k];
+            engine_set(trk, TP_DRUM(key, DP_K1 + k), par[TP_DRUM(key, DP_K1 + k)]);
+        }
+        mark_dirty();
+        return;
+    }
     if (p == TP_ENGINE && !is_aux(trk)) {
         sound_default(par, v);
         memset(proj.trk[trk].name, 0, NAME_LEN);
         engine_set_all(trk);
+        {                                        /* a kit has a page more under ENV: off it, back to the first */
+            int g = page_group(ui.page);
+            if (ui.page - PAGE_BTN[g].first >= group_n(g))
+                ui.page = PAGE_BTN[g].first;
+        }
     } else
         engine_set(trk, p, v);
     if (is_aux(trk))
@@ -1512,17 +1528,23 @@ static void presets(int32_t e)
             say("CHARACTER", tp_info_par(TP_CTYPE, par)->names[par[TP_CTYPE] % NCT]);
         }
         break;
-    case P_FILTER:                               /* the filter type */
+    case P_FILTER: case P_KITF:                  /* the filter type (a kit: the key's; Kit filter: the bus on / off) */
         if (!is_aux(trk)) {
             const uint8_t *par = proj.trk[trk].par;
-            set_tp(trk, TP_FTYPE, (par[TP_FTYPE] + d + NFT) % NFT);
-            say("FILTER", tp_info_par(TP_FTYPE, par)->names[par[TP_FTYPE] % NFT]);
+            int q = ftype_param(trk, ui.page), n = tp_info_par(q, par)->hi + 1;
+            if (is_drum(trk) && q == TP_FTYPE) {
+                set_tp(trk, TP_FTYPE, par[TP_FTYPE] == FT_DYNAMIC ? FT_LP24 : FT_DYNAMIC);
+                say("KIT FILTER", par[TP_FTYPE] == FT_DYNAMIC ? "on" : "off");
+                break;
+            }
+            set_tp(trk, q, (par[q] + d + n) % n);
+            say("FILTER", tp_info_par(q, par)->names[par[q] % n]);
         }
         break;
     default:
         if (is_fx(trk))
             fx_pick(trk, d);
-        else if (is_drum(trk) && (ui.page == P_ENGINE || ui.page == P_PLAY)) {
+        else if (is_drum(trk) && (ui.page == P_ENGINE || ui.page == P_PLAY || ui.page == P_ENV)) {
             ui.dsound = (uint8_t)((ui.dsound + d + DL_NSOUND) % DL_NSOUND);
             say("KEY", DL_SOUND_NAME[ui.dsound]);
         } else if (!is_aux(trk) && ui.page >= P_ENGINE && ui.page <= P_PLAYERS3)
@@ -1650,9 +1672,14 @@ static void list_change(int32_t e)
             set_tp(t, q, clampi(proj.trk[t].par[q] + d, 0, NPM - 1));
             break;
         }
-        case A_FTYPE:
-            set_tp(sel_trk(), TP_FTYPE, clampi(proj.trk[sel_trk()].par[TP_FTYPE] + d, 0, NFT - 1));
+        case A_FTYPE: {
+            int t = sel_trk(), q = ftype_param(t, ui.page);
+            if (is_drum(t) && q == TP_FTYPE)          /* the kit's bus: on (dynamic) / off */
+                set_tp(t, TP_FTYPE, d > 0 ? FT_DYNAMIC : FT_LP24);
+            else
+                set_tp(t, q, clampi(proj.trk[t].par[q] + d, 0, tp_info_par(q, proj.trk[t].par)->hi));
             break;
+        }
         case A_FX_HP: case A_FX_LP: case A_FX_SEND: {
             int ft = ui.page == P_FX2 ? AUX_FX2 : AUX_FX1, id = lst.row[lst.sel].id;
             int q = id == A_FX_HP ? TP_FENV : id == A_FX_LP ? TP_CUT : TP_SEND2;
@@ -1764,8 +1791,9 @@ static void act_scramble(void)                   /* a random sound: the engine s
     if (is_drum(trk)) {
         int key = ui.dsound % DL_NSOUND;
         for (int k = 0; k < 4; k++) {
+            const tp_info_t *in = tp_info_par(TP_DRUM(key, DP_K1 + k), par);
             r = r * 1664525u + 1013904223u;
-            par[TP_DRUM(key, DP_K1 + k)] = (uint8_t)((r >> 8) & 127u);
+            par[TP_DRUM(key, DP_K1 + k)] = (uint8_t)(in->lo + (int)((r >> 8) % (uint32_t)(in->hi - in->lo + 1)));
         }
         engine_set_all(trk);
         mark_dirty();
@@ -2087,6 +2115,19 @@ static void input(void)
                 !is_aux(sel_trk())) {
                 ui.lockpg = (uint8_t)(1 + (i == B_EDIT ? P_ENGINE : i == B_ENV ? P_ENV
                                            : i == B_FX ? (is_drum(sel_trk()) ? P_SENDS : P_CHARACTER) : P_LFO));
+                if (is_drum(sel_trk())) {           /* a kit's locks reach the key the step plays: the one shown
+                                                     * if the step has it, else the step's first */
+                    const step_t *st = &tpat(sel_trk())->st[step_shown(ui.held_first)];
+                    int has = 0, first = -1;
+                    for (int k = 0; k < SN; k++)
+                        if (st->note[k] >= 1 && st->note[k] <= DL_NSOUND) {
+                            has |= st->note[k] == ui.dsound + 1;
+                            if (first < 0)
+                                first = st->note[k] - 1;
+                        }
+                    if (!has && first >= 0)
+                        ui.dsound = (uint8_t)first;
+                }
                 ui.held_used = 1;
                 ui.touched = -1;
                 ui.btn_used |= m;
@@ -2389,7 +2430,7 @@ static void sp_page(void)
     int g = page_group(ui.page), n = group_n(g), d = ui.page - PAGE_BTN[g].first, any = 0;
     char t[80];
     knob_t k[4];
-    sp_cat(is_drum(sel_trk()) && ui.page == P_PLAY ? "Key" : PAGE_NAME[ui.page]);
+    sp_cat(page_name_of(ui.page, sel_trk()));
     if (n > 1) {
         sp_cat(", page ");
         sp_int(d + 1);
@@ -2505,7 +2546,7 @@ static void sp_front(int all)
             }
         }
     } else if (sp_list()) {
-        sp_cat(PAGE_NAME[ui.page]);
+        sp_cat(page_name_of(ui.page, sel_trk()));
         sp_cat(" list. ");
         sp_row();
         return;

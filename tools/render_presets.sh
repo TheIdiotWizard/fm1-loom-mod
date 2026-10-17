@@ -15,7 +15,7 @@ sh host/build_host.sh >/dev/null
 mkdir -p "$OUT"
 rm -f "$OUT"/*.wav "$OUT"/*.xy
 $CC -O2 -std=c99 -DXY_HOST -Ifirmware/src/dsp -Ifirmware/src -Ibuild/gen -o build/host/preset_scripts \
-    tools/preset_scripts.c firmware/src/dsp/synth.c firmware/src/dsp/drumline.c -lm
+    tools/preset_scripts.c firmware/src/dsp/synth.c firmware/src/dsp/drumline.c firmware/src/dsp/sample.c -lm
 names=$(build/host/preset_scripts "$OUT")
 for n in $names; do
     build/host/xy_host "$OUT/$n.xy" "$OUT" >/dev/null || { echo "render failed: $n"; exit 1; }

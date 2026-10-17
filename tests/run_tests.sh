@@ -25,6 +25,10 @@ run() {
 }
 [ -f build/gen/felucca_font.h ] || "$PY" tools/gen_font.py build/gen/felucca_font.h >/dev/null
 [ -f build/gen/wavetables.h ] || "$PY" tools/gen_wavetables.py build/gen/wavetables.h >/dev/null
+"$PY" tools/gen_samples.py build/gen/samples.h build/gen/wav >/dev/null   # the factory samples (cheap: always fresh)
+# a user bank from two of them, as tools/loom_samples.py would upload it (tests/scenarios/samples.xy loads it)
+run sample-bank "$PY" tools/loom_samples.py build build/gen/user_bank.bin "piano two=build/gen/wav/piano.wav:60" \
+    "vowel=build/gen/wav/ah.wav:57"
 run fastmath sh -c "$CC -O2 -ffp-contract=off -Wall -Wextra -Werror -o $OUT/fastmath_test tests/host/fastmath_test.c -lm && $OUT/fastmath_test"   # its reference is double on purpose
 run encoder sh -c "$CC -O2 -w -Ifirmware/hal -o $OUT/encoder_test tests/host/encoder_test.c && $OUT/encoder_test"
 run uac sh -c "$CC -O2 -w -Ifirmware/src -Ifirmware/hal -o $OUT/uac_test tests/host/uac_test.c -lm && $OUT/uac_test"

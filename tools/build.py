@@ -41,7 +41,7 @@ CFLAGS = ["-Os", "-ffunction-sections", "-fno-builtin", "-Wall", "-Wno-unused-fu
 # build (-ffp-contract=off) computes the same samples
 FPU = ["-mcpu=r3", "-mfprev1", "-ffp-contract=off"]
 # the DSP units and the sequencer: separate units at -O2 (the rest, the unity build firmware/src/main.c, is -Os)
-O2_UNITS = ["dsp/synth.c", "dsp/drumline.c", "dsp/fx.c", "seq/pattern.c", "seq/seq.c"]
+O2_UNITS = ["dsp/synth.c", "dsp/drumline.c", "dsp/sample.c", "dsp/fx.c", "seq/pattern.c", "seq/seq.c"]
 LINE = re.compile(r"^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2} )+)\s*\t(.*)$")
 
 # SDK files of AC79NN_SDK_V1.2.1_2023-12-13 (the tested version)
@@ -135,7 +135,7 @@ FX\teffects
 
 def generate():
     """generated headers: the font (Felucca's), the screen reader's words link (fm1-reader), the
-    wavetables (tools/gen_wavetables.py, the synth's)"""
+    wavetables (tools/gen_wavetables.py, the synth's), the factory samples (tools/gen_samples.py)"""
     GEN.mkdir(parents=True, exist_ok=True)
     tools = SRC / "tools"
     words = SRC / "firmware" / "words.tsv"
@@ -148,6 +148,7 @@ def generate():
         jobs.append([tools / "gen_wavetables.py", GEN / "wavetables.h"])
     else:
         print("build: no tools/gen_wavetables.py yet: build/gen/wavetables.h not generated")
+    jobs.append([tools / "gen_samples.py", GEN / "samples.h"])     # the factory samples (dsp/sample.c)
     for c in jobs:
         r = subprocess.run([sys.executable, *map(str, c)], capture_output=True, text=True)
         sys.stdout.write(r.stdout)

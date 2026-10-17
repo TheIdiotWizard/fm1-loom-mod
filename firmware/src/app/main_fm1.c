@@ -311,8 +311,12 @@ static void fm1_main(void)
         plat_sysvdd_level = (uint8_t)fm1_sysvdd();
         flash_ok = FL_FAR(fl_jedec_ram)() == 0x856014u;   /* the expected 1 MiB part, else RAM only */
         irq_restore(f);
-        if (flash_ok)
+        if (flash_ok) {
+            fl_plain_window_init();                 /* the user sample bank reads as plaintext through XIP (X0X's) */
+            smp_user_attach(fm1_xip_ptr(SMP_BANK_BASE));
+            smp_user_scan();                        /* (an empty or torn bank: no user samples) */
             ota_boot_cleanup();
+        }
     }
     lcd_init();
     palette_set(1);
@@ -407,10 +411,11 @@ static void fm1_main(void)
                 enter_uboot("UBOOT");
             }
         }
-        {   /* a screen reader's SysEx (announce.c), before the updater looks */
+        {   /* a screen reader's SysEx (announce.c), the remote, the sample bank (samples.c), before the updater
+             * looks */
             const uint8_t *p;
             uint32_t n;
-            if (ota_frame_get(&p, &n) && (ann_frame(p, n, fm1_ms) || remote_frame(p, n)))
+            if (ota_frame_get(&p, &n) && (ann_frame(p, n, fm1_ms) || remote_frame(p, n) || smp_frame(p, n)))
                 ota_frame_done();
         }
         ota_service();                              /* M-UPGRADE handshake (other SysEx is dropped) */

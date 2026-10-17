@@ -58,17 +58,18 @@ static uint16_t trk_tint(int t) { return ink_mix(trk_ink(t), theme->tint); }
 
 /* the pages (the spec's Buttons table): a button opens its first page; SELECT turns them. EDIT: the engine
  * (a drum track: the shown key's knobs) and Play (a drum track: the key's model, random, pan, volume); ENV: the
- * envelope, the filter, the filter envelope; FX: the instrument's character stage (a kit track has none: the
- * page says so), its sends and the two effects; ARP three with the arp (its page 2, then hold) */
-enum { P_ARRANGE, P_SONG, P_STEPS, P_BAR, P_ENGINE, P_PLAY, P_ENV, P_FILTER, P_ENV2, P_CHARACTER, P_SENDS, P_FX1,
-       P_FX2, P_LFO, P_LFO2, P_PLAYERS, P_PLAYERS2, P_PLAYERS3, P_MIX, P_MASTER, P_MASTER2, P_MASTER3, P_SETUP,
+ * envelope, the filter, the filter envelope (a drum track: the shown key's envelope and filter, then the kit's
+ * envelope and the kit's bus filter: four pages); FX: the instrument's character stage (a kit track has none:
+ * the page says so), its sends and the two effects; ARP three with the arp (its page 2, then hold) */
+enum { P_ARRANGE, P_SONG, P_STEPS, P_BAR, P_ENGINE, P_PLAY, P_ENV, P_FILTER, P_ENV2, P_KITF, P_CHARACTER, P_SENDS,
+       P_FX1, P_FX2, P_LFO, P_LFO2, P_PLAYERS, P_PLAYERS2, P_PLAYERS3, P_MIX, P_MASTER, P_MASTER2, P_MASTER3, P_SETUP,
        P_STATUS, NPAGES };
 static const char *const PAGE_NAME[NPAGES] = {"Arrange", "Song", "Steps", "Bar", "Engine", "Play", "Envelope",
-                                              "Filter", "Filter env", "Character", "Sends", "FX I", "FX II", "LFO",
-                                              "LFO 2", "Players", "Players 2", "Hold", "Mix", "Master EQ",
-                                              "Master drive", "Master out", "Setup", "Status"};
+                                              "Filter", "Filter env", "Kit filter", "Character", "Sends", "FX I",
+                                              "FX II", "LFO", "LFO 2", "Players", "Players 2", "Hold", "Mix",
+                                              "Master EQ", "Master drive", "Master out", "Setup", "Status"};
 static const struct { uint8_t btn, first, n; } PAGE_BTN[] = {
-    {B_HOME, P_ARRANGE, 2}, {B_SEQ, P_STEPS, 2}, {B_EDIT, P_ENGINE, 2}, {B_ENV, P_ENV, 3}, {B_FX, P_CHARACTER, 4},
+    {B_HOME, P_ARRANGE, 2}, {B_SEQ, P_STEPS, 2}, {B_EDIT, P_ENGINE, 2}, {B_ENV, P_ENV, 4}, {B_FX, P_CHARACTER, 4},
     {B_LFO, P_LFO, 2}, {B_ARP, P_PLAYERS, 3}, {B_GLO, P_MIX, 6}};
 #define NPAGE_BTN (sizeof PAGE_BTN / sizeof PAGE_BTN[0])
 static int page_group(int p)
@@ -433,6 +434,23 @@ static int sel_trk(void) { return proj.trk_sel < NALLTRK ? proj.trk_sel : 0; }
 static int is_aux(int t) { return t >= NTRK; }
 static int is_seqt(int t) { return t < NSEQT; }
 static int is_drum(int t) { return t < NTRK && proj.trk[t].par[TP_ENGINE] == EG_DRUMLINE; }
+/* a page's name: a drum track's Play page is its Key page, its Filter env page the kit's envelope */
+static const char *page_name_of(int p, int trk)
+{
+    if (is_drum(trk) && p == P_PLAY)
+        return "Key";
+    if (is_drum(trk) && p == P_ENV2)
+        return "Kit env";
+    return PAGE_NAME[p % NPAGES];
+}
+/* the filter type the Filter pages' PRESET and their list turn: a drum track's key's own (its Envelope and
+ * Filter pages), the kit bus's (Kit env, Kit filter), else the voice filter's */
+static int ftype_param(int trk, int page)
+{
+    if (is_drum(trk) && (page == P_ENV || page == P_FILTER))
+        return TP_DRUM(ui.dsound % DL_NSOUND, DP_FTYPE);
+    return TP_FTYPE;
+}
 static int is_fx(int t) { return t >= AUX_FX1; }
 static int cur_scene(void) { return seq.scene < NSCENE ? seq.scene : 0; }
 static int cur_pat(int t) { return is_seqt(t) ? seq.ppat[t] % NPATT : 0; }
@@ -457,6 +475,8 @@ static int group_n(int g)
         return trk == AUX_PUNCH || trk == AUX_TAPE ? 1 : 2;
     if (b == B_ARP)
         return pl_type(trk) == PL_ARP ? 3 : 2;
+    if (b == B_ENV)
+        return is_drum(trk) ? 4 : 3;                 /* a kit: the key's envelope, filter; the kit's envelope, filter */
     return PAGE_BTN[g].n;
 }
 /* the TP_* a page's knob k edits, -1 none */
@@ -464,7 +484,8 @@ static int tp_page_param(int p, int k, int trk)
 {
     static const int8_t M[][4] = {
         {TP_E1, TP_E2, TP_E3, TP_E4}, {TP_VMODE, TP_PORTA, TP_BEND, TP_VOLUME}, {TP_A, TP_D, TP_S, TP_R},
-        {TP_CUT, TP_RES, TP_FENV, TP_KTRK}, {TP_FA, TP_FD, TP_FS, TP_FR}, {TP_CTYPE, TP_CAMT, TP_CTONE, TP_CMIX},
+        {TP_CUT, TP_RES, TP_FENV, TP_KTRK}, {TP_FA, TP_FD, TP_FS, TP_FR}, {TP_CUT, TP_RES, TP_FENV, TP_KTRK},
+        {TP_CTYPE, TP_CAMT, TP_CTONE, TP_CMIX},
         {TP_SEND1, TP_SEND2, TP_SENDT, TP_LEVEL},
         {TP_E1, TP_E2, TP_E3, TP_E4}, {TP_E1, TP_E2, TP_E3, TP_E4}, {TP_LTYPE, TP_LSPEED, TP_LAMT, TP_LDEST},
         {TP_LX, TP_LX2, -1, -1}, {TP_PLAYER, TP_P1, TP_P2, TP_P3}, {TP_AP1, TP_AP2, TP_AP3, TP_AP4},
@@ -496,6 +517,16 @@ static int tp_page_param(int p, int k, int trk)
             static const uint8_t K2[4] = {DP_MODEL, DP_RANDOM, DP_PAN, DP_VOLUME};
             return TP_DRUM(key, K2[k]);
         }
+        if (p == P_ENV) {                            /* the key's own envelope */
+            static const uint8_t KE[4] = {DP_ATTACK, DP_HOLD, DP_DECAY, DP_LAG};
+            return TP_DRUM(key, KE[k]);
+        }
+        if (p == P_FILTER) {                         /* and its filter (the type: PRESET) */
+            static const uint8_t KF[4] = {DP_CUT, DP_RES, DP_FENV, DP_DRIVE};
+            return TP_DRUM(key, KF[k]);
+        }
+        if (p == P_ENV2)                             /* the kit's envelope: lag, attack, random, length */
+            return M[P_ENV - P_ENGINE][k];
     }
     if (p == P_PLAYERS2 && pl_type(trk) != PL_ARP)
         return k == 0 ? TP_P4 : -1;
@@ -590,10 +621,8 @@ static void draw_header(void)
     } else {
         int32_t r = 232, x = 8;
         const char *bn = BTN_LABEL[PAGE_BTN[page_group(ui.page)].btn];
-        const char *pn = PAGE_NAME[ui.page];
+        const char *pn = page_name_of(ui.page, sel_trk());
         int32_t w = text_w(&FONT_XS, bn) + 6;
-        if (is_drum(sel_trk()) && ui.page == P_PLAY)
-            pn = "Key";
         if (ui.page >= P_STEPS && ui.page <= P_PLAYERS3) {   /* a track's page: the track first, in its colour */
             int pt = page_trk(ui.page);
             const char *tn = TRACK_NAME[pt];
@@ -606,7 +635,7 @@ static void draw_header(void)
         cv_round(x + 1, 5, w - 2, 15, 2, K_BG);
         cv_text(x + 3, cap_y(4, 17, &FONT_XS) - 1, &FONT_XS, bn, K_DIM);
         x += w + 6;
-        cv_text(x, 4, &FONT_B, pn, K_TEXT);
+        cv_text(x, 4, &FONT_B, pn, K_TEXT);   /* (pn: page_name_of) */
         if (ext)
             s_cat(t, "ext");
         else
@@ -672,7 +701,8 @@ static void ktp_val(knob_t *k, int trk, int p, int v)
             e = s_cat(e, " ");
         s_cat(e, unit);
     }
-    kv(k, short_name(in->name), val, v - in->lo, in->kind == PK_NAMES || in->kind == PK_SWITCH ? 0 : in->hi - in->lo);
+    kv(k, short_name(in->name), val, v - in->lo,
+       in->kind == PK_NAMES || in->kind == PK_SWITCH || in->kind == PK_SAMPLE ? 0 : in->hi - in->lo);
 }
 static void ktp(knob_t *k, int trk, int p)
 {
@@ -1055,15 +1085,19 @@ static void page_tag(char *t)
     case P_STEPS:
         track_crumb(t);
         if (ui.lockpg) {
+            int lp = ui.lockpg - 1;
             e = num_s((uint32_t)step_shown(ui.held_first) + 1u, s_cat(t + s_len(t), ">step "));
-            s_cat(s_cat(e, ">"), PAGE_NAME[ui.lockpg - 1]);
+            if (is_drum(sel_trk()) && (lp == P_ENGINE || lp == P_PLAY || lp == P_ENV || lp == P_FILTER))
+                e = s_cat(s_cat(e, ">"), DL_SOUND_NAME[ui.dsound % DL_NSOUND]);   /* the key the locks reach */
+            s_cat(s_cat(e, ">"), page_name_of(lp, sel_trk()));
         } else if (ui.held || ui.cstep)
             num_s((uint32_t)step_shown(ui.held_first) + 1u, s_cat(t + s_len(t), ">step "));
         break;
-    case P_ENGINE: case P_PLAY: case P_ENV: case P_FILTER: case P_ENV2: case P_LFO: case P_LFO2:
+    case P_ENGINE: case P_PLAY: case P_ENV: case P_FILTER: case P_ENV2: case P_KITF: case P_LFO: case P_LFO2:
         track_crumb(t);
-        if (is_drum(sel_trk()))
-            s_cat(s_cat(t + s_len(t), ">"), DL_SOUND_NAME[ui.dsound % DL_NSOUND]);
+        if (is_drum(sel_trk()))                      /* the key the knobs edit (the kit's own pages: the whole kit) */
+            s_cat(s_cat(t + s_len(t), ">"), ui.page == P_ENV2 || ui.page == P_KITF ? "all keys"
+                                             : DL_SOUND_NAME[ui.dsound % DL_NSOUND]);
         break;
     case P_SENDS:
         s_cat(s_cat(t, TRACK_NAME[inst_trk()]), ">sends");
@@ -1224,6 +1258,10 @@ static void page_footer(char *t)
             s_cat(t, "REC record the chord|KEYS play");
         else if (ui.page >= P_PLAYERS && ui.page <= P_PLAYERS3 && pl_type(trk) == PL_ARP)
             s_cat(t, "KEYS hold notes: they arpeggiate");
+        else if (is_drum(trk) && ui.page == P_FILTER)
+            s_cat(t, "PRESET type|BLACK pick a key");
+        else if (is_drum(trk) && (ui.page == P_ENV2 || ui.page == P_KITF))
+            s_cat(t, ui.page == P_KITF ? "PRESET on or off|KEYS play" : "KEYS play");
         else if (is_drum(trk) && ui.page <= P_LFO2)
             s_cat(t, "BLACK pick a key|KEYS play");
         else if (ui.page == P_ENGINE)
@@ -1259,7 +1297,7 @@ static void enc_line(char *t)
         const char *a = p == P_ARRANGE ? "scene" : p == P_SONG ? "slot"
                         : (p == P_STEPS || p == P_BAR) && is_drum(trk) ? "sound"
                         : (p == P_STEPS || p == P_BAR) && is_seqt(trk) ? "pattern"
-                        : (p == P_ENGINE || p == P_PLAY) && is_drum(trk) ? "key"
+                        : (p == P_ENGINE || p == P_PLAY || p == P_ENV) && is_drum(trk) ? "key"
                         : p == P_ENGINE && is_fx(trk) ? "effect"
                         : p == P_MIX ? "track" : 0;   /* (Engine, Filter, the FX pages: the footer says it) */
         if (a)
@@ -1460,8 +1498,8 @@ static void draw_footer(void)
 #define PG(p) (1u << (p))
 #define PG_ANY 0xFFFFFFFFu
 #define PG_STEPS (PG(P_STEPS) | PG(P_BAR))
-#define PG_SOUND (PG(P_ENGINE) | PG(P_PLAY) | PG(P_ENV) | PG(P_ENV2) | PG(P_FILTER) | PG(P_CHARACTER) | PG(P_LFO) | \
-                  PG(P_LFO2))
+#define PG_SOUND (PG(P_ENGINE) | PG(P_PLAY) | PG(P_ENV) | PG(P_ENV2) | PG(P_KITF) | PG(P_FILTER) | PG(P_CHARACTER) | \
+                  PG(P_LFO) | PG(P_LFO2))
 static const struct { uint8_t btn; uint32_t pages; const char *title, *l1, *l2; } CARD[] = {
     {B_SEQ, PG_ANY, "Steps", "The bar's 16 steps on the white keys. Hold SEQ and play the notes,",
      "then press steps to write them. HOME + a step: tricks."},
@@ -1470,7 +1508,7 @@ static const struct { uint8_t btn; uint32_t pages; const char *title, *l1, *l2; 
     {B_EDIT, PG_ANY, "Engine", "The track's engine and its four knobs. PRESETS: its next sound.",
      "SEL changes the engine. Page 2: Play. Drums: black keys pick a key."},
     {B_ENV, PG_ANY, "Envelope", "The amp's envelope, then the filter, then the filter's envelope.",
-     "On the Filter page, PRESETS turns the filter type."},
+     "PRESETS on Filter: its type. A kit: the key's envelope and filter, then the kit's."},
     {B_FX, PG_ANY, "Effects", "The track's own character: drive, fold, crush and more. Then its sends, FX I and FX II.",
      "PRESETS: the character's type; on FX I and FX II the effect, SEL its filter."},
     {B_LFO, PG_ANY, "LFO", "Type, then its first three knobs.", "Page 2 has the type's fourth and fifth."},
@@ -1643,9 +1681,13 @@ static void list_build(void)
         list_add(ACTION_NAME[A_PANIC], 0, LK_ACTION, A_PANIC);
     } else if (keep == P_CHARACTER) {
         ;                                            /* (its four knobs) */
-    } else if ((keep == P_ENV || keep == P_FILTER || keep == P_ENV2) && !is_aux(trk)) {
-        list_add(ACTION_NAME[A_FTYPE], tp_info_par(TP_FTYPE, proj.trk[trk].par)->names[proj.trk[trk].par[TP_FTYPE] % NFT],
-                 LK_PICK, A_FTYPE);
+    } else if ((keep == P_ENV || keep == P_FILTER || keep == P_ENV2 || keep == P_KITF) && !is_aux(trk)) {
+        int fq = ftype_param(trk, keep);
+        const tp_info_t *fi = tp_info_par(fq, proj.trk[trk].par);
+        if (is_drum(trk) && fq == TP_FTYPE)          /* the kit's bus filter: on (dynamic) or off */
+            list_add(ACTION_NAME[A_FTYPE], proj.trk[trk].par[TP_FTYPE] == FT_DYNAMIC ? "on" : "off", LK_PICK, A_FTYPE);
+        else
+            list_add(ACTION_NAME[A_FTYPE], fi->names[proj.trk[trk].par[fq] % (fi->hi + 1u)], LK_PICK, A_FTYPE);
     } else if ((keep == P_ENGINE || keep == P_PLAY) && is_drum(trk)) {   /* the key's play mode, then the sound's */
         list_add(ACTION_NAME[A_PLAYMODE], PM_NAME[proj.trk[trk].par[TP_DRUM(ui.dsound % DL_NSOUND, DP_MODE)] % NPM],
                  LK_PICK, A_PLAYMODE);
@@ -2323,6 +2365,81 @@ static void pic_swarm(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_
             cv_rect(cx + dx, y0 + h / 2 + dy, 2, 2, (r >> 4 & 3u) ? K_DIM : K_NOW);
     }
 }
+/* the sample engine: the sample's waveform (each column its lowest and highest), the region that plays bright,
+ * the rest faint, the loop's ends marked; its name, root and the mode above */
+static int8_t smp_col_lo[200], smp_col_hi[200];
+static int smp_col_for = -1;
+static uint32_t smp_col_bank;
+static void smp_columns(int idx, const smp_t *sm, int w)
+{
+    smp_cache_t c;
+    uint32_t bank = (uint32_t)smp_user_count() << 16 ^ smp_user_bytes();
+    if (idx == smp_col_for && bank == smp_col_bank)
+        return;
+    smp_col_for = idx;
+    smp_col_bank = bank;
+    smp_cache_reset(&c);
+    for (int x = 0; x < w; x++) {
+        int32_t i0 = (int32_t)((uint32_t)x * sm->n / (uint32_t)w), i1 = (int32_t)((uint32_t)(x + 1) * sm->n / (uint32_t)w);
+        float lo = 0.0f, hi = 0.0f;
+        for (int32_t i = i0; i < i1 || i == i0; i++) {
+            float v = smp_one(&c, sm, i);
+            lo = v < lo ? v : lo;
+            hi = v > hi ? v : hi;
+        }
+        smp_col_lo[x] = (int8_t)(lo * 127.0f);
+        smp_col_hi[x] = (int8_t)(hi * 127.0f);
+    }
+}
+static void pic_sample(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p)
+{
+    int idx = p[TP_E1] < smp_slots() ? p[TP_E1] : smp_slots() - 1, mode = p[TP_E4] % NSM;
+    const smp_t *sm = smp_get(idx);
+    int32_t wy = y0 + 20, wh = h - 22, cy = wy + wh / 2;
+    char t[40], *e;
+    static const char *const MODE_ARROW[NSM] = {"once", "loop", "backwards", "forth and back"};
+    if (!sm) {
+        text_c(x0 + w / 2, cy - 16, &FONT_S, smp_name(idx), K_DIM);
+        text_c(x0 + w / 2, cy + 4, &FONT_XS, "empty: tools/loom_samples.py fills it", K_DIM);
+        return;
+    }
+    e = s_cat(t, sm->name);
+    e = s_cat(e, ", root ");
+    e = note_name(sm->root, e);
+    text_fit(x0, y0 + 2, &FONT_XS, t, w - 70, K_TEXT);
+    text_r(x0 + w, y0 + 2, &FONT_XS, MODE_ARROW[mode], K_DIM);
+    smp_columns(idx, sm, w > 200 ? 200 : w);
+    {
+        float n = (float)sm->n, s0 = (float)p[TP_E2] * (1.0f / 127.0f), s1;
+        int32_t xa, xb, la = -1, lb = -1;
+        s0 = (s0 > 0.99f ? 0.99f : s0) * n;
+        s1 = s0 + (n - s0) * (float)p[TP_E3] * (1.0f / 127.0f);
+        if (s1 < s0 + 32.0f)
+            s1 = s0 + 32.0f;
+        xa = (int32_t)(s0 * (float)w / n);
+        xb = (int32_t)(s1 * (float)w / n);
+        if ((mode == SM_LOOP || mode == SM_PINGPONG) && sm->le > sm->ls && (float)sm->ls >= s0 && (float)sm->le <= s1) {
+            la = (int32_t)((float)sm->ls * (float)w / n);
+            lb = (int32_t)((float)sm->le * (float)w / n);
+        }
+        cv_rect(x0, cy, w, 1, K_LINE);
+        if (xb > xa)
+            cv_rect(x0 + xa, wy, xb - xa, wh, K_TINT);
+        for (int32_t x = 0; x < w && x < 200; x++) {
+            int32_t yl = cy - smp_col_hi[x] * (wh / 2 - 1) / 127, yh = cy - smp_col_lo[x] * (wh / 2 - 1) / 127;
+            cv_rect(x0 + x, yl, 1, yh - yl + 1, x >= xa && x < xb ? K_NOW : K_FAINT);
+        }
+        if (la >= 0) {
+            cv_rect(x0 + la, wy, 1, wh, K_TEXT);
+            cv_rect(x0 + lb - 1, wy, 1, wh, K_TEXT);
+        }
+        if (mode == SM_REVERSE)                      /* where it starts: the region's end */
+            cv_round(x0 + xb - 3, wy, 6, 6, 3, K_TEXT);
+        else
+            cv_round(x0 + xa - 3 < x0 ? x0 : x0 + xa - 3, wy, 6, 6, 3, K_TEXT);
+    }
+}
+
 /* the drumline: eleven pads, each key's model, the shown one ringed, hits flashing */
 static void pic_drumline(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
 {
@@ -2330,7 +2447,8 @@ static void pic_drumline(int32_t x0, int32_t y0, int32_t w, int32_t h, const uin
     (void)f;
     for (int k = 0; k < DL_NSOUND; k++) {
         int32_t x = x0 + (k % 6) * pw + 2, y = y0 + (k / 6) * ph + 2, hit = eng_drum_hit[k];
-        static const char *const PAD[NDM] = {"kick", "snare", "hat", "clap", "shakr", "tamb", "strng", "conga", "tom", "fm"};
+        static const char *const PAD[NDM] = {"kick", "snare", "hat", "clap", "shakr", "tamb", "strng", "conga", "tom", "fm",
+                                             "smpl"};
         const char *nm = PAD[p[TP_DRUM(k, DP_MODEL)] % NDM];
         char t[4];
         cv_round(x, y, pw - 4, ph - 4, 4, hit > 40 ? K_NOW : k == ui.dsound ? K_PANEL2 : K_PANEL);
@@ -2350,9 +2468,11 @@ static void draw_engine(void)
     int trk = sel_trk(), eg = proj.trk[trk].par[TP_ENGINE] % NENGINE;
     const uint8_t *p = proj.trk[trk].par;
     uint32_t h = hash_u(hash_u(2166136261u, 0xE0u), (uint32_t)trk | (uint32_t)eg << 4 | (uint32_t)ui.dsound << 8 |
-                                          (ui.frame / 2) << 12);
+                                          (eg == EG_SAMPLE ? 0u : (ui.frame / 2) << 12));
     for (int i = 0; i < 4; i++)
         h = hash_u(h, p[TP_E1 + i]);
+    if (eg == EG_SAMPLE)                             /* (the bank: an upload changes what the picture shows) */
+        h = hash_u(h, (uint32_t)smp_user_count() << 16 ^ smp_user_bytes());
     if (eg == EG_DRUMLINE)
         for (int k = 0; k < DL_NSOUND; k++)
             h = hash_u(h, p[TP_DRUM(k, DP_MODEL)] | (uint32_t)eng_drum_hit[k] << 8);
@@ -2377,6 +2497,7 @@ static void draw_engine(void)
     case EG_ORGAN: pic_organ(20, 24, 200, 88, p, ui.frame); break;
     case EG_SYNC: pic_sync(20, 24, 200, 88, p, ui.frame); break;
     case EG_SWARM: pic_swarm(20, 24, 200, 88, p, ui.frame); break;
+    case EG_SAMPLE: pic_sample(20, 24, 200, 88, p); break;
     default: pic_drumline(10, 26, 220, 90, p, ui.frame); break;
     }
     cv_blit(0, MAIN_Y);
@@ -2587,9 +2708,125 @@ static void draw_play(void)
     cv_text(12, 66, &FONT_XS, t, K_DIM);
     cv_blit(0, MAIN_Y);
 }
+/* a drum key's own envelope: its lag (flat), the attack's rise, the hold, the decay's fall (or, off, the level
+ * held to the right edge: the sound's own length rules), the key's colour under it */
+static void draw_key_env(void)
+{
+    int trk = sel_trk(), key = ui.dsound % DL_NSOUND;
+    const uint8_t *p = proj.trk[trk].par + TP_DRUM(key, 0);
+    uint32_t h = hash_u(hash_u(2166136261u, 0xE8u), (uint32_t)trk | (uint32_t)key << 4 | (uint32_t)p[DP_ATTACK] << 8 |
+                                          (uint32_t)p[DP_HOLD] << 16 | (uint32_t)p[DP_DECAY] << 24);
+    float x0 = 16.0f, w = 208.0f, hh = 84.0f, base = 16.0f + hh, x = x0, px[48], py[48];
+    int n = 0, open = p[DP_DECAY] >= 127;
+    pen_t pn = {0, 0, 0};
+    char t[48];
+    h = hash_u(h, p[DP_LAG] | (uint32_t)p[DP_MODEL] << 8);
+    if (!begin_main(h))
+        return;
+    cv_rect(16, 16 + 84, 208, 1, K_LINE);
+    px[n] = x, py[n++] = base;
+    x += (float)p[DP_LAG] * 20.0f / 127.0f;          /* the lag */
+    px[n] = x, py[n++] = base;
+    {
+        float a = p[DP_ATTACK] ? 2.0f + (float)p[DP_ATTACK] * 42.0f / 127.0f : 0.0f;
+        for (int i = 1; i <= 8; i++)
+            px[n] = x + a * (float)i / 8.0f, py[n++] = base - hh * (float)i / 8.0f;
+        x += a;
+    }
+    x += (float)p[DP_HOLD] * 36.0f / 127.0f;         /* the hold */
+    px[n] = x, py[n++] = base - hh;
+    if (open) {
+        px[n] = x0 + w, py[n++] = base - hh;
+    } else {
+        float d = 6.0f + (float)p[DP_DECAY] * 98.0f / 127.0f;
+        for (int i = 1; i <= 24; i++) {
+            float u = (float)i / 24.0f;
+            px[n] = x + d * u, py[n++] = base - hh * ease_exp(u);
+        }
+    }
+    for (int i = 1; i < n; i++)                      /* under the curve, the track's colour thinned */
+        for (int32_t xi = f_floor(px[i - 1] + 0.5f); xi < f_floor(px[i] + 0.5f); xi++) {
+            float u = px[i] > px[i - 1] ? (xi - px[i - 1]) / (px[i] - px[i - 1]) : 0.0f;
+            int32_t yt = f_floor(py[i - 1] + (py[i] - py[i - 1]) * u + 1.5f);
+            if (yt < (int32_t)base)
+                cv_rect(xi, yt, 1, (int32_t)base - yt, K_TINT);
+        }
+    for (int i = 0; i < n; i++)
+        pen_to(&pn, px[i], py[i], K_NOW);
+    s_cat(s_cat(t, DL_SOUND_NAME[key]), open ? "'s envelope, decay off: its own length" : "'s envelope");
+    text_fit(16, 16 + 84 + 3, &FONT_XS, t, 208, K_DIM);
+    cv_blit(0, MAIN_Y);
+}
+/* a filter's response in dB at x px from its cutoff (an octave every 22 px): a resonant two-pole section,
+ * squared for the 24 dB types; hp mirrors it, bp is its band-pass with the peak at unity */
+static float filt_db(float dx, float q, int hp, int bp, int steep)
+{
+    float wn = fm_exp2f(dx / 22.0f), m2;
+    if (hp)
+        wn = 1.0f / wn;
+    m2 = (1.0f - wn * wn) * (1.0f - wn * wn) + wn * wn / (q * q);   /* 1 / |H|^2 */
+    if (bp)
+        m2 = m2 * q * q / (wn * wn > 1e-6f ? wn * wn : 1e-6f);
+    return -3.0103f * fm_log2f(m2 > 1e-6f ? m2 : 1e-6f) * (steep ? 2.0f : 1.0f);
+}
+/* a drum key's own filter: its response at the cutoff (bright), at where the envelope takes the cutoff
+ * (faint), the cutoff's mark; off: a flat line */
+static void draw_key_filter(void)
+{
+    int trk = sel_trk(), key = ui.dsound % DL_NSOUND;
+    const uint8_t *p = proj.trk[trk].par + TP_DRUM(key, 0);
+    int ft = p[DP_FTYPE] % NDF;
+    uint32_t h = hash_u(hash_u(2166136261u, 0xF2u), (uint32_t)trk | (uint32_t)key << 4 | (uint32_t)ft << 8 |
+                                          (uint32_t)p[DP_CUT] << 12 | (uint32_t)p[DP_RES] << 20);
+    int32_t x0 = 16, y0 = 12, w = 208, hh = 84, fc = x0 + 10 + p[DP_CUT] * (w - 20) / 127;
+    char t[48];
+    h = hash_u(h, p[DP_FENV] | (uint32_t)p[DP_DRIVE] << 8);
+    if (!begin_main(h))
+        return;
+    cv_rect(x0, y0 + hh, w, 1, K_LINE);
+    if (ft == DF_OFF) {
+        cv_rect(x0, y0 + 14, w, 2, K_DIM);
+        s_cat(s_cat(t, DL_SOUND_NAME[key]), ": no filter, PRESET picks one");
+        text_fit(x0, y0 + hh + 3, &FONT_XS, t, w, K_DIM);
+        cv_blit(0, MAIN_Y);
+        return;
+    }
+    {
+        float q = 0.7f + (float)p[DP_RES] * 6.0f / 127.0f, ys[209], ye[209];
+        float reach = ((float)p[DP_FENV] - 64.0f) * (6.0f / 64.0f) * 22.0f;   /* the envelope's reach, px */
+        int hp = ft == DF_HP, bp = ft == DF_BP;
+        pen_t pn = {0, 0, 0}, pe = {0, 0, 0};
+        for (int32_t x = 0; x <= w; x++) {
+            float y = (float)y0 + 14.0f - filt_db((float)(x0 + x - fc), q, hp, bp, 0) * (float)(hh - 14) / 48.0f;
+            float z = (float)y0 + 14.0f - filt_db((float)(x0 + x - fc) - reach, q, hp, bp, 0) * (float)(hh - 14) / 48.0f;
+            ys[x] = y < (float)y0 ? (float)y0 : y > (float)(y0 + hh) ? (float)(y0 + hh) : y;
+            ye[x] = z < (float)y0 ? (float)y0 : z > (float)(y0 + hh) ? (float)(y0 + hh) : z;
+        }
+        for (int32_t x = 0; x < w; x++) {
+            int32_t yt = f_floor(ys[x] + 1.5f);
+            if (yt < y0 + hh)
+                cv_rect(x0 + x, yt, 1, y0 + hh - yt, K_TINT);
+        }
+        if (p[DP_FENV] != 64)
+            for (int32_t x = 0; x <= w; x++)
+                pen_to(&pe, (float)(x0 + x), ye[x], K_DIM);
+        for (int32_t x = 0; x <= w; x++)
+            pen_to(&pn, (float)(x0 + x), ys[x], K_NOW);
+    }
+    cv_rect(fc, y0, 1, hh, K_FAINT);
+    {
+        char *e = s_cat(s_cat(s_cat(t, DL_SOUND_NAME[key]), ": "), tp_info_par(TP_DRUM(key, DP_FTYPE), proj.trk[trk].par)->names[ft]);
+        if (p[DP_DRIVE])
+            e = s_cat(e, ", driven");
+        if (p[DP_FENV] != 64)
+            s_cat(e, p[DP_FENV] > 64 ? ", the envelope opens it" : ", the envelope closes it");
+    }
+    text_fit(x0, y0 + hh + 3, &FONT_XS, t, w, K_DIM);
+    cv_blit(0, MAIN_Y);
+}
 static void draw_env(int filter)
 {
-    int trk = sel_trk(), b = filter ? TP_FA : TP_A, drum = is_drum(trk) && !filter;
+    int trk = sel_trk(), b = filter ? TP_FA : TP_A, drum = is_drum(trk) && filter;
     const uint8_t *p = proj.trk[trk].par;
     uint32_t h = hash_u(hash_u(2166136261u, 0xE7u), (uint32_t)trk | (uint32_t)filter << 4 | (uint32_t)p[b] << 8 |
                                           (uint32_t)p[b + 1] << 16 | (uint32_t)p[b + 2] << 24);
@@ -2650,7 +2887,7 @@ static void draw_env(int filter)
         }
     for (int i = 0; i < n; i++)
         pen_to(&pn, px[i], py[i], K_NOW);
-    cv_text(16, 16 + 84 + 3, &FONT_XS, drum ? "drum envelope: lag, attack, random, length"
+    cv_text(16, 16 + 84 + 3, &FONT_XS, drum ? "every key: lag, attack, random, length"
                                               : filter ? "filter envelope" : "amp envelope", K_DIM);
     cv_blit(0, MAIN_Y);
 }
@@ -2662,15 +2899,25 @@ static void draw_filter(void)
     uint32_t h = hash_u(hash_u(2166136261u, 0xF1u), (uint32_t)trk | (uint32_t)ft << 4 | (uint32_t)cut << 8 | (uint32_t)res << 16 |
                                           (uint32_t)p[TP_KTRK] << 24);
     int32_t x0 = 16, y0 = 12, w = 208, hh = 84, fc = x0 + 10 + cut * (w - 20) / 127, py = -1;
+    if (is_drum(trk) && ui.page == P_FILTER) {       /* a kit's Filter page: the key's own */
+        draw_key_filter();
+        return;
+    }
     if (!begin_main(h))
         return;
     cv_rect(x0, y0 + hh, w, 1, K_LINE);
+    if (is_drum(trk) && !dyn) {                      /* the kit's bus filter, switched off */
+        cv_rect(x0, y0 + 14, w, 2, K_DIM);
+        cv_text(x0, y0 + hh + 3, &FONT_XS, "all keys: no bus filter, PRESET turns it on", K_DIM);
+        cv_blit(0, MAIN_Y);
+        return;
+    }
     if (dyn) {                                       /* low cut .. hi cut: the band that passes */
         int32_t lo = x0 + p[TP_CUT] * (w - 20) / 127, hi = x0 + 20 + p[TP_KTRK] * (w - 20) / 127;
         cv_round(lo, y0 + 10, hi > lo ? hi - lo : 2, hh - 10, 4, K_NOW_T);
         cv_rect(lo, y0 + 10, 2, hh - 10, K_NOW);
         cv_rect(hi, y0 + 10, 2, hh - 10, K_NOW);
-        cv_text(x0, y0 + hh + 3, &FONT_XS, "dynamic: low cut, compression, drive, hi cut", K_DIM);
+        cv_text(x0, y0 + hh + 3, &FONT_XS, "all keys: low cut, compression, drive, hi cut", K_DIM);
         cv_blit(0, MAIN_Y);
         return;
     }
@@ -2682,13 +2929,7 @@ static void draw_filter(void)
         pen_t pn = {0, 0, 0};
         (void)py;
         for (int32_t x = 0; x <= w; x++) {
-            float wn = fm_exp2f((float)(x0 + x - fc) / 22.0f), m2, db, y;
-            if (hp)
-                wn = 1.0f / wn;
-            m2 = (1.0f - wn * wn) * (1.0f - wn * wn) + wn * wn / (q * q);   /* 1 / |H|^2 */
-            if (bp)                                  /* the band-pass: (w/q)^2 over it, unity at its peak */
-                m2 = m2 * q * q / (wn * wn > 1e-6f ? wn * wn : 1e-6f);
-            db = -3.0103f * fm_log2f(m2 > 1e-6f ? m2 : 1e-6f) * (steep ? 2.0f : 1.0f);
+            float db = filt_db((float)(x0 + x - fc), q, hp, bp, steep), y;
             y = (float)y0 + 14.0f - db * (float)(hh - 14) / 48.0f;
             ys[x] = y < (float)y0 ? (float)y0 : y > (float)(y0 + hh) ? (float)(y0 + hh) : y;
         }
@@ -3081,7 +3322,7 @@ static void draw_page(void)
     case P_SENDS: draw_sends(); break;
     case P_FX1: draw_fxtrack(AUX_FX1); break;
     case P_FX2: draw_fxtrack(AUX_FX2); break;
-    case P_ENGINE: case P_PLAY: case P_ENV: case P_ENV2: case P_FILTER: case P_LFO:
+    case P_ENGINE: case P_PLAY: case P_ENV: case P_ENV2: case P_KITF: case P_FILTER: case P_LFO:
     case P_LFO2: case P_PLAYERS: case P_PLAYERS2: case P_PLAYERS3:
         if (trk == AUX_BRAIN)
             draw_brain();
@@ -3095,9 +3336,11 @@ static void draw_page(void)
             draw_engine();
         else if (ui.page == P_PLAY)
             draw_play();
+        else if (ui.page == P_ENV && is_drum(trk))
+            draw_key_env();
         else if (ui.page == P_ENV || ui.page == P_ENV2)
             draw_env(ui.page == P_ENV2);
-        else if (ui.page == P_FILTER)
+        else if (ui.page == P_FILTER || ui.page == P_KITF)
             draw_filter();
         else if (ui.page == P_LFO || ui.page == P_LFO2)
             draw_lfo();

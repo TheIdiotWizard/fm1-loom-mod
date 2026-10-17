@@ -9,6 +9,8 @@ CC="${CC:-cc}"
 PY="${PYTHON:-python3}"
 mkdir -p build/gen build/host
 "$PY" tools/gen_wavetables.py build/gen/wavetables.h
+[ -f build/gen/samples.h ] || "$PY" tools/gen_samples.py build/gen/samples.h >/dev/null
 $CC -O2 -ffp-contract=off -std=c99 -Wall -Wextra -Wdouble-promotion -Werror -DXY_HOST -Ifirmware/src/dsp -Ibuild/gen \
-    -o build/host/synth_test tests/host/synth_test.c firmware/src/dsp/synth.c
+    -o build/host/synth_test tests/host/synth_test.c firmware/src/dsp/synth.c firmware/src/dsp/drumline.c \
+    firmware/src/dsp/sample.c
 build/host/synth_test

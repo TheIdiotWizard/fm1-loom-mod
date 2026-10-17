@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* LOOM-8 synth: a pool of voices playing eight engines (weft, stack, wavetable, orbit, tines, organ,
- * sync, swarm), each voice with two ADSRs, a state-variable filter, a character stage, an LFO and sends.
+/* LOOM-8 synth: a pool of voices playing nine engines (weft, stack, wavetable, orbit, tines, organ,
+ * sync, swarm and sample), each voice with two ADSRs, a state-variable filter, a character stage, an LFO
+ * and sends. (The kit, EG_DRUMLINE, is dsp/drumline.c's.)
  *
  * A track's sound is a flat byte array par[NTP] (four modules, four knobs each: engine, envelope, filter,
  * LFO; plus the play page, sends, the character stage, player and mix). Continuous values are 0..127, switches small integers (ranges in
@@ -18,11 +19,28 @@
 #define NVOICE 16                     /* synth voices, all tracks */
 #define NVOICE_TRK 6                  /* the most one track takes */
 
-enum { EG_WEFT, EG_STACK, EG_WAVETABLE, EG_ORBIT, EG_TINES, EG_ORGAN, EG_SYNC, EG_SWARM, EG_DRUMLINE,
+/* the engines; the kit (EG_DRUMLINE) is the drum engine, EG_SAMPLE (after it, so a saved kit stays a kit)
+ * plays a sample of the bank (dsp/sample.h) pitched by the note: sample, start, length, mode (one-shot,
+ * loop, reverse, pingpong) */
+enum { EG_WEFT, EG_STACK, EG_WAVETABLE, EG_ORBIT, EG_TINES, EG_ORGAN, EG_SYNC, EG_SWARM, EG_DRUMLINE, EG_SAMPLE,
        NENGINE };
-extern const char *const EG_NAME[NENGINE];         /* "weft", "stack", ... "kit" */
+static inline int eg_synth(int e) { return e >= 0 && e < NENGINE && e != EG_DRUMLINE; }   /* a voice engine */
+enum { SM_ONESHOT, SM_LOOP, SM_REVERSE, SM_PINGPONG, NSM };   /* the sample engine's modes (TP_E4) */
+extern const char *const EG_NAME[NENGINE];         /* "weft", "stack", ... "kit", "sample" */
 extern const char *const EG_KNOB[NENGINE][4];      /* each engine's four knob names */
 
+/* a drumline key: its model (drumline.h DM_*), the model's four knobs (names per model: DM_KNOB), then
+ * random / pan / volume (-30..+20 dB, 0..127, 76 = 0 dB) and the play mode (drumline.h PM_*); then its own
+ * envelope (the kit's Envelope page): attack, hold, decay (127 = off: the model's own length), lag (a delay
+ * of 0..60 ms); and its own filter (the Filter page): cutoff (50 Hz .. 20 kHz), resonance, the envelope's
+ * reach on the cutoff (64 = none), drive, and the type (DF_*, off by default). Neutral, the key sounds as
+ * the model alone: attack 0, hold 0, decay off, lag 0, the filter off, drive 0.
+ * On a drumline track TP_A..TP_R are the kit's envelope (the Kit env page): lag (a delay before every hit),
+ * attack, random (randomise every model's knobs per hit, the kick's pitch excepted), length (a scale on
+ * every model's length); TP_FTYPE / TP_CUT..TP_KTRK the kit's bus filter (Kit filter: FT_DYNAMIC). */
+enum { DP_MODEL, DP_K1, DP_K2, DP_K3, DP_K4, DP_RANDOM, DP_PAN, DP_VOLUME, DP_MODE,
+       DP_ATTACK, DP_HOLD, DP_DECAY, DP_LAG, DP_CUT, DP_RES, DP_FENV, DP_DRIVE, DP_FTYPE, DP_N };
+enum { DF_OFF, DF_LP, DF_HP, DF_BP, NDF };        /* a key's filter: off, 12 dB low-pass, high-pass, band-pass */
 enum {
     TP_ENGINE, TP_E1, TP_E2, TP_E3, TP_E4,         /* Engine page: the engine and its four knobs */
     TP_VMODE, TP_PORTA, TP_BEND, TP_VOLUME,        /* Play page: poly / mono / legato, glide (0 = off), bend range
@@ -43,13 +61,9 @@ enum {
     TP_BRAIN,                                       /* follows the brain: 0 no, 1 diatonic, 2 transpose only */
     TP_CHAN,                                        /* MIDI channel 0 = off, 1..16 */
     TP_DRUM0,                                       /* the drum kit: NDRUM keys * DP_N */
-    NTP = TP_DRUM0 + 11 * 9
+    NTP = TP_DRUM0 + 11 * DP_N
 };
-/* a drumline key: its model (drumline.h DM_*), the model's four knobs (names per model: DM_KNOB), then
- * random / pan / volume (-30..+20 dB, 0..127, 76 = 0 dB) and the play mode (drumline.h PM_*).
- * On a drumline track TP_A..TP_R are the track-wide drum envelope: funk (pre-attack delay), attack, random
- * (randomise every model's knobs per hit, the kick's pitch excepted), length (sustain / release scale). */
-enum { DP_MODEL, DP_K1, DP_K2, DP_K3, DP_K4, DP_RANDOM, DP_PAN, DP_VOLUME, DP_MODE, DP_N };
+_Static_assert(NTP <= 255, "a parameter's index is a byte (the engine's queue, the lock lanes)");
 #define TP_DRUM(s, k) (TP_DRUM0 + (s) * DP_N + (k))
 #define NTP_SOUND TP_PLAYER                          /* a preset keeps par[0..TP_PLAYER): the character too */
 
@@ -101,7 +115,12 @@ enum { PL_OFF, PL_ARP, PL_STRUM, PL_HOLD, NPL };
 /* how a value is shown: a number, a percentage, bipolar (64 = 0), a name from the list, semitones, on / off,
  * milliseconds / seconds, the LFO speed (a division or Hz), 00..99 (the engine knobs),
  * Hz / kHz (cutoff), an LFO fade ("in 50 %" / "off" / "out 50 %"), dB */
-enum { PK_NUM, PK_PCT, PK_BIP, PK_NAMES, PK_SEMI, PK_SWITCH, PK_MS, PK_HZ_SYNC, PK_NN, PK_HZ, PK_FADE, PK_DB };
+enum { PK_NUM, PK_PCT, PK_BIP, PK_NAMES, PK_SEMI, PK_SWITCH, PK_MS, PK_HZ_SYNC, PK_NN, PK_HZ, PK_FADE, PK_DB,
+       PK_SAMPLE,                                  /* a sample of the bank: its name (dsp/sample.h smp_name) */
+       PK_BIPST,                                   /* semitones about 64: "+3 st" */
+       PK_DMS,                                     /* a drum key's time: 0 = 0 ms, else as PK_MS */
+       PK_DECAY,                                   /* the same, 127 = "off" */
+       PK_LAGMS };                                 /* 0..127 = 0..60 ms */
 typedef struct {
     const char *name;                 /* short, as on the knob row (<= 8 chars) */
     uint8_t lo, hi, def;

@@ -143,4 +143,5 @@ static int ann_wire_send(const uint8_t *p, uint32_t n)   /* never waits: no room
 #include "app/project.c"
 #include "app/pages.c"
 #include "app/ui.c"
+#include "app/samples.c"          /* the user sample bank over USB (tools/loom_samples.py) */
 #include "app/main_fm1.c"

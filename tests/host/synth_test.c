@@ -6,7 +6,10 @@
  * filter types; the voice modes' retrigger rules; the pool's limit and stealing; locks; the LFO
  * (regular vs free, the wobble's envelope and shapes, the drift's unipolar amount, the pump's hold and
  * release); the character stage (every type bounded and finite, drive and fold keep the level, crush
- * quantises, ring makes sidebands, mix 0 is a bypass, locks and the LFO reach the amount); and that
+ * quantises, ring makes sidebands, mix 0 is a bypass, locks and the LFO reach the amount); the sample
+ * engine (a sample at its root note plays at its own rate, an octave up twice as fast; one-shot, loop,
+ * reverse, pingpong; start and length; an empty slot is silent; bounded everywhere; a user bank built in
+ * RAM is read, a bad one refused, a dropped one stops its voices); and that
  * splitting a block by voices or by frames changes no sample. Then a benchmark: instructions per sample
  * per voice, 16 voices of each engine and of each character type (macOS: the task's own instruction count,
  * as fm1-sph's sophie_bench.c; elsewhere clock()).
@@ -23,23 +26,7 @@
 #endif
 #include "synth.h"
 #include "drumline.h"
-
-/* dsp/drumline.c is not linked here: its tables, for the drum keys' names and defaults */
-const char *const DM_NAME[NDM] = {"kick", "snare", "hihat", "clap", "shaker", "tamb", "resonator", "congas", "tom", "fm"};
-const char *const DM_KNOB[NDM][4] = {
-    {"pitch", "length", "punch", "tone"}, {"pitch", "length", "snare", "punch"}, {"pitch", "length", "era", "tone"},
-    {"tone", "length", "spread", "contour"}, {"color", "length", "attack", "onset"}, {"tone", "length", "shake", "ring"},
-    {"pitch", "length", "tone", "strike"}, {"pitch", "length", "slap", "mush"}, {"pitch", "length", "sweep", "rate"},
-    {"pitch", "length", "mod", "feedback"}};
-const uint8_t DM_DEFAULT[NDM][4] = {{100, 40, 64, 64}, {100, 40, 64, 64}, {93, 23, 64, 88}, {100, 64, 64, 38},
-                                    {31, 64, 64, 101}, {93, 23, 64, 88}, {69, 54, 78, 122}, {100, 46, 64, 0},
-                                    {101, 46, 38, 64}, {93, 100, 46, 15}};
-const char *const PM_NAME[NPM] = {"one-shot", "gated", "loop", "choke 1", "choke 2", "choke 3"};
-const uint8_t DL_DEFAULT_KIT[DL_NSOUND][9] = {
-    {DM_KICK, 100, 40, 64, 64, 0, 64, 76, 0},  {DM_SNARE, 100, 40, 64, 64, 0, 64, 76, 0}, {DM_HIHAT, 93, 23, 64, 88, 0, 64, 76, 3},
-    {DM_HIHAT, 93, 80, 64, 88, 0, 64, 76, 3},  {DM_CLAP, 100, 64, 64, 38, 0, 64, 76, 0},  {DM_TOM, 80, 46, 38, 64, 0, 64, 76, 0},
-    {DM_TOM, 110, 46, 38, 64, 0, 64, 76, 0},   {DM_CONGA, 100, 46, 64, 0, 0, 64, 76, 0},  {DM_SHAKER, 31, 64, 64, 101, 0, 64, 76, 0},
-    {DM_FM, 93, 100, 46, 15, 0, 64, 76, 0},    {DM_RESO, 69, 54, 78, 122, 0, 64, 76, 0}};
+#include "sample.h"
 
 static int bad;
 static void check(const char *what, int ok)
@@ -56,6 +43,7 @@ static float L[N], R[N], S1[N], S2[N], ST[N];
 static float last_rms;                           /* the last block's RMS (left) */
 
 static int finite_f(float x) { return x == x && x < 1e30f && x > -1e30f; }
+static float fm_fabs_t(float x) { return x < 0.0f ? -x : x; }
 static float fabs_f(float x) { return x < 0.0f ? -x : x; }
 
 /* render n frames in one range, return the block's peak and whether all was finite */
@@ -286,12 +274,232 @@ static float weft_even(int bend, int wave)
     return finite && e > 0.0 ? (float)(s / e) : 1e9f;
 }
 
+/* ---- the sample engine ---- */
+static float sbuf[44100 * 3];
+/* track 0 plays note for up to secs, held: the mono output into sbuf; returns the frames until its voices stopped
+ * (-1: still sounding at the end) */
+static int sample_run(int note, float secs, int *n_out)
+{
+    int finite = 1, n = 0, stop = -1, b, i, nb = (int)(secs * 44100.0f) / 32;
+    synth_all_off(S, -1);
+    for (b = 0; b < 400 && synth_sounding(S, 0, NVOICE); b++)
+        block(32, &finite);
+    synth_note_on(S, 0, note, 100, 0, 77);
+    for (b = 0; b < nb; b++) {
+        block(32, &finite);
+        for (i = 0; i < 32; i++)
+            sbuf[n++] = (L[i] + R[i]) * 0.5f;
+        if (stop < 0 && !synth_sounding(S, 0, NVOICE))
+            stop = n;
+    }
+    synth_note_off(S, 0, 77);
+    if (!finite)
+        stop = -2;
+    *n_out = n;
+    return stop;
+}
+static float rms_d(const float *x, int n)
+{
+    double s = 0.0;
+    int i;
+    for (i = 0; i < n; i++)
+        s += (double)x[i] * (double)x[i];
+    return n ? (float)sqrt(s / n) : 0.0f;
+}
+static int period_of(const float *x, int n, int lo, int hi)   /* the autocorrelation's best lag in lo..hi */
+{
+    int lag, best = lo, i;
+    double bv = -1e30;
+    for (lag = lo; lag <= hi; lag++) {
+        double s = 0.0;
+        for (i = 0; i + lag < n; i++)
+            s += (double)x[i] * (double)x[i + lag];
+        if (s > bv) {
+            bv = s;
+            best = lag;
+        }
+    }
+    return best;
+}
+/* a tiny IMA encoder (tools/sampleio.py's), to build a user bank in RAM */
+static const int IMA_S[89] = {7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60,
+    66, 73, 80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598,
+    658, 724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327, 3660, 4026,
+    4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818, 18500, 20350,
+    22385, 24623, 27086, 29794, 32767};
+static const int IMA_I[8] = {-1, -1, -1, -1, 2, 4, 6, 8};
+static void put32(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24); }
+static uint8_t bank[SMP_BANK_SIZE];
+static void bank_sine(float hz, int n, int root)       /* one sample, a sine, as the bank's only entry */
+{
+    int pred = 0, idx = 0, i;
+    uint32_t ck_off = 0, adp_off = (uint32_t)((n + 63) / 64) * 4u, len;
+    uint8_t *d = bank + SMP_BANK_HDR, *e = bank + 32;
+    memset(bank, 0, sizeof bank);
+    for (i = 0; i < n; i++) {
+        int x = (int)(20000.0 * sin(6.283185307179586 * (double)hz * i / SMP_RATE)), step, diff, code = 0, vd;
+        if (i % 64 == 0)
+            put32(d + ck_off + (uint32_t)(i / 64) * 4u, (uint32_t)(pred & 0xFFFF) | (uint32_t)idx << 16);
+        step = IMA_S[idx];
+        diff = x - pred;
+        if (diff < 0) { code = 8; diff = -diff; }
+        vd = step >> 3;
+        if (diff >= step) { code |= 4; diff -= step; vd += step; }
+        if (diff >= step >> 1) { code |= 2; diff -= step >> 1; vd += step >> 1; }
+        if (diff >= step >> 2) { code |= 1; vd += step >> 2; }
+        pred = code & 8 ? pred - vd : pred + vd;
+        pred = pred > 32767 ? 32767 : pred < -32768 ? -32768 : pred;
+        idx += IMA_I[code & 7];
+        idx = idx < 0 ? 0 : idx > 88 ? 88 : idx;
+        d[adp_off + (uint32_t)(i >> 1)] |= (uint8_t)(code << ((i & 1) * 4));
+    }
+    len = adp_off + (uint32_t)(n + 1) / 2u;
+    put32(bank, SMP_BANK_MAGIC);
+    bank[4] = 1;
+    bank[6] = 1;
+    put32(bank + 8, len);
+    put32(bank + 12, smp_crc32(d, len));
+    memcpy(e, "sine", 4);
+    put32(e + 12, adp_off);
+    put32(e + 16, ck_off);
+    put32(e + 20, (uint32_t)n);
+    e[32] = (uint8_t)root;
+}
+
+static void sample_tests(void)
+{
+    int n, stop, stop2, p1, p2, ok, sm, md, nt;
+    float e0, e1;
+    char what[120];
+    printf("-- the sample engine\n");
+    reset();
+    sound_default(par[0], EG_SAMPLE);
+    par[0][TP_A] = 0;
+    par[0][TP_S] = 127;                           /* held: the sample's own length decides */
+    par[0][TP_R] = 20;
+    par[0][TP_CUT] = 127;
+    par[0][TP_RES] = 0;
+    par[0][TP_E1] = 0;                            /* the kick, one-shot: 0.3 s at its root */
+    par[0][TP_E4] = SM_ONESHOT;
+    stop = sample_run(60, 1.0f, &n);
+    stop2 = sample_run(72, 1.0f, &n);
+    sprintf(what, "a sample at its root plays at its rate: the kick ends after %d frames (%d), an octave up %d",
+            stop, (int)(smp_get(0)->n * 2u), stop2);
+    check(what, abs(stop - (int)(smp_get(0)->n * 2u)) < 200 && abs(stop2 * 2 - stop) < 300);
+    par[0][TP_E1] = 4;                            /* the ah: 220.5 Hz at its root A3, looped */
+    par[0][TP_E4] = SM_LOOP;
+    stop = sample_run(57, 1.5f, &n);
+    p1 = period_of(sbuf + 22050, 8192, 150, 250);
+    e0 = rms_d(sbuf + 4410, 4410);
+    e1 = rms_d(sbuf + n - 4410, 4410);
+    sample_run(69, 0.6f, &n);
+    p2 = period_of(sbuf + 8820, 8192, 70, 130);
+    sprintf(what, "the ah's period at its root %d frames (200), an octave up %d (100); looped held 1.5 s: still on (%d)",
+            p1, p2, stop);
+    check(what, abs(p1 - 200) <= 1 && abs(p2 - 100) <= 1 && stop == -1);
+    sprintf(what, "loop: as loud at 1.5 s as at 0.1 s (RMS %.3f, %.3f)", (double)e0, (double)e1);
+    check(what, e1 > e0 * 0.8f && e1 < e0 * 1.25f);
+    par[0][TP_E4] = SM_ONESHOT;
+    stop = sample_run(57, 1.5f, &n);
+    sprintf(what, "one-shot: the same ah ends with its sample (%d frames, %d)", stop, (int)(smp_get(4)->n * 2u));
+    check(what, abs(stop - (int)(smp_get(4)->n * 2u)) < 200);
+    par[0][TP_E1] = 5;                            /* the piano reversed: it swells */
+    par[0][TP_E4] = SM_REVERSE;
+    stop = sample_run(60, 1.2f, &n);
+    e0 = rms_d(sbuf + 2205, 8820);
+    e1 = rms_d(sbuf + (int)(smp_get(5)->n * 2u) - 8820, 8820 - 441);
+    sprintf(what, "reverse: the piano swells into its attack (RMS %.4f -> %.4f), ends with it (%d)", (double)e0, (double)e1, stop);
+    check(what, e1 > e0 * 1.8f && abs(stop - (int)(smp_get(5)->n * 2u)) < 300);
+    par[0][TP_E1] = 6;                            /* the sweep, pingpong: on past its 0.6 s, forth and back */
+    par[0][TP_E4] = SM_PINGPONG;
+    stop = sample_run(60, 2.0f, &n);
+    e1 = rms_d(sbuf + 66150, 4410);
+    sprintf(what, "pingpong: the sweep still sounds at 1.5 s, held (RMS %.4f)", (double)e1);
+    check(what, stop == -1 && e1 > 0.01f);
+    par[0][TP_E1] = 5;                            /* start and length: the piano from 50 %, a quarter of the rest */
+    par[0][TP_E2] = 64;
+    par[0][TP_E3] = 32;
+    par[0][TP_E4] = SM_ONESHOT;
+    stop = sample_run(60, 1.0f, &n);
+    {
+        int want = (int)((float)(smp_get(5)->n - smp_get(5)->n * 64u / 127u) * 32.0f / 127.0f) * 2;
+        sprintf(what, "start 64, length 32: a region of %d frames plays (%d)", stop, want);
+        check(what, abs(stop - want) < 300);
+    }
+    par[0][TP_E2] = 0;
+    par[0][TP_E3] = 127;
+    par[0][TP_E1] = (uint8_t)smp_factory();       /* the first user slot: empty */
+    stop = sample_run(60, 0.2f, &n);
+    check("an empty user slot: silent, the voice ends at once", stop >= 0 && stop < 200 && rms_d(sbuf, n) == 0.0f);
+    {   /* every factory sample in every mode, notes from 0 to 127, the region's corners: finite, bounded */
+        static const uint8_t ST[3][2] = {{0, 127}, {127, 127}, {64, 0}};
+        float pk = 0.0f;
+        int c, i;
+        ok = 1;
+        for (sm = 0; sm < smp_factory(); sm++)
+            for (md = 0; md < NSM; md++)
+                for (c = 0; c < 3; c++)
+                    for (nt = 0; nt <= 127; nt += 127) {
+                        par[0][TP_E1] = (uint8_t)sm;
+                        par[0][TP_E4] = (uint8_t)md;
+                        par[0][TP_E2] = ST[c][0];
+                        par[0][TP_E3] = ST[c][1];
+                        stop = sample_run(nt, 0.3f, &n);
+                        for (i = 0; i < n; i++)
+                            pk = fm_fabs_t(sbuf[i]) > pk ? fm_fabs_t(sbuf[i]) : pk;
+                        if (stop == -2 || pk > 1.0f) {
+                            printf("    %s mode %d corner %d note %d: peak %.2f\n", smp_name(sm), md, c, nt, (double)pk);
+                            ok = 0;
+                        }
+                    }
+        sprintf(what, "every sample x mode x region corner x note 0 / 127: finite, peak %.2f", (double)pk);
+        check(what, ok);
+    }
+    {   /* a user bank in RAM: a 441 Hz sine, its root A4 */
+        bank_sine(441.0f, 8000, 69);
+        smp_user_attach(bank);
+        check("a user bank: read, one sample, named", smp_user_scan() == 1 && !strcmp(smp_name(smp_factory()), "sine") &&
+                                                       smp_get(smp_factory()) != 0);
+        par[0][TP_E1] = (uint8_t)smp_factory();
+        par[0][TP_E2] = 0;
+        par[0][TP_E3] = 127;
+        par[0][TP_E4] = SM_LOOP;
+        stop = sample_run(69, 0.5f, &n);
+        p1 = period_of(sbuf + 4410, 4096, 80, 120);
+        sprintf(what, "the user sine at its root: a period of %d frames (100), looped on (%d)", p1, stop);
+        check(what, abs(p1 - 100) <= 1 && stop == -1);
+        {   /* a voice playing it when the bank is dropped (an upload begins) stops */
+            int finite = 1, b;
+            synth_note_on(S, 0, 69, 100, 0, 78);
+            for (b = 0; b < 20; b++)
+                block(64, &finite);
+            smp_user_drop();
+            for (b = 0; b < 4; b++)
+                block(64, &finite);
+            check("a dropped bank: its voices stop at once", !synth_sounding(S, 0, NVOICE) && finite);
+            synth_note_off(S, 0, 78);
+        }
+        bank[SMP_BANK_HDR + 100] ^= 0x55;          /* a flipped byte: the CRC refuses it */
+        check("a bank whose data does not match its CRC is refused", smp_user_scan() == 0 && !smp_get(smp_factory()));
+        bank[SMP_BANK_HDR + 100] ^= 0x55;
+        bank[32 + 20] = 0xFF;                      /* a sample longer than the data */
+        bank[32 + 21] = 0xFF;
+        bank[32 + 22] = 0x01;
+        check("an entry pointing past the data is refused", smp_user_scan() == 0);
+        smp_user_attach(0);
+        smp_user_scan();
+    }
+    reset();
+}
+
 static void bench(void)
 {
     int e;
     double m, w, orbit_mean = 0.0;
     printf("\nbenchmark: 16 voices, lp24, instructions per sample per voice (mean / worst block)\n");
-    for (e = 0; e < EG_DRUMLINE; e++) {
+    for (e = 0; e < NENGINE; e++) {
+        if (!eg_synth(e))
+            continue;
         int t, b, finite = 1;
         uint64_t total = 0, worst = 0;
         reset();
@@ -300,6 +508,12 @@ static void bench(void)
             par[t][TP_FTYPE] = FT_LP24;
             par[t][TP_E4] = e == EG_ORGAN ? 8 : 100;   /* stereo where the engine has it: the dear case */
             par[t][TP_E3] = e == EG_ORGAN ? 8 : 60;
+            if (e == EG_SAMPLE) {                /* the sung ah, looped: every voice sounds throughout */
+                par[t][TP_E1] = 4;
+                par[t][TP_E2] = 0;
+                par[t][TP_E3] = 127;
+                par[t][TP_E4] = SM_LOOP;
+            }
             par[t][TP_LTYPE] = LT_WAVE;
             par[t][TP_LDEST] = LD_FILTER;
             par[t][TP_LX] = 0;
@@ -688,7 +902,7 @@ int main(void)
     tp_text(TP_LDEST, LD_FILTER + LD_FREE, 0, num, unit);
     check("LFO destination's free version", !strcmp(num, "filter free"));
     tp_text(TP_DRUM(2, DP_MODEL), 2, EG_DRUMLINE, num, unit);
-    check("drum model text", !strcmp(num, "hihat"));
+    check("drum model text", !strcmp(num, "hat"));
     {
         uint8_t p[NTP];
         sound_default(p, EG_DRUMLINE);
@@ -827,7 +1041,7 @@ int main(void)
     tp_text(TP_PORTA, 50, 0, num, unit);
     check("portamento shows 0..127", !strcmp(num, "50") && !unit[0]);
 
-    check("64 presets, 8 an engine", NPRESETS == 64);
+    check("72 presets, 8 an engine", NPRESETS == 72);
     {   /* names: lower case words, at most 11 characters, each its own; tape on; stack's first is a bass */
         int ok = 1, j;
         for (k = 0; k < NPRESETS && ok; k++) {
@@ -849,7 +1063,9 @@ int main(void)
         check("preset names: lower case, <= 11 characters, unique; tape send on", ok);
         check("stack's first preset is its bass (a new project's track 2)", strstr(PRESETS[preset_first(EG_STACK)].name, "bass") != 0);
     }
-    for (e = 0; e < EG_DRUMLINE; e++) {
+    for (e = 0; e < NENGINE; e++) {
+        if (!eg_synth(e))
+            continue;
         int n = 0;
         for (k = 0; k < NPRESETS; k++)
             n += PRESETS[k].par[TP_ENGINE] == e;
@@ -880,14 +1096,18 @@ int main(void)
 
     /* every engine, default sound */
     reset();
-    for (e = 0; e < EG_DRUMLINE; e++) {
+    for (e = 0; e < NENGINE; e++) {
+        if (!eg_synth(e))
+            continue;
         char what[64];
         sound_default(par[0], e);
         sprintf(what, "engine %s renders a note (default sound)", EG_NAME[e]);
         check(what, note_test(what, 0, &pk, 1));
         printf("    %-10s peak %6.1f dBFS\n", EG_NAME[e], (double)db(pk));
     }
-    for (e = 0; e < EG_DRUMLINE; e++) {          /* and with every filter type, resonance up, knobs at the ends */
+    for (e = 0; e < NENGINE; e++) {
+        if (!eg_synth(e))
+            continue;          /* and with every filter type, resonance up, knobs at the ends */
         int ft, ok = 1;
         for (ft = 0; ft < NFT; ft++) {
             sound_default(par[0], e);
@@ -1512,6 +1732,7 @@ int main(void)
     }
 
     char_tests();
+    sample_tests();
     bench();
     bench_char();
     printf("%s\n", bad ? "SYNTH TESTS FAILED" : "all synth tests passed");
