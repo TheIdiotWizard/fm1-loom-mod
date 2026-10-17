@@ -72,6 +72,9 @@ static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint1
             if (x + i < 240u && y + j < 240u)
                 fb[(y + j) * 240u + x + i] = px[j * w + i];
 }
+#ifndef XY_WEB
+#define GFX_AUDIT 1                          /* the layout audit (gfx.c): LAYOUT lines on stdout */
+#endif
 #include "../firmware/src/gfx.c"
 
 /* ---------------------------------------------------------- platform --- */
@@ -798,6 +801,21 @@ int main(int argc, char **argv)
     printf("host: %u ms simulated, %u blits, render %.1f%% of real time (host CPU)%s\n", now_ms, blits,
            render_budget_ns_total > 0 ? 100.0 * render_ns_total / render_budget_ns_total : 0.0,
            fails ? ", EXPECTATIONS FAILED" : "");
+#ifdef GFX_AUDIT
+    if (ga_findings) {                                   /* the layout audit (gfx.c): labels must not clip, touch or overlap */
+        printf("LAYOUT: %u findings\n", (unsigned)ga_findings);
+        fails++;
+    }
+#endif
     return fails ? 1 : 0;
 }
 #endif /* XY_WEB */
+
+#ifdef GFX_AUDIT
+static const char *gfx_audit_where(void)          /* the layout audit's "where": the page and the track */
+{
+    static char w[64];
+    snprintf(w, sizeof w, "%s, track %d", ui_page_name(), (int)proj.trk_sel + 1);
+    return w;
+}
+#endif

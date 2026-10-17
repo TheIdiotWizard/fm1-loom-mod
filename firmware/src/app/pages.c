@@ -276,6 +276,9 @@ static int32_t cos100(uint32_t k) { return SIN32[(k + 8u) & 31u]; }
 /* a rounded box; the corners anti-aliased (each corner pixel by its distance from the corner's centre) */
 static void cv_round(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint16_t c)
 {
+#ifdef GFX_AUDIT
+    gfx_audit_box(x, y, w, h);
+#endif
     if (r > h / 2)
         r = h / 2;
     if (r > w / 2)
@@ -418,9 +421,9 @@ static int32_t segs(int32_t x, int32_t y, const felucca_font_t *f, const char *s
 #define MAIN_Y 24
 #define MAIN_H 120
 #define TAG_Y 144
-#define TAG_H 12
-#define KNB_Y 156
-#define KNB_H 52
+#define TAG_H 14                                     /* the small font's descenders fit */
+#define KNB_Y 158
+#define KNB_H 50
 #define ENC_Y 208
 #define FOOT_Y 224
 enum { AL_INFO, AL_DONE, AL_UNDO, AL_REDO, AL_ASK, AL_NO };
@@ -585,9 +588,9 @@ static void draw_header(void)
         int32_t w = text_w(&FONT_XS, bn) + 6;
         if (is_drum(sel_trk()) && ui.page == P_PLAY)
             pn = "Key";
-        cv_round(x, 6, w, 13, 2, K_DIM);
-        cv_round(x + 1, 7, w - 2, 11, 1, K_BG);
-        cv_text(x + 3, cap_y(6, 13, &FONT_XS), &FONT_XS, bn, K_DIM);
+        cv_round(x, 4, w, 17, 3, K_DIM);
+        cv_round(x + 1, 5, w - 2, 15, 2, K_BG);
+        cv_text(x + 3, cap_y(4, 17, &FONT_XS) - 1, &FONT_XS, bn, K_DIM);
         x += w + 6;
         cv_text(x, 4, &FONT_B, pn, K_TEXT);
         if (ext)
@@ -975,14 +978,14 @@ static void draw_knobs(void)
         if (nw > 46)
             nw = 46;
         text_fit(cx - nw / 2, 0, &FONT_XS, k[i].name, 46, hot ? K_TEXT : K_DIM);
-        if (upper_only(k[i].val) && text_w(&FONT_M, k[i].val) <= 56)
+        if (upper_only(k[i].val) && text_w(&FONT_M, k[i].val) <= 48)   /* (48 px: clear of the panel's sides) */
             text_c(cx, cap_y(12, 28, &FONT_M), &FONT_M, k[i].val, vc);
-        else if (text_w(&FONT_B, k[i].val) <= 54)
+        else if (text_w(&FONT_B, k[i].val) <= 48)
             text_c(cx, cap_y(12, 28, &FONT_B), &FONT_B, k[i].val, vc);
-        else if (text_w(&FONT_XS, k[i].val) <= 54)
+        else if (text_w(&FONT_XS, k[i].val) <= 48)
             text_c(cx, cap_y(12, 28, &FONT_XS), &FONT_XS, k[i].val, vc);
         else
-            text_fit(x + 3, cap_y(12, 28, &FONT_XS), &FONT_XS, k[i].val, 54, vc);
+            text_fit(cx - 24, cap_y(12, 28, &FONT_XS), &FONT_XS, k[i].val, 48, vc);
         if (k[i].max > 0) {
             int32_t bw = 44 * k[i].num / k[i].max;
             cv_round(cx - 22, 41, 44, 6, 3, K_LINE);
@@ -1258,6 +1261,13 @@ static uint32_t ctl_len(const char *s)
             a = n + 1;
         }
 }
+static int s_has_q(const char *s)                   /* a label with a Q: its tail needs the pixel below */
+{
+    for (; *s; s++)
+        if (*s == 'Q')
+            return 1;
+    return 0;
+}
 static int32_t bot_part(int32_t x, int32_t y, const char *s, uint32_t n, const felucca_font_t *job, int draw)
 {
     char b[48];
@@ -1278,7 +1288,7 @@ static int32_t bot_part(int32_t x, int32_t y, const char *s, uint32_t n, const f
             if (draw) {
                 cv_round(x, y, w, BOT_PH, enc ? 7 : 2, K_TEXT);
                 cv_round(x + 1, y + 1, w - 2, BOT_PH - 2, enc ? 6 : 1, K_BG);
-                cv_text(x + pad, cap_y(y, BOT_PH, &FONT_XS), &FONT_XS, b, K_TEXT);
+                cv_text(x + pad, cap_y(y, BOT_PH, &FONT_XS) - (s_has_q(b) ? 1 : 0), &FONT_XS, b, K_TEXT);   /* (Q's tail) */
             }
             x += w;
             if (i < c) {
@@ -1654,7 +1664,7 @@ static void list_paint(int32_t oy)
 {
     uint32_t i;
     for (i = lst.top; i < lst.n && i < lst.top + LIST_SHOWN; i++) {
-        int32_t y = 1 + (int32_t)(i - lst.top) * LIST_RH - oy, ty = cap_y(y, LIST_RH - 1, &FONT_S);
+        int32_t y = 1 + (int32_t)(i - lst.top) * LIST_RH - oy, ty = cap_y(y, LIST_RH - 1, &FONT_S) - 1;   /* (descenders clear the foot) */
         int on = i == lst.sel, k = lst.row[i].kind;
         uint16_t fg = on ? K_BG : K_TEXT, dim = on ? K_PANEL2 : K_DIM;
         const char *v = lst.row[i].val;
@@ -1746,8 +1756,7 @@ static void draw_arrange(void)
             s_cat(nm, tr == AUX_BRAIN ? "CO" : tr == AUX_PUNCH ? "TH" : "TP");
         text_r(22, y - 3, &FONT_XS, nm, tr == sel_trk() ? K_TEXT : ink);
         num_s((uint32_t)pt + 1u, s_cat(t, "P"));
-        cv_round(27, y, 20, 8, 3, muted ? K_LINE : trk_ink(tr));
-        text_c(37, y - 3, &FONT_XS, t, muted ? K_FAINT : K_BG);
+        text_c(37, y - 3, &FONT_XS, t, muted ? K_FAINT : trk_ink(tr));
         cv_rect(52, y + 3, 96, 2, K_PANEL2);
         if (len > 0 && len <= NSTEP)
             cv_rect(52, y + 3, 96 * len / NSTEP, 2, muted ? K_LINE : trk_tint(tr));
@@ -1918,11 +1927,11 @@ static void draw_steps(void)
         for (int b = 0; b < NBAR; b++) {
             int32_t x = 176 + b * 14;
             uint16_t c = b < nb ? K_DIM : K_LINE;
-            cv_round(x, 3, 10, 8, 2, b == pb && playing() ? K_NOW : c);
+            cv_round(x - 1, 0, 12, 15, 4, b == pb && playing() ? K_NOW : c);
             if (b == ui.bar)
-                cv_frame(x - 2, 1, 14, 12, 3, K_SEL, b == pb && playing() ? K_NOW : c);
+                cv_frame(x - 1, 0, 12, 15, 4, K_SEL, b == pb && playing() ? K_NOW : c);
             num_s((uint32_t)b + 1u, t);
-            text_c(x + 5, -1, &FONT_XS, t, b == ui.bar || (b == pb && playing()) ? K_BG : K_TEXT);
+            text_c(x + 5, cap_y(0, 15, &FONT_XS), &FONT_XS, t, b == ui.bar || (b == pb && playing()) ? K_BG : K_TEXT);
         }
     }
     for (int i = 0; i < 16; i++) {
@@ -1943,7 +1952,7 @@ static void draw_steps(void)
         if ((ui.rec_armed && s == ui.cursor) || (seq.rec_wait && s == 0 && (ui.frame / 8 & 1u)))
             cv_frame(x, y, ST_CW - 2, ST_CH, 4, K_REC, bg);
         num_s((uint32_t)s + 1u, t);
-        cv_text(x + 3, y - 1, &FONT_XS, t, bg == K_NOW ? K_BG : K_DIM);
+        cv_text(x + 4, y + 1, &FONT_XS, t, bg == K_NOW ? K_BG : K_DIM);
         if (drum && !step_empty(st)) {               /* every sound on the step: a tick each, by key, the shown one bright */
             uint16_t have = 0;
             int nt = 0;
@@ -1967,7 +1976,7 @@ static void draw_steps(void)
             if (trk == AUX_PUNCH) {
                 int fx = st->note[0] - 1;
                 text_fit(x + 2, y + 11, &FONT_XS, PX_VALID(fx) ? PUNCH_NAME[fx & 15] : "?", ST_CW - 5, fg);
-                cv_text(x + 3, y + 23, &FONT_XS, PX_VALID(fx) && fx >= PX_MEL ? "mel" : "drum", bg == K_NOW ? K_BG : K_DIM);
+                text_fit(x + 2, y + 23, &FONT_XS, PX_VALID(fx) && fx >= PX_MEL ? "mel" : "drum", ST_CW - 5, bg == K_NOW ? K_BG : K_DIM);
             } else if (trk == AUX_TAPE) {
                 num_s((uint32_t)st->note[0], s_cat(t, "seg "));
                 text_fit(x + 2, y + 15, &FONT_XS, t, ST_CW - 5, fg);
@@ -1987,16 +1996,28 @@ static void draw_steps(void)
                     text_c(x + (ST_CW - 2) / 2, y + 26, &FONT_XS, l1, bg == K_NOW ? K_BG : K_DIM);
                     nn = 0;
                 }
-                for (int k = 0; k < nn; k++) {
-                    e = note_name(st->note[k], e);
-                    n++;
-                    if (n == 2 || !st->note[k + 1] || k == SN - 1) {
-                        text_c(x + (ST_CW - 2) / 2, y + (line ? 25 : 13), &FONT_XS, l1, fg);
-                        e = l1;
-                        n = 0;
-                        line++;
-                    } else
-                        e = s_cat(e, " ");
+                {                                    /* two notes a line when they fit the cell, else one; two lines */
+                    char two[12], *t2;
+                    int per = 2;
+                    t2 = note_name(st->note[0], two);
+                    if (nn > 1) {
+                        note_name(st->note[1], s_cat(t2, " "));
+                        if (text_w(&FONT_XS, two) > ST_CW - 8)
+                            per = 1;
+                    }
+                    for (int k = 0; k < nn && line < 2; k++) {
+                        e = note_name(st->note[k], e);
+                        n++;
+                        if (n == per || k == nn - 1) {
+                            if (line == 1 && k < nn - 1)
+                                s_cat(e, "+");       /* more notes than show */
+                            text_c(x + (ST_CW - 2) / 2, y + (line ? 25 : 13), &FONT_XS, l1, fg);
+                            e = l1;
+                            n = 0;
+                            line++;
+                        } else
+                            e = s_cat(e, " ");
+                    }
                 }
             }
         }
@@ -2007,10 +2028,10 @@ static void draw_steps(void)
                 e = s_cat(e, COMP_GLYPH[st->comp % NSC]);
             if (st->comp2)
                 s_cat(e, COMP_GLYPH[st->comp2 % NSC]);
-            text_r(x + ST_CW - 5, y + ST_CH - 14, &FONT_XS, g, fg);
+            text_r(x + ST_CW - 6, y + ST_CH - 17, &FONT_XS, g, fg);
         }
         if (st->cond)
-            cv_text(x + 3, y + ST_CH - 14, &FONT_XS, "%", bg == K_NOW ? K_BG : K_DIM);
+            cv_text(x + 4, y + ST_CH - 17, &FONT_XS, "%", bg == K_NOW ? K_BG : K_DIM);
         if (step_has_lock(pats.lane, trk, pt, s))
             cv_round(x + ST_CW - 9, y + 3, 4, 4, 2, K_REC);
     }
@@ -2223,7 +2244,11 @@ static void pic_drumline(int32_t x0, int32_t y0, int32_t w, int32_t h, const uin
         cv_round(x, y, pw - 4, ph - 4, 4, hit > 40 ? K_NOW : k == ui.dsound ? K_PANEL2 : K_PANEL);
         if (k == ui.dsound)
             cv_frame(x, y, pw - 4, ph - 4, 4, K_SEL, hit > 40 ? K_NOW : K_PANEL2);
-        text_fit(x + 3, y + (ph - 4) / 2 - 6, &FONT_XS, nm, pw - 9, hit > 40 ? K_BG : K_TEXT);
+        {
+            int32_t tw = text_w(&FONT_XS, nm);
+            text_fit(tw <= pw - 9 ? x + (pw - 4 - tw) / 2 : x + 3, y + (ph - 4) / 2 - 6, &FONT_XS, nm, pw - 9,
+                     hit > 40 ? K_BG : K_TEXT);
+        }
         num_s((uint32_t)k + 1u, t);
         cv_text(x + 3, y, &FONT_XS, t, hit > 40 ? K_BG : K_FAINT);
     }
@@ -2533,7 +2558,7 @@ static void draw_env(int filter)
         }
     for (int i = 0; i < n; i++)
         pen_to(&pn, px[i], py[i], K_NOW);
-    cv_text(16, 16 + 84 + 6, &FONT_XS, drum ? "drum envelope: lag, attack, random, length"
+    cv_text(16, 16 + 84 + 3, &FONT_XS, drum ? "drum envelope: lag, attack, random, length"
                                               : filter ? "filter envelope" : "amp envelope", K_DIM);
     cv_blit(0, MAIN_Y);
 }
@@ -2553,7 +2578,7 @@ static void draw_filter(void)
         cv_round(lo, y0 + 10, hi > lo ? hi - lo : 2, hh - 10, 4, K_NOW_T);
         cv_rect(lo, y0 + 10, 2, hh - 10, K_NOW);
         cv_rect(hi, y0 + 10, 2, hh - 10, K_NOW);
-        cv_text(x0, y0 + hh + 6, &FONT_XS, "dynamic: low cut, compression, drive, hi cut", K_DIM);
+        cv_text(x0, y0 + hh + 3, &FONT_XS, "dynamic: low cut, compression, drive, hi cut", K_DIM);
         cv_blit(0, MAIN_Y);
         return;
     }
@@ -2582,8 +2607,8 @@ static void draw_filter(void)
             pen_to(&pn, (float)(x0 + x), ys[x], K_NOW);
     }
     cv_rect(fc, y0, 1, hh, K_FAINT);
-    cv_text(x0, y0 + hh + 6, &FONT_XS, tp_info_par(TP_FTYPE, p)->names[ft], K_DIM);
-    text_r(x0 + w, y0 + hh + 6, &FONT_XS, p[TP_KTRK] ? "key tracking on" : "", K_DIM);
+    cv_text(x0, y0 + hh + 3, &FONT_XS, tp_info_par(TP_FTYPE, p)->names[ft], K_DIM);
+    text_r(x0 + w, y0 + hh + 3, &FONT_XS, p[TP_KTRK] ? "key tracking on" : "", K_DIM);
     cv_blit(0, MAIN_Y);
 }
 static void draw_sends(void)                         /* the instrument's three sends, named with the effects on them */
@@ -2650,9 +2675,9 @@ static void draw_lfo(void)
         e = s_cat(s_cat(e, num), " ");
         tp_text_par(TP_LX, p[TP_LX], p, num, unit);
         s_cat(e, num);
-        cv_text(x0, y0 + hh + 6, &FONT_XS, t, K_DIM);
+        cv_text(x0, y0 + hh + 3, &FONT_XS, t, K_DIM);
     } else if (lt)
-        cv_text(x0, y0 + hh + 6, &FONT_XS, tp_info_par(TP_LTYPE, p)->names[lt], K_DIM);
+        cv_text(x0, y0 + hh + 3, &FONT_XS, tp_info_par(TP_LTYPE, p)->names[lt], K_DIM);
     cv_blit(0, MAIN_Y);
 }
 static void draw_players(void)
@@ -2760,7 +2785,7 @@ static void draw_master(void)
             pen_to(&pn, (float)(x0 + x), (float)cy - (b - 64.0f) * (float)(hh / 2 - 6) * (float)m[MS_EQ_BLEND] / (64.0f * 127.0f),
                    K_NOW);
         }
-        cv_text(x0, y0 + hh + 6, &FONT_XS, "low  mid  high, by the blend", K_DIM);
+        cv_text(x0, y0 + hh + 3, &FONT_XS, "low  mid  high, by the blend", K_DIM);
     } else if (pg == 1) {
         int32_t py = -1;
         for (int32_t x = 0; x < w; x++) {
@@ -2774,14 +2799,14 @@ static void draw_master(void)
                 py = y;
             }
         }
-        cv_text(x0, y0 + hh + 6, &FONT_XS, "drive: gain, clip, tone, blend", K_DIM);
+        cv_text(x0, y0 + hh + 3, &FONT_XS, "drive: gain, clip, tone, blend", K_DIM);
     } else {
         static const char *const NM[4] = {"drums", "melodic", "comp", "level"};
         for (int i = 0; i < 4; i++) {
             int32_t x = x0 + i * 52, v = m[MS_PERC + i] * (hh - 10) / 127;
             cv_round(x + 8, y0, 30, hh, 4, K_PANEL);
             cv_round(x + 8, y0 + hh - v, 30, v, 4, i == 2 ? K_NOW_M : K_NOW);
-            text_c(x + 23, y0 + hh + 6, &FONT_XS, NM[i], K_DIM);
+            text_c(x + 23, y0 + hh + 3, &FONT_XS, NM[i], K_DIM);
         }
     }
     cv_blit(0, MAIN_Y);
@@ -2804,14 +2829,14 @@ static void draw_setup(void)
         nm[i] = proj.name[i];
     nm[NAME_LEN] = 0;
     num_s((uint32_t)proj_slot + 1u, s_cat(t, "slot "));
-    setup_row(4, "project", t);
-    setup_row(22, "name", nm[0] ? nm : "-");
-    setup_row(40, "clock", seq.ext ? "MIDI in" : "internal");
-    setup_row(58, "MIDI out", proj.send_clock || proj.send_notes ? (proj.send_clock && proj.send_notes ? "clock, notes"
+    setup_row(2, "project", t);
+    setup_row(18, "name", nm[0] ? nm : "-");
+    setup_row(34, "clock", seq.ext ? "MIDI in" : "internal");
+    setup_row(50, "MIDI out", proj.send_clock || proj.send_notes ? (proj.send_clock && proj.send_notes ? "clock, notes"
                                                                   : proj.send_clock ? "clock" : "notes") : "off");
-    setup_row(76, "count-in", ONOFF[proj.rsv[0] & 1u]);
-    setup_row(94, "theme", THEME_OF_PROJ()->name);
-    setup_row(112, "version", XY_VERSION);
+    setup_row(66, "count-in", ONOFF[proj.rsv[0] & 1u]);
+    setup_row(82, "theme", THEME_OF_PROJ()->name);
+    setup_row(98, "version", XY_VERSION);
     cv_blit(0, MAIN_Y);
 }
 static void draw_status(void)

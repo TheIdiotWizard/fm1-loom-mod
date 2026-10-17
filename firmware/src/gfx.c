@@ -56,6 +56,78 @@ static void palette_set(uint32_t i)
 
 static inline uint16_t swap16(uint32_t c) { return (uint16_t)(((c >> 8) & 0xFFu) | ((c & 0xFFu) << 8)); }
 
+#ifdef GFX_AUDIT
+/* host only: the layout audit. Within one canvas, a label's ink must stay inside the canvas (and its band),
+ * must not touch another label's ink, and must not cross the edge of a rounded box (wholly in or wholly out).
+ * Findings print once each as "LAYOUT ..." with where the app is (gfx_audit_where, the host's). */
+static const char *gfx_audit_where(void);
+typedef struct { int32_t x0, y0, x1, y1; char s[24]; } ga_box_t;
+static ga_box_t ga_txt[96], ga_rnd[160];
+static uint32_t ga_ntxt, ga_nrnd, ga_seen[512], ga_nseen, ga_findings;
+static void ga_reset(void) { ga_ntxt = ga_nrnd = 0; }
+static void ga_report(const char *what, const char *a, const char *b, int32_t x, int32_t y)
+{
+    uint32_t h = 2166136261u;
+    const char *w = gfx_audit_where(), *q;
+    for (q = what; *q; q++) h = (h ^ (uint8_t)*q) * 16777619u;
+    for (q = a; *q; q++) h = (h ^ (uint8_t)*q) * 16777619u;
+    for (q = b; *q; q++) h = (h ^ (uint8_t)*q) * 16777619u;
+    for (q = w; *q; q++) h = (h ^ (uint8_t)*q) * 16777619u;
+    for (uint32_t i = 0; i < ga_nseen; i++)
+        if (ga_seen[i] == h)
+            return;
+    if (ga_nseen < 512)
+        ga_seen[ga_nseen++] = h;
+    ga_findings++;
+    printf("LAYOUT %s: \"%s\"%s%s%s at %d,%d (%s)\n", what, a, *b ? " / \"" : "", b, *b ? "\"" : "", (int)x, (int)y, w);
+}
+static void ga_text(const char *s, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int clipped)
+{
+    ga_box_t *t;
+    uint32_t i;
+    if (x1 < x0)
+        return;                                      /* no ink (spaces) */
+    if (clipped)
+        ga_report("CLIPPED", s, "", x0, y0);
+    else if (cv_w == 240u && (x0 < 2 || x1 > 237))   /* a full-width band: ink right at the glass's edge */
+        ga_report("AT THE SCREEN EDGE", s, "", x0, y0);
+    for (i = 0; i < ga_ntxt; i++) {
+        ga_box_t *o = &ga_txt[i];
+        if (x0 <= o->x1 && o->x0 <= x1 && y0 <= o->y1 && o->y0 <= y1)
+            ga_report("OVERLAP", s, o->s, x0, y0);
+    }
+    for (i = 0; i < ga_nrnd; i++) {
+        ga_box_t *r = &ga_rnd[i];
+        int inside = x0 >= r->x0 && x1 <= r->x1 && y0 >= r->y0 && y1 <= r->y1;
+        int apart = x1 < r->x0 || x0 > r->x1 || y1 < r->y0 || y0 > r->y1;
+        if (!inside && !apart)
+            ga_report("CROSSES A BOX EDGE", s, "", x0, y0);
+        else if (inside && (x0 < r->x0 + 1 || x1 > r->x1 - 1 || y0 < r->y0 + 1 || y1 > r->y1 - 1)
+                 && (r->x1 - r->x0 > 16 || r->y1 - r->y0 > 16))   /* (a tiny chip may hug its label) */
+        {
+            char bx[40];
+            snprintf(bx, sizeof bx, "ink %d..%d,%d..%d box %d..%d,%d..%d", (int)x0, (int)x1, (int)y0, (int)y1, (int)r->x0,
+                     (int)r->x1, (int)r->y0, (int)r->y1);
+            ga_report("TOUCHES A BOX EDGE", s, bx, x0, y0);
+        }
+    }
+    if (ga_ntxt < 96) {
+        t = &ga_txt[ga_ntxt++];
+        t->x0 = x0, t->y0 = y0, t->x1 = x1, t->y1 = y1;
+        for (i = 0; i < sizeof t->s - 1u && s[i]; i++)
+            t->s[i] = s[i];
+        t->s[i] = 0;
+    }
+}
+static void gfx_audit_box(int32_t x, int32_t y, int32_t w, int32_t h)
+{
+    if (ga_nrnd < 160 && w > 0 && h > 0) {
+        ga_box_t *r = &ga_rnd[ga_nrnd++];
+        r->x0 = x, r->y0 = y + cv_oy, r->x1 = x + w - 1, r->y1 = y + cv_oy + h - 1, r->s[0] = 0;
+    }
+}
+#endif
+
 static void cv_begin(uint32_t w, uint32_t h, uint16_t bg)
 {
     uint32_t i, n;
@@ -66,6 +138,9 @@ static void cv_begin(uint32_t w, uint32_t h, uint16_t bg)
     cv_h = h;
     cv_oy = cv_y0 = 0;
     cv_y1 = (int32_t)h;
+#ifdef GFX_AUDIT
+    ga_reset();
+#endif
     n = w * h;
     for (i = 0; i < n; i++)
         cv_px[i] = swap16(bg);
@@ -223,6 +298,10 @@ static uint32_t glyph(const felucca_font_t *f, uint32_t ch)
 static int32_t cv_text(int32_t x, int32_t y, const felucca_font_t *f, const char *s, uint16_t c)
 {
     uint32_t r = c >> 11, g = (c >> 5) & 63u, b = c & 31u;
+#ifdef GFX_AUDIT
+    const char *s0 = s;
+    int32_t ix0 = 1 << 20, iy0 = 1 << 20, ix1 = -(1 << 20), iy1 = -(1 << 20), clip = 0, shown = 0;
+#endif
     for (; *s; s++) {
         uint32_t gi = glyph(f, (uint8_t)*s), gx, gy, w, bpr;
         const uint8_t *gd;
@@ -234,6 +313,18 @@ static int32_t cv_text(int32_t x, int32_t y, const felucca_font_t *f, const char
                 uint32_t a = gd[gy * bpr + gx / 2u];
                 int32_t px = x - f->pad + (int32_t)gx, py = y + (int32_t)gy + cv_oy;
                 a = (gx & 1u) ? (a & 15u) : (a >> 4);
+#ifdef GFX_AUDIT
+                if (a >= 4u) {                       /* ink that shows (the faintest edge pixels aside) */
+                    if (px < ix0) ix0 = px;
+                    if (px > ix1) ix1 = px;
+                    if (py < iy0) iy0 = py;
+                    if (py > iy1) iy1 = py;
+                    if ((uint32_t)px >= cv_w || py < cv_y0 || py >= cv_y1)
+                        clip = 1;
+                    else
+                        shown = 1;
+                }
+#endif
                 if (!a || (uint32_t)px >= cv_w || py < cv_y0 || py >= cv_y1)
                     continue;
                 if (a == 15u) {
@@ -248,6 +339,10 @@ static int32_t cv_text(int32_t x, int32_t y, const felucca_font_t *f, const char
             }
         x += f->adv[gi];
     }
+#ifdef GFX_AUDIT
+    if (shown)                                       /* (wholly outside: a list's hidden rows, not drawn) */
+        ga_text(s0, ix0, iy0, ix1, iy1, clip);
+#endif
     return x;
 }
 
