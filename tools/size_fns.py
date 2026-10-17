@@ -53,7 +53,7 @@ COLD = {
 }
 # XY_RAM_DSP=1: the two FX slots' and the master's per-sample code, closed under calls (~20 KB; the 24 KB
 # RAMTEXT region holds .ram_text's ~3 KB and .c1_text besides)
-RAM_DSP = ["fx_process", "do_spu", "spu_interp", "master_process", "ts_gs_side", "ts_wf_side", "ts_block_pole"]
+RAM_DSP = ["fx_process", "do_spu", "spu_interp", "master_process", "ts_side", "ts_wf", "ts_block_pole"]
 RAM_INLINE = ["fx_states", "zero16"]
 ROOTS = re.compile(r"^(?:\w+_irq|fm1_fault_c|fm1_fatal_common|core2_job)$")
 DEF = re.compile(r"^(?:static\s+|inline\s+|const\s+|unsigned\s+|signed\s+|struct\s+\w+\s+|__attribute__\s*\(\(.*?\)\)\s*)*"

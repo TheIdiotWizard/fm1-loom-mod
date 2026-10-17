@@ -38,7 +38,7 @@ Where LOOM-8's own parts come from:
 | The menu paradigm (a button per set of knobs, SELECT turns the pages) | [Polly](https://github.com/charlesvestal/fm1-polly) | GPL-3.0-only |
 | The screen reader's words (`app/words.tsv`, `app/web/words/`) | [fm1-reader](https://github.com/charlesvestal/fm1-reader)'s protocol (fm1-base's `device/announce.c`, `tools/gen_words.py`) | GPL-3.0-only |
 | The idea of a browser emulator for FM-1 firmware (`app/web/emu/`) | [Groove OS](https://www.groove-os.com/) by Peter Gombos, whose site runs its firmware in the browser; no code from it | credit only |
-| `app/dsp/tapescam.h` (the master's tape) | ported from [schwung-tapescam](https://github.com/charlesvestal/move-everything-tapescam), Copyright (c) 2025 Charles Vestal | MIT (below) |
+| `app/dsp/tapescam.h` (the master's tape, TapeScam-lite) | after [schwung-tapescam](https://github.com/charlesvestal/move-everything-tapescam), Copyright (c) 2025 Charles Vestal | MIT (below) |
 | `app/dsp/psxrev.h` (the reverb's PlayStation modes) | ported from [schwung-psxverb](https://github.com/charlesvestal/move-everything-psxverb), Copyright (c) 2025 Charles Vestal; the register sets and the resampling filter are psx-spx's documentation of the PlayStation's SPU | MIT (below) |
 | Everything else in `app/`, `tools/`, `tests/` | LOOM-8 | GPL-3.0-only |
 

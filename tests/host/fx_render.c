@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* Renders for listening (nothing here plays audio): the master's tape (TapeScam) on a drum loop and on a pad
+/* Renders for listening (nothing here plays audio): the master's tape (TapeScam-lite) on a drum loop and on a pad
  * at a few settings, and every reverb mode (the plate, the PlayStation's SPU modes) on a short dry phrase, as
  * 16-bit stereo WAVs in build/fx_renders/, with an index (index.txt) of what each file is.
  *   tools/fx_renders.sh */
@@ -177,7 +177,7 @@ int main(void)
         {"off", {0, 0, 0, 0}, "the tape out (all four at 0): the bus as it was"},
         {"default", {0, MS_TP_COLOR_DEF, 0, 0}, "a new project's: color 24 (the saturation alone, trimmed)"},
         {"color64", {0, 64, 0, 0}, "color 64"},
-        {"drive40", {40, 24, 0, 0}, "drive 40, color 24: the gain stage in (its 144 Hz .. 5.7 kHz voicing, the lows kept)"},
+        {"drive40", {40, 24, 0, 0}, "drive 40, color 24: the gain stage in (its 5 kHz voicing, the lows around it)"},
         {"drive100_color60", {100, 60, 0, 0}, "drive 100, color 60: hard"},
         {"wobble60", {0, 24, 60, 0}, "color 24, wobble 60"},
         {"wobble127", {0, 24, 127, 0}, "color 24, wobble 127: seasick"},

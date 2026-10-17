@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* LOOM-8 effects: the two send-effect tracks (fx I, fx II: one of chorus, delay, lofi, phaser, reverb each,
  * four knobs of its own; the reverb in one of eleven modes: the plate, or one of the PlayStation's SPU
- * reverbs) and the master section (3-band EQ with blend, the tape (TapeScam), compressor, limiter, group
+ * reverbs) and the master section (3-band EQ with blend, the tape (TapeScam-lite), compressor, limiter, group
  * levels).
  *
  * All run in the audio interrupt. Buffers for the delay, the reverb and the master tape live in the pool;
@@ -59,15 +59,15 @@ void fx_process(fxslot_t *f, const float *in, float *out_l, float *out_r, uint32
 int fx_has(const fxslot_t *f, int pick);                    /* the slot can do this effect (reverb needs its line) */
 
 /* ---- master ---- */
-/* the master's knobs, three pages of four: EQ (low, mid, high, blend), tape (TapeScam: drive, color,
+/* the master's knobs, three pages of four: EQ (low, mid, high, blend), tape (TapeScam-lite: drive, color,
  * wobble, noise; all four at 0 = the tape out of the path), out (perc, mel, comp, level) */
 enum { MS_EQ_LO, MS_EQ_MID, MS_EQ_HI, MS_EQ_BLEND, MS_TP_DRIVE, MS_TP_COLOR, MS_TP_WOBBLE, MS_TP_NOISE,
        MS_PERC, MS_MEL, MS_COMP, MS_LEVEL, NMS };
 extern const char *const MS_NAME[NMS];
 #define MS_TP_COLOR_DEF 24            /* a new project's tape: a little colour (the saturation alone, trimmed to unity) */
 typedef struct master master_t;
-#define MASTER_BYTES 1536
-#define MST_TAPE_DLY 512              /* the tape's wow / flutter line, floats a side (5.5 ms + 4.2 ms of swing at 44.1 kHz) */
+#define MASTER_BYTES 1280
+#define MST_TAPE_DLY 512              /* the tape's wow / flutter line, floats a side (5 ms + 4.2 ms of swing at 44.1 kHz) */
 void master_init(master_t *m, float *tape_l, float *tape_r);   /* the tape's two lines (the pool), MST_TAPE_DLY each */
 void master_set(master_t *m, int p, int v);                 /* 0..127 (EQ blend 0, the tape's four 0 = neutral) */
 /* perc and mel: the two groups (stereo, in place), summed with the fx returns (added into mel) */

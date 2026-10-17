@@ -27,7 +27,7 @@
  * schwung-psxverb: MIT), which run on the same line, all of it.
  *
  * Master: the two groups' levels, a 3-band EQ (RBJ shelves and a peak, their gains scaled by blend
- * so blend 0 is a true bypass), the tape (TapeScam, tapescam.h, from schwung-tapescam: MIT; all four
+ * so blend 0 is a true bypass), the tape (TapeScam-lite, tapescam.h, after schwung-tapescam: MIT; all four
  * knobs at 0 a true bypass), X0X's bus compressor behind its one-knob macro, the master level and
  * X0X's lookahead limiter.
  *

@@ -650,12 +650,13 @@ Master out (the drums' level, the melodic tracks' level, the compressor and the 
 a project, starts a new one, and sets the USB audio level, the count-in and the theme (tape deck or blueprint). Status shows the audio load, the
 voices and the second core.
 
-Master tape puts the whole mix through a tape (TapeScam, after the plugin): **drive** pushes it into the
-tape's preamp, harder and denser (the low end goes around it, so the kick stays); **color** is the tape's
-saturation, rounder and a little darker as it goes up; **wobble** is wow and flutter, the pitch wavering and
-the sides spreading; **noise** is the hiss. With all four at 0 the tape is out of the path. A new project
-starts with a little color (24) and nothing else. The tape keeps the level about where it was: what it adds,
-it takes back at its output.
+Master tape puts the whole mix through a tape (TapeScam-lite, after the TapeScam plugin): **drive** pushes
+it into the tape's preamp, harder and denser (the low end goes around it, so the kick stays); **color** is the
+tape's saturation, rounder and a little darker as it goes up; **wobble** is wow and flutter, the pitch
+wavering on both sides together, as on one tape (so the mix holds up on the FM-1's one speaker); **noise** is
+the hiss. Even pushed hard it stays smooth rather than gritty in the highs. With all four at 0 the tape is out
+of the path. A new project starts with a little color (24) and nothing else. The tape keeps the level about
+where it was: turning drive or color changes the sound, not how loud it is.
 
 <img src="img/screen-mix.png" width="240" alt="Mix: a meter for each track while playing; knobs fx I, fx II, pan and level" title="The mixer"> <img src="img/screen-sends.png" width="240" alt="FX&#x27;s Sends page: the track&#x27;s sends to FX I (delay) and FX II (reverb plate), its pan and level" title="The sends"> <img src="img/screen-master.png" width="240" alt="Master EQ: low, mid, high and the blend from flat to the EQ" title="Master EQ"> <img src="img/screen-master-tape.png" width="240" alt="Master tape: drive, color, wobble and noise, a sine drawn through the tape" title="Master tape"> <img src="img/screen-status.png" width="240" alt="Status: audio load, peak, voices, the second core, guard trips and dropouts" title="Status">
 
