@@ -1,0 +1,421 @@
+# LOOM-8 demo: 90s jungle / drum and bass, 170 BPM, A minor. (tools/demos/render.sh renders it; its bank, the amen
+# and think breaks, is build/demos/jungle.bin: private, never committed.)
+#   T1 slice "chop": the amen, one bar in 16 slices, mono; re-cut per section, rolls by multiply, its pitch turned up
+#      by hand through the build
+#   T2 stack "rope sub": the sub          T3 stack "ply bass" made a reese: detuned, legato, the filter on an LFO
+#   T4 wavetable "gauze choir": the pad   T5 stack "braid stab": dub stabs into the delay
+#   T6 slice "chop": the think break      T7 weft "thread lead" as a dub siren (a square LFO on the pitch)
+# Song: intro 8 bars (the amen through a closed filter, opened by hand), build 4, drop A 8 (a stutter throw at
+# its end), the change 4 (the think break, the sub alone, stabs), drop B 8, outro 4 (echo throw, then stop).
+master 4096
+samples build/demos/jungle.bin
+bpm 170
+
+# ---- the sounds
+knob 1 engine slice
+preset 1 chop slice
+knob 1 e1 u1
+knob 1 e4 127
+knob 1 cut 127
+knob 1 ctone 127
+knob 1 brain no
+knob 1 level 124
+knob 1 ctype drive
+knob 1 camt 40
+knob 1 cmix 127
+knob 1 send2 12
+
+preset 2 rope_sub stack
+knob 2 brain no
+knob 2 level 71
+
+preset 3 ply_bass stack
+knob 3 brain no
+knob 3 e2 1
+knob 3 e3 70
+knob 3 e4 50
+knob 3 vmode legato
+knob 3 porta 40
+knob 3 cut 58
+knob 3 res 40
+knob 3 fenv 76
+knob 3 ltype wave
+knob 3 lspeed 2
+knob 3 lamt 92
+knob 3 ldest filter
+knob 3 lx 0
+knob 3 lx2 sine
+knob 3 camt 75
+knob 3 level 40
+
+preset 4 gauze_choir wavetable
+knob 4 brain no
+knob 4 level 50
+knob 4 send2 70
+
+preset 5 braid_stab stack
+knob 5 brain no
+knob 5 level 69
+knob 5 send1 70
+knob 5 send2 30
+
+knob 6 engine slice
+preset 6 chop slice
+knob 6 e1 u2
+knob 6 e4 127
+knob 6 ctone 127
+knob 6 brain no
+knob 6 level 112
+
+preset 7 thread_lead weft
+knob 7 brain no
+knob 7 ltype wave
+knob 7 lspeed 4
+knob 7 lamt 84
+knob 7 ldest amp
+knob 7 lx 1
+knob 7 lx2 square
+knob 7 level 56
+knob 7 send1 90
+knob 7 send2 60
+
+# FX I a dotted-eighth delay with long repeats, FX II a hall
+knob 11 engine delay
+knob 11 e1 80
+knob 11 e3 84
+knob 11 e4 50
+knob 12 engine hall
+knob 12 e2 70
+mst color 32
+mst blend 127
+mst hi 82
+mst lo 60
+mst drive 30
+mst comp 36
+mst level 89
+
+# ---- T1 the amen (slice k = note 52 + k; 16 slices)
+# P1 straight, every slice in its place
+pat 1 1 16 1 100
+notes 1 1 1 0 120 53
+notes 1 1 2 0 104 54
+notes 1 1 3 0 116 55
+notes 1 1 4 0 104 56
+notes 1 1 5 0 124 57
+notes 1 1 6 0 104 58
+notes 1 1 7 0 108 59
+notes 1 1 8 0 112 60
+notes 1 1 9 0 108 61
+notes 1 1 10 0 112 62
+notes 1 1 11 0 120 63
+notes 1 1 12 0 116 64
+notes 1 1 13 0 124 65
+notes 1 1 14 0 104 66
+notes 1 1 15 0 108 67
+notes 1 1 16 0 112 68
+# P2 drop A: the classic re-edit, a roll on 16 and a skip that trades a ghost for a kick every other bar
+pat 1 2 16 1 100
+notes 1 2 1 0 124 53
+notes 1 2 2 0 104 54
+notes 1 2 3 0 120 55
+notes 1 2 4 0 104 56
+notes 1 2 5 0 127 57
+notes 1 2 6 0 100 58
+notes 1 2 7 0 112 59
+notes 1 2 8 0 116 60
+notes 1 2 9 0 104 54
+notes 1 2 10 0 116 62
+notes 1 2 11 0 124 63
+notes 1 2 12 0 116 64
+notes 1 2 13 0 127 65
+notes 1 2 14 0 104 66
+notes 1 2 15 0 116 57
+notes 1 2 16 0 112 60
+trick 1 2 16 multiply 2
+notes 1 2 9 0 120 53
+trick 1 2 9 skip 2
+# P3 drop B: chopped harder, double kicks, snare rolls, a jump past step 9 every other bar
+pat 1 3 16 1 100
+notes 1 3 1 0 127 53
+notes 1 3 2 0 120 53
+notes 1 3 3 0 127 57
+notes 1 3 4 0 100 56
+notes 1 3 5 0 112 63
+notes 1 3 6 0 124 57
+notes 1 3 7 0 104 59
+notes 1 3 8 0 116 60
+notes 1 3 9 0 124 53
+notes 1 3 10 0 104 66
+notes 1 3 11 0 124 63
+notes 1 3 12 0 127 57
+notes 1 3 13 0 108 61
+notes 1 3 14 0 127 65
+notes 1 3 15 0 120 57
+notes 1 3 16 0 124 57
+trick 1 3 16 multiply 3
+trick 1 3 12 multiply 2
+chance 1 3 12 60
+trick 1 3 8 jump 5
+trick 1 3 8 skiptrick 2
+# P4 the build: 4 bars of snare, quarters, eighths, sixteenths, rolls (the pitch knob turned up through the last
+# two bars, live)
+pat 1 4 64 1 100
+notes 1 4 1 0 124 53
+notes 1 4 5 0 108 57
+notes 1 4 9 0 112 53
+notes 1 4 13 0 112 57
+notes 1 4 17 0 112 53
+notes 1 4 19 0 104 57
+notes 1 4 21 0 108 57
+notes 1 4 23 0 106 57
+notes 1 4 25 0 112 53
+notes 1 4 27 0 108 57
+notes 1 4 29 0 112 57
+notes 1 4 31 0 114 57
+notes 1 4 33 0 108 57
+notes 1 4 34 0 104 57
+notes 1 4 35 0 110 57
+notes 1 4 36 0 106 57
+notes 1 4 37 0 112 57
+notes 1 4 38 0 108 57
+notes 1 4 39 0 114 57
+notes 1 4 40 0 110 57
+notes 1 4 41 0 116 57
+notes 1 4 42 0 112 57
+notes 1 4 43 0 118 57
+notes 1 4 44 0 114 57
+notes 1 4 45 0 120 57
+notes 1 4 46 0 116 57
+notes 1 4 47 0 122 57
+notes 1 4 48 0 118 57
+notes 1 4 49 0 120 57
+trick 1 4 49 multiply 2
+notes 1 4 50 0 120 57
+trick 1 4 50 multiply 2
+notes 1 4 51 0 122 57
+trick 1 4 51 multiply 2
+notes 1 4 52 0 122 57
+trick 1 4 52 multiply 2
+notes 1 4 53 0 124 57
+trick 1 4 53 multiply 3
+notes 1 4 54 0 124 57
+trick 1 4 54 multiply 3
+notes 1 4 55 0 124 57
+trick 1 4 55 multiply 3
+notes 1 4 56 0 124 57
+trick 1 4 56 multiply 3
+notes 1 4 57 0 127 57
+trick 1 4 57 multiply 4
+notes 1 4 58 0 127 57
+trick 1 4 58 multiply 4
+notes 1 4 59 0 127 57
+trick 1 4 59 multiply 4
+notes 1 4 60 0 127 57
+trick 1 4 60 multiply 4
+
+# ---- T2 the sub, 4 bars: Am | F | Dm | Em
+pat 2 1 64
+notes 2 1 1 5 110 A1
+notes 2 1 7 2 100 A1
+notes 2 1 11 3 105 C2
+notes 2 1 15 2 95 A1
+notes 2 1 17 5 110 F1
+notes 2 1 23 2 100 F1
+notes 2 1 27 3 105 A1
+notes 2 1 31 2 95 F1
+notes 2 1 33 5 110 D1
+notes 2 1 39 2 100 D1
+notes 2 1 43 3 105 F1
+notes 2 1 47 2 95 D1
+notes 2 1 49 5 110 E1
+notes 2 1 55 2 100 E1
+notes 2 1 59 3 105 G1
+notes 2 1 63 2 95 B1
+# P2 the change: held roots
+pat 2 2 64
+notes 2 2 1 14 110 A1
+notes 2 2 17 14 110 F1
+notes 2 2 33 14 110 D1
+notes 2 2 49 14 110 E1
+
+# ---- T3 the reese
+pat 3 1 64
+notes 3 1 1 12 100 A2
+notes 3 1 13 4 100 C3
+notes 3 1 17 12 100 F2
+notes 3 1 29 4 100 E2
+notes 3 1 33 12 100 D2
+notes 3 1 45 4 100 F2
+notes 3 1 49 14 100 E2
+trick 3 1 13 porta 5
+trick 3 1 29 porta 5
+trick 3 1 49 bend 8
+# P2 drop B: busier, an octave jump
+pat 3 2 64
+notes 3 2 1 6 100 A2
+notes 3 2 7 2 100 A3
+notes 3 2 9 6 100 G2
+notes 3 2 15 2 100 C3
+notes 3 2 17 6 100 F2
+notes 3 2 23 2 100 F3
+notes 3 2 25 8 100 E2
+notes 3 2 33 6 100 D2
+notes 3 2 39 2 100 D3
+notes 3 2 41 8 100 F2
+notes 3 2 49 6 100 E2
+notes 3 2 55 2 100 E3
+notes 3 2 57 8 100 G2
+trick 3 2 7 porta 3
+trick 3 2 23 porta 3
+trick 3 2 39 porta 3
+trick 3 2 55 porta 3
+
+# ---- T4 the pad: Am(add9) | Fmaj7 | Dm9 | Em7
+pat 4 1 64
+notes 4 1 1 16 80 A3 C4 E4 B4
+notes 4 1 17 16 80 F3 A3 C4 E4
+notes 4 1 33 16 80 D3 F3 C4 E4
+notes 4 1 49 16 80 E3 G3 B3 D4
+
+# ---- T5 the stabs: P1 a bar of offbeat Am stabs (the 2nd one every other bar), P2 the change's, through the progression
+pat 5 1 16
+notes 5 1 3 0.5 110 A3 C4 E4
+notes 5 1 11 0.5 100 A3 C4 E4
+chance 5 1 11 1:2
+pat 5 2 64
+notes 5 2 1 1 110 A3 C4 E4 G4
+notes 5 2 7 0.5 90 A3 C4 E4 G4
+notes 5 2 17 1 110 F3 A3 C4 E4
+notes 5 2 23 0.5 90 F3 A3 C4 E4
+notes 5 2 33 1 110 D3 F3 A3 C4
+notes 5 2 39 0.5 90 D3 F3 A3 C4
+notes 5 2 49 1 110 E3 G3 B3 D4
+notes 5 2 55 0.5 90 E3 G3 B3 D4
+
+# ---- T6 the think break: P1 straight, P2 the change (chopped), P3 drop B (its ghosts and hats only, under the amen)
+pat 6 1 16 1 100
+notes 6 1 1 0 120 53
+notes 6 1 2 0 104 54
+notes 6 1 3 0 112 55
+notes 6 1 4 0 104 56
+notes 6 1 5 0 124 57
+notes 6 1 6 0 104 58
+notes 6 1 7 0 112 59
+notes 6 1 8 0 108 60
+notes 6 1 9 0 116 61
+notes 6 1 10 0 104 62
+notes 6 1 11 0 112 63
+notes 6 1 12 0 108 64
+notes 6 1 13 0 124 65
+notes 6 1 14 0 104 66
+notes 6 1 15 0 112 67
+notes 6 1 16 0 108 68
+pat 6 2 16 1 100
+notes 6 2 1 0 124 53
+notes 6 2 3 0 112 54
+notes 6 2 4 0 116 53
+notes 6 2 5 0 127 57
+notes 6 2 7 0 108 60
+notes 6 2 8 0 116 57
+notes 6 2 9 0 108 62
+notes 6 2 11 0 120 53
+notes 6 2 12 0 104 64
+notes 6 2 13 0 127 65
+notes 6 2 15 0 116 57
+notes 6 2 16 0 112 68
+trick 6 2 16 multiply 2
+pat 6 3 16 1 100
+notes 6 3 2 0 104 54
+notes 6 3 4 0 100 56
+notes 6 3 6 0 104 58
+notes 6 3 8 0 100 60
+notes 6 3 10 0 104 62
+notes 6 3 12 0 100 64
+notes 6 3 14 0 104 66
+notes 6 3 16 0 100 68
+chance 6 3 16 50
+
+# ---- T7 the siren: a long E5 every 2 bars in the intro; in drop B a short call every 4
+pat 7 1 32
+notes 7 1 1 6 90 E5
+notes 7 1 17 4 80 A5
+chance 7 1 17 1:2
+pat 7 2 64
+notes 7 2 1 3 90 A5
+notes 7 2 33 3 90 E5
+
+# ---- scenes (patterns for T1..T8, COND, THROW) and their mutes
+scenedef 1 1 1 1 1 1 1 1 1
+scenemute 1 .xx.xx.x
+scenedef 2 4 1 1 1 1 1 1 1
+scenemute 2 .xx.xx.x
+scenedef 3 2 1 1 1 1 1 1 1
+scenemute 3 ...x.xxx
+scenedef 4 1 2 1 1 2 2 1 1
+scenemute 4 x.x....x
+scenedef 5 3 1 2 1 1 3 2 1
+scenemute 5 ...x...x
+scenedef 6 1 2 1 1 1 1 1 1
+scenemute 6 .xx.xx.x
+song 1:8 2:1 3:8 4:4 5:8 6:4
+songloop 0
+
+# ---- play the song (HOME, SELECT to the Song page, PLAY) and perform: the intro's filter by hand, the throws
+knob 1 cut 50
+knob 4 cut 70
+tap HOME
+turn SELECT 1
+stats reset
+wav loom_demo_jungle.wav
+tap PLAY
+bars 2
+knob 1 cut 62
+bars 2
+knob 1 cut 74
+bars 2
+knob 1 cut 88
+bars 1
+knob 1 cut 100
+bars 1
+knob 1 cut 127
+knob 4 cut 90
+# the build (4 bars): the pad opens; the slices' pitch turned up over the last two bars, back for the drop
+bars 2
+knob 1 e3 66
+bars 0.5
+knob 1 e3 68
+bars 0.5
+knob 1 e3 70
+knob 4 cut 110
+bars 0.5
+knob 1 e3 72
+bars 0.25
+knob 1 e3 75
+bars 0.1875
+knob 1 e3 64
+bars 0.0625
+# drop A, 8 bars; a stutter on everything for the last half bar
+bars 7.5
+throw stutter on mel
+bars 0.5
+throw stutter off mel
+# the change, 4 bars: the stabs' delay longer
+knob 11 e3 100
+bars 4
+knob 11 e3 84
+# drop B, 8 bars, the think quieter under the amen; a repeat on the drums' last beat
+knob 6 level 100
+knob 6 cut 90
+bars 7.75
+throw repeat on mel 1
+bars 0.25
+throw repeat off mel 1
+# outro, 4 bars: echo out on the last bar
+knob 1 cut 80
+bars 3
+throw echo on mel
+bars 1
+throw echo off mel
+wait 3000
+wavstop
+stats

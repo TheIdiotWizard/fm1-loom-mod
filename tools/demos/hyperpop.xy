@@ -1,0 +1,443 @@
+# LOOM-8 demo: hyperpop, 160 BPM, A minor (F G Am Em). (tools/demos/render.sh renders it; its bank is
+# build/demos/hyperpop.bin: a bar sung high and tuned hard, and an 808, both made by tools/demos/make_banks.py.)
+#   T1 kit: kick, clap and snare, hats with rolls (multiply), the kit's bus driven hard
+#   T2 sample: the 808 (user 2, its root C2), mono, gliding (portamento trick), driven
+#   T3 stack "braid stab" detuned wide: the supersaw chords, ducked by the kick (the pump LFO)
+#   T4 slice: the voice in 16, crushed, chopped with octave and fifth locks
+#   T5 wavetable "spool bell" through the arp (1/16, up, two octaves, latched): the chord held by hand each bar
+#   T6 orbit "chime": sparkles in the intro and the break
+# Song: intro 4, build 4 (snare build), drop 8, break 4 (the voice and the 808 alone, throws), build 2, drop 2 8
+# (the arp in), outro 4 (the voice echoing).
+master 4096
+samples build/demos/hyperpop.bin
+bpm 160
+
+# ---- the sounds
+knob 1 d1.k1 70
+knob 1 d1.k2 60
+knob 1 d1.k3 110
+knob 1 d5.volume 86
+knob 1 d2.volume 72
+knob 1 d2.k1 90
+knob 1 d3.volume 66
+knob 1 ftype dynamic
+knob 1 res 70
+knob 1 fenv 70
+knob 1 level 88
+
+knob 2 engine sample
+knob 2 e1 u2
+knob 2 e4 one-shot
+knob 2 vmode mono
+knob 2 porta 40
+knob 2 a 0
+knob 2 d 100
+knob 2 s 127
+knob 2 r 40
+knob 2 cut 100
+knob 2 ktrk 0
+knob 2 ctype drive
+knob 2 camt 90
+knob 2 ctone 100
+knob 2 cmix 127
+knob 2 brain no
+knob 2 level 92
+
+preset 3 braid_stab stack
+knob 3 e3 64
+knob 3 e4 127
+knob 3 s 90
+knob 3 r 56
+knob 3 cut 96
+knob 3 ltype pump
+knob 3 lspeed track_1
+knob 3 lamt 100
+knob 3 brain no
+knob 3 level 49
+knob 3 send2 30
+
+knob 4 engine slice
+preset 4 chop slice
+knob 4 e1 u1
+knob 4 e4 127
+knob 4 vmode mono
+knob 4 cut 127
+knob 4 ctype crush
+knob 4 camt 50
+knob 4 ctone 30
+knob 4 cmix 90
+knob 4 brain no
+knob 4 level 75
+knob 4 send1 40
+knob 4 send2 40
+
+preset 5 spool_bell wavetable
+knob 5 brain no
+knob 5 player arp
+knob 5 p1 1/16
+knob 5 p2 up
+knob 5 p3 2
+knob 5 p4 1
+knob 5 ap1 short
+knob 5 ap4 wide
+knob 5 level 66
+knob 5 send1 50
+
+preset 6 chime orbit
+knob 6 brain no
+knob 6 level 60
+knob 6 send1 60
+knob 6 send2 70
+
+knob 11 engine delay
+knob 11 e1 72
+knob 11 e3 60
+knob 12 engine plate
+knob 12 e1 110
+mst drive 64
+mst color 44
+mst comp 50
+mst level 70
+mst blend 127
+mst hi 84
+mst lo 70
+
+# ---- T1 the kit: kick 1, snare 2, hat 3, open 4, clap 5
+# P1 the drop
+pat 1 1 16 1 40
+hits 1 1 1 x.....x...x.....
+hits 1 1 5 ....X.......X...
+hits 1 1 2 ....x.......x...
+hits 1 1 3 x.x.x.x.x.x.xox.
+hits 1 1 4 ..............x.
+trick 1 1 12 multiply 3
+trick 1 1 15 multiply 4
+# P2 drop 2: busier, the rolls change every other bar
+pat 1 2 16 1 40
+hits 1 2 1 x.....x.x.x..x..
+hits 1 2 5 ....X.......X...
+hits 1 2 2 ....x.......x..o
+hits 1 2 3 xxx.x.xxx.x.xox.
+hits 1 2 4 ......x.......x.
+trick 1 2 2 multiply 2
+trick 1 2 8 multiply 3
+trick 1 2 13 multiply 4
+chance 1 2 16 1:2
+trick 1 2 16 multiply 6
+# P3 the build, 4 bars: claps in quarters, eighths, sixteenths, rolls
+pat 1 3 64 1 40
+hits 1 3 5 x...x...x...x...|x.x.x.x.x.x.x.x.|xxxxxxxxxxxxxxxx|xxxxxxxxxxxxxxxx
+hits 1 3 2 ................|................|....o...o...o...|o.o.o.o.o.o.o.o.
+hits 1 3 1 x...............|x...............|x.......x.......|x...x...x...x...
+trick 1 3 49 multiply 2
+trick 1 3 50 multiply 2
+trick 1 3 51 multiply 2
+trick 1 3 52 multiply 2
+trick 1 3 53 multiply 3
+trick 1 3 54 multiply 3
+trick 1 3 55 multiply 3
+trick 1 3 56 multiply 3
+trick 1 3 57 multiply 4
+trick 1 3 58 multiply 4
+trick 1 3 59 multiply 4
+trick 1 3 60 multiply 4
+trick 1 3 61 multiply 6
+trick 1 3 62 multiply 6
+trick 1 3 63 multiply 8
+trick 1 3 64 multiply 8
+# P4 the second build, 2 bars
+pat 1 4 32 1 40
+hits 1 4 5 x.x.x.x.x.x.x.x.|xxxxxxxxxxxxxxxx
+hits 1 4 1 x.......x.......|x...x...x...x...
+trick 1 4 25 multiply 3
+trick 1 4 26 multiply 3
+trick 1 4 27 multiply 4
+trick 1 4 28 multiply 4
+trick 1 4 29 multiply 6
+trick 1 4 30 multiply 6
+trick 1 4 31 multiply 8
+trick 1 4 32 multiply 8
+# P5 the intro and the break: a hat ticking
+pat 1 5 16 1 40
+hits 1 5 3 ..x...x...x...xg
+
+# ---- T2 the 808 (its root C2 = 36): F | G | Am | Em, slides into the octaves
+pat 2 1 64 1 90
+notes 2 1 1 3 120 F1
+notes 2 1 7 2 110 F1
+notes 2 1 11 2 115 F2
+notes 2 1 14 2 110 F1
+notes 2 1 17 3 120 G1
+notes 2 1 23 2 110 G1
+notes 2 1 27 2 115 G2
+notes 2 1 30 2 110 D2
+notes 2 1 33 3 120 A1
+notes 2 1 39 2 110 A1
+notes 2 1 43 2 115 A2
+notes 2 1 46 2 110 G2
+notes 2 1 49 3 120 E1
+notes 2 1 55 2 110 E1
+notes 2 1 59 2 115 E2
+notes 2 1 62 2 110 B1
+trick 2 1 11 porta 4
+trick 2 1 14 porta 4
+trick 2 1 27 porta 4
+trick 2 1 30 porta 4
+trick 2 1 43 porta 4
+trick 2 1 46 porta 4
+trick 2 1 59 porta 4
+trick 2 1 62 porta 4
+# P2 the break: long notes bending
+pat 2 2 32 1 100
+notes 2 2 1 6 120 A1
+notes 2 2 9 6 120 A2
+notes 2 2 17 6 120 E1
+notes 2 2 25 6 120 G1
+trick 2 2 9 porta 6
+trick 2 2 25 bend 5
+
+# ---- T3 the supersaws: 3 + 3 + 4 + 3 + 3 on every bar
+pat 3 1 64 1 90
+notes 3 1 1 2 110 F3 A3 C4 E4
+notes 3 1 4 2 90 F3 A3 C4 E4
+notes 3 1 7 2 100 F3 A3 C4 E4
+notes 3 1 11 2 90 F3 A3 C4 E4
+notes 3 1 14 2 95 F3 A3 C4 E4
+notes 3 1 17 2 110 G3 B3 D4 A4
+notes 3 1 20 2 90 G3 B3 D4 A4
+notes 3 1 23 2 100 G3 B3 D4 A4
+notes 3 1 27 2 90 G3 B3 D4 A4
+notes 3 1 30 2 95 G3 B3 D4 A4
+notes 3 1 33 2 110 A3 C4 E4 G4
+notes 3 1 36 2 90 A3 C4 E4 G4
+notes 3 1 39 2 100 A3 C4 E4 G4
+notes 3 1 43 2 90 A3 C4 E4 G4
+notes 3 1 46 2 95 A3 C4 E4 G4
+notes 3 1 49 2 110 E3 G3 B3 D4
+notes 3 1 52 2 90 E3 G3 B3 D4
+notes 3 1 55 2 100 E3 G3 B3 D4
+notes 3 1 59 2 90 E3 G3 B3 D4
+notes 3 1 62 2 95 E3 G3 B3 D4
+# P2 held, for the intro and the builds
+pat 3 2 64 1 90
+notes 3 2 1 16 80 F3 A3 C4 E4
+notes 3 2 17 16 80 G3 B3 D4 A4
+notes 3 2 33 16 80 A3 C4 E4 G4
+notes 3 2 49 16 80 E3 G3 B3 D4
+
+# ---- T4 the voice: P1 as sung, P2 the chops (an octave up, a fifth, repeats and stutters)
+pat 4 1 16 1 100
+notes 4 1 1 0 110 53
+notes 4 1 2 0 110 54
+notes 4 1 3 0 110 55
+notes 4 1 4 0 110 56
+notes 4 1 5 0 110 57
+notes 4 1 6 0 110 58
+notes 4 1 7 0 110 59
+notes 4 1 8 0 110 60
+notes 4 1 9 0 110 61
+notes 4 1 10 0 110 62
+notes 4 1 11 0 110 63
+notes 4 1 12 0 110 64
+notes 4 1 13 0 110 65
+notes 4 1 14 0 110 66
+notes 4 1 15 0 110 67
+notes 4 1 16 0 110 68
+pat 4 2 32 1 100
+notes 4 2 1 0 120 53
+notes 4 2 2 0 110 54
+notes 4 2 3 0 110 55
+notes 4 2 4 0 110 55
+notes 4 2 5 0 120 57
+notes 4 2 6 0 110 58
+notes 4 2 7 0 110 57
+notes 4 2 8 0 110 58
+notes 4 2 9 0 120 61
+notes 4 2 10 0 110 61
+notes 4 2 11 0 110 63
+notes 4 2 13 0 120 65
+notes 4 2 14 0 110 65
+notes 4 2 15 0 110 67
+notes 4 2 16 0 110 68
+trick 4 2 4 multiply 2
+trick 4 2 10 multiply 4
+trick 4 2 16 multiply 3
+notes 4 2 17 0 120 53
+notes 4 2 18 0 110 54
+notes 4 2 19 0 110 55
+notes 4 2 21 0 120 61
+notes 4 2 22 0 110 62
+notes 4 2 23 0 110 61
+notes 4 2 24 0 110 62
+notes 4 2 25 0 120 65
+notes 4 2 27 0 110 66
+notes 4 2 28 0 110 66
+notes 4 2 29 0 120 57
+notes 4 2 30 0 110 58
+notes 4 2 31 0 110 53
+notes 4 2 32 0 110 53
+trick 4 2 28 multiply 3
+trick 4 2 32 multiply 6
+lock 4 2 3 e3 76
+lock 4 2 4 e3 76
+lock 4 2 7 e3 71
+lock 4 2 8 e3 71
+lock 4 2 13 e3 76
+lock 4 2 14 e3 76
+lock 4 2 23 e3 71
+lock 4 2 24 e3 76
+lock 4 2 27 e3 59
+lock 4 2 28 e3 76
+lock 4 2 31 e3 52
+lock 4 2 32 e3 88
+
+# ---- T6 the chimes: a few notes of the chords, an A:B cycle so they change
+pat 6 1 32 2 60
+notes 6 1 1 2 90 E6
+notes 6 1 3 2 80 C6
+notes 6 1 5 2 85 A5
+notes 6 1 7 2 70 G5
+notes 6 1 9 2 90 E6
+notes 6 1 11 2 80 D6
+notes 6 1 13 2 85 B5
+notes 6 1 15 2 70 A5
+chance 6 1 7 60
+chance 6 1 15 1:2
+
+# ---- scenes: T1 T2 T3 T4 T5 T6 ...
+scenedef 1 5 1 2 1 1 1 1 1
+scenemute 1 .x..x.xx
+scenedef 2 3 1 2 1 1 1 1 1
+scenemute 2 .x..xxxx
+scenedef 3 1 1 1 2 1 1 1 1
+scenemute 3 ....xxxx
+scenedef 4 5 2 2 1 1 1 1 1
+scenemute 4 ..x.x.xx
+scenedef 5 4 1 2 2 1 1 1 1
+scenemute 5 .x..xxxx
+scenedef 6 2 1 1 2 1 1 1 1
+scenemute 6 .....xxx
+scenedef 7 5 1 2 1 1 1 1 1
+scenemute 7 .x..x.xx
+song 1:4 2:1 3:8 4:4 5:1 6:8 7:4
+songloop 0
+
+# ---- play the song (HOME, SELECT to the Song page, PLAY), and perform
+
+knob 4 cut 64
+tap HOME
+turn SELECT 1
+stats reset
+wav loom_demo_hyperpop.wav
+tap PLAY
+# intro 4: the voice opening
+bars 1
+knob 4 cut 80
+bars 1
+knob 4 cut 96
+bars 1
+knob 4 cut 112
+bars 1
+knob 4 cut 127
+# build 4: the chords' filter opening, the voice an octave up for the last bar
+knob 3 cut 70
+bars 1
+knob 3 cut 80
+bars 1
+knob 3 cut 90
+bars 1
+knob 3 cut 100
+knob 4 e3 76
+bars 1
+knob 4 e3 64
+knob 3 cut 96
+# drop 8: a jumble on the drums for the last beat
+bars 7.75
+throw jumble on perc
+bars 0.25
+throw jumble off perc
+# break 4 (two passes of 2-bar patterns): stutter, octave, chop
+bars 1.5
+throw stutter on mel 4
+bars 0.5
+throw stutter off mel 4
+bars 1
+throw octave on mel
+bars 0.5
+throw octave off mel
+throw chop on mel
+bars 0.5
+throw chop off mel
+# build 2
+bars 2
+# drop 2 8, the arp on T5: the chord held each bar (latched), let go
+play 5 F4 on 100
+play 5 A4 on 100
+play 5 C5 on 100
+play 5 F4 off
+play 5 A4 off
+play 5 C5 off
+bars 1
+play 5 G4 on 100
+play 5 B4 on 100
+play 5 D5 on 100
+play 5 G4 off
+play 5 B4 off
+play 5 D5 off
+bars 1
+play 5 A4 on 100
+play 5 C5 on 100
+play 5 E5 on 100
+play 5 A4 off
+play 5 C5 off
+play 5 E5 off
+bars 1
+play 5 E4 on 100
+play 5 G4 on 100
+play 5 B4 on 100
+play 5 E4 off
+play 5 G4 off
+play 5 B4 off
+bars 1
+play 5 F4 on 100
+play 5 A4 on 100
+play 5 C5 on 100
+play 5 F4 off
+play 5 A4 off
+play 5 C5 off
+bars 1
+play 5 G4 on 100
+play 5 B4 on 100
+play 5 D5 on 100
+play 5 G4 off
+play 5 B4 off
+play 5 D5 off
+bars 1
+play 5 A4 on 100
+play 5 C5 on 100
+play 5 E5 on 100
+play 5 A4 off
+play 5 C5 off
+play 5 E5 off
+bars 1
+play 5 E4 on 100
+play 5 G4 on 100
+play 5 B4 on 100
+play 5 E4 off
+play 5 G4 off
+play 5 B4 off
+bars 0.75
+throw repeat on perc
+bars 0.25
+throw repeat off perc
+knob 5 p4 0
+play 5 E4 on 1
+play 5 E4 off
+# outro 4: the voice echoing out
+bars 2
+throw echo on mel 4
+bars 2
+throw echo off mel 4
+wait 2500
+wavstop
+stats
