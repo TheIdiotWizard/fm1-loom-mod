@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-"""Build the unity build's main-loop code for size (tools/build.py): the functions defined in SIZE_FILES
-(the UI, the pages, the drawing, the stores, the update, the screen reader) get LLVM's `minsize` (about
--Oz) while the rest of firmware/src/main.c (the audio and timer interrupts, the engine glue, USB, MIDI,
-libc) keeps -Os. The idea is Melodee's (github.com/keremimo/melodee, tools/size_fns.py): the JieLi clang
-has no `#pragma clang attribute`, so build.py compiles main.c to LLVM IR without the optimiser, this
-script adds `minsize` to those definitions, and the IR is then compiled at -Os (without the edit the
-round trip is byte-identical to compiling main.c directly).
+"""Build the unity build's main-loop code for size (fm1-base's tools/build.py runs it: app/fm1.toml ir_pass): the
+functions defined in SIZE_FILES (the UI, the pages, the drawing, the stores, the update, the backup, the screen
+reader) get LLVM's `minsize` (about -Oz) while the rest of fm1-base's device/unity.c (the audio and timer
+interrupts, the engine glue, USB, MIDI, libc) keeps -Os. The idea is Melodee's (github.com/keremimo/melodee,
+tools/size_fns.py): the JieLi clang has no `#pragma clang attribute`, so the build compiles unity.c to LLVM IR
+without the optimiser, this script adds `minsize` to those definitions, and the IR is then compiled at -Os
+(without the edit the round trip is byte-identical to compiling unity.c directly).
 
 Safety net: nothing an interrupt can reach is marked. The roots are the C bodies of the ISRs
 (hal/fm1_isr.S: *_irq), the crash handlers and the second core's code; from them every function and
 global they name is followed (a function pointer in a table counts as a call), and whatever is reached
 keeps -Os, whichever file it is in. Functions placed in a section (.ram_text, .c1_text) are left alone.
+SIZE_FILES are relative to the repository (the app's, and fm1-base's in base/).
 
 The DSP units (build.py O2_UNITS, built at -O2) name theirs in COLD: what runs once a note, a hit, a step
 or a setting change (and the UI's text), never once a sample or a block. The same IR round trip.
@@ -19,22 +20,24 @@ or a setting change (and the UI's text), never once a sample or a block. The sam
 Code built for size computes the same samples: the FPU is single precision only and no fused multiply-add
 or reassociation is allowed at any level (-ffp-contract=off); only its speed differs.
 
-XY_RAM_DSP=1 also places the effects' and the master's code (RAM_DSP) in .ram_dsp: RAM beside .ram_text
-(app.ld RAMTEXT, 24 KB), copied there at boot (main_fm1.c), out of the XIP cache's way. A direct call
+XY_RAM_DSP=1 placed the effects' and the master's code (RAM_DSP) in .ram_dsp: RAM beside .ram_text
+(app.ld RAMTEXT, 24 KB), copied there at boot, out of the XIP cache's way. LOOM-8's own platform had that section;
+fm1-base's linker script has not, so the experiment is off here (the code stays for a platform that has it). A direct call
 does not reach from the XIP window to that RAM (R_PI32V2_LONG_JUMP_23M2: 4 MB) or back, so the set is
 closed (RAM_INLINE: what both sides call is inlined into each) and engine.c calls in through a pointer
 (DSP_FAR); the linker refuses any call that was missed. An experiment for the device
 (tools/measure_load.sh): off by default.
 
-    size_fns.py IN.ll OUT.ll [UNIT]        (XY_SIZE=0: copy unchanged)"""
+    size_fns.py IN.ll OUT.ll [UNIT]        (XY_SIZE=0: copy unchanged; UNIT: an o2 unit, relative to app/)"""
 import os
 import re
 import sys
 from pathlib import Path
 
-SRC = Path(__file__).resolve().parents[1] / "firmware" / "src"
-SIZE_FILES = ["app/ui.c", "app/pages.c", "app/project.c", "app/lz.c", "app/panel.c", "app/samples.c",
-              "app/main_fm1.c", "gfx.c", "storage.c", "ota.c", "announce.c"]
+SRC = Path(__file__).resolve().parents[1]
+SIZE_FILES = ["app/ui.c", "app/pages.c", "app/project.c", "app/lz.c", "app/samples.c", "app/gfx_loom.c", "app/app.c",
+              "app/plat_loom.c", "base/device/panel.c", "base/device/main_fm1.c", "base/device/gfx.c",
+              "base/device/storage.c", "base/bsp/chip/ota.c", "base/device/announce.c", "base/device/backup.c"]
 COLD = {
     "dsp/drumline.c": ["start", "knob", "drumline_filter", "drumline_hit", "reso_set", "drumline_init"],
     "dsp/fx.c": ["fx_derive", "ts_set", "eq_coefs", "fx_filter", "master_set", "master_init", "comp_coefs",
@@ -167,8 +170,8 @@ def main(src, dst, unit=None):
         return m.group(0)[:m.start(1) - m.start(0)] + str(made[g]) + m.group(0)[m.end(1) - m.start(0):]
     ir = re.sub(r"^define [^\n]* #(\d+) [^\n]*\{$", mark, ir, flags=re.M)
     ram = os.environ.get("XY_RAM_DSP", "")
-    if ram and ram != "0":
-        ir = ram_place(ir, set(RAM_DSP), set(RAM_INLINE), groups, made)
+    if ram and ram != "0":            # (fm1-base's app.ld has no .ram_dsp: see the top)
+        raise SystemExit("size_fns: XY_RAM_DSP needs a .ram_dsp section in RAM, which fm1-base's app.ld has not")
     for g, new in made.items():
         a = groups[g] if "optsize" in groups[g].split() else "optsize " + groups[g]
         if unit and "noinline" not in a.split():
@@ -184,4 +187,4 @@ def main(src, dst, unit=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main(*sys.argv[1:3]))
+    sys.exit(main(*sys.argv[1:4]))
