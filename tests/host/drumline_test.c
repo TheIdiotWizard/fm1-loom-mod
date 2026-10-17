@@ -610,11 +610,11 @@ int main(void)
         h = one_hit(0, 127, 0, 0, 0, 0);
         pk_dry = h.peak;
         drumline_init(dl, par);
-        drumline_filter(dl, FT_SVF, 127, 127, 127, 0);
+        drumline_filter(dl, FT_LP24, 127, 127, 127, 0);
         drumline_hit(dl, 0, 127, 0, 0, 0);
         pk_f = 0.0f;
         for (b = 0; b < 300; b++) { render(); pk_f = fm_maxf(pk_f, blk_peak()); }
-        check("type svf with every knob up: bypass, the kick unchanged", pk_f == pk_dry);
+        check("type lp24 with every knob up: bypass, the kick unchanged", pk_f == pk_dry);
         /* neutral settings: close to dry */
         drumline_init(dl, par);
         drumline_filter(dl, FT_DYNAMIC, 0, 0, 0, 127);

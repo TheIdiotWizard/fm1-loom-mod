@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* LOOM-8 synth: a pool of voices playing eight engines (simple, stack, wavetable, orbit, epiano, organ,
+/* LOOM-8 synth: a pool of voices playing eight engines (weft, stack, wavetable, orbit, tines, organ,
  * sync, swarm), each voice with two ADSRs, a state-variable filter, an LFO and sends.
  *
- * A track's sound is a flat byte array par[NTP] (the OP-XY's four modules, four knobs each, plus the
- * play page, sends, player and mix). Continuous values are 0..127, switches small integers (ranges in
+ * A track's sound is a flat byte array par[NTP] (four modules, four knobs each: engine, envelope, filter,
+ * LFO; plus the play page, sends, player and mix). Continuous values are 0..127, switches small integers (ranges in
  * tp_info()). The same index space addresses parameter locks (seq/pattern.h lane_t.param), LFO
  * destinations and MIDI CCs. The drum engine's 11 sounds take TP_DRUM0 + sound * DP_N + DP_*.
  *
@@ -18,10 +18,10 @@
 #define NVOICE 16                     /* synth voices, all tracks */
 #define NVOICE_TRK 6                  /* the most one track takes */
 
-enum { EG_SIMPLE, EG_STACK, EG_WAVETABLE, EG_ORBIT, EG_EPIANO, EG_ORGAN, EG_SYNC, EG_SWARM, EG_DRUMLINE,
+enum { EG_WEFT, EG_STACK, EG_WAVETABLE, EG_ORBIT, EG_TINES, EG_ORGAN, EG_SYNC, EG_SWARM, EG_DRUMLINE,
        NENGINE };
-extern const char *const EG_NAME[NENGINE];         /* "simple", "stack", ... "kit" */
-extern const char *const EG_KNOB[NENGINE][4];      /* each engine's four knob names, as the OP-XY prints them */
+extern const char *const EG_NAME[NENGINE];         /* "weft", "stack", ... "kit" */
+extern const char *const EG_KNOB[NENGINE][4];      /* each engine's four knob names */
 
 enum {
     TP_ENGINE, TP_E1, TP_E2, TP_E3, TP_E4,         /* Engine page: the engine and its four knobs */
@@ -32,9 +32,9 @@ enum {
     TP_CUT, TP_RES, TP_FENV, TP_KTRK, TP_FTYPE,     /* Filter page (cutoff 50 Hz .. 20 kHz) and the type (FT_*); on a
                                                      * drumline track low cut / compression / drive / hi cut */
     TP_SEND1, TP_SEND2, TP_SENDT,                   /* sends: fx I, fx II, tape */
-    TP_LTYPE, TP_LSPEED, TP_LAMT, TP_LDEST, TP_LX,  /* LFO: type (off, value, tremolo, random, duck), then its four
+    TP_LTYPE, TP_LSPEED, TP_LAMT, TP_LDEST, TP_LX,  /* LFO: type (off, wave, wobble, drift, pump), then its four
                                                      * knobs as the comment below the enum says */
-    TP_LX2,                                         /* a fifth LFO value: shape (value, tremolo) or envelope (random) */
+    TP_LX2,                                         /* a fifth LFO value: shape (wave, wobble) or envelope (drift) */
     TP_PLAYER, TP_P1, TP_P2, TP_P3, TP_P4,          /* Players: off / arp / strum / hold and its four knobs */
     TP_AP1, TP_AP2, TP_AP3, TP_AP4,                 /* the arp's second page: length, style, glide, stereo */
     TP_LEVEL, TP_PAN,                               /* Mix */
@@ -43,8 +43,8 @@ enum {
     TP_DRUM0,                                       /* the drum kit: NDRUM keys * DP_N */
     NTP = TP_DRUM0 + 11 * 9
 };
-/* a drumline key: its model (drumline.h DM_*), the model's four knobs (names per model: DM_KNOB), then the
- * OP-XY's shift page random / pan / volume (-30..+20 dB, 0..127, 76 = 0 dB) and the play mode (drumline.h PM_*).
+/* a drumline key: its model (drumline.h DM_*), the model's four knobs (names per model: DM_KNOB), then
+ * random / pan / volume (-30..+20 dB, 0..127, 76 = 0 dB) and the play mode (drumline.h PM_*).
  * On a drumline track TP_A..TP_R are the track-wide drum envelope: funk (pre-attack delay), attack, random
  * (randomise every model's knobs per hit, the kick's pitch excepted), length (sustain / release scale). */
 enum { DP_MODEL, DP_K1, DP_K2, DP_K3, DP_K4, DP_RANDOM, DP_PAN, DP_VOLUME, DP_MODE, DP_N };
@@ -52,39 +52,40 @@ enum { DP_MODEL, DP_K1, DP_K2, DP_K3, DP_K4, DP_RANDOM, DP_PAN, DP_VOLUME, DP_MO
 #define NTP_SOUND TP_PLAYER                          /* a preset keeps par[0..TP_PLAYER) */
 
 enum { VM_POLY, VM_MONO, VM_LEGATO };
-/* filter types, the OP-XY's names: svf (24 dB, aggressive), ladder (Moog-like, saturating feedback), z lowpass
- * (gentle 12 dB), z hipass (12 dB), dynamic (drum tracks: low cut, compression, drive, hi cut on the
- * Filter page's four knobs instead of cutoff / res / env / keytrack) */
-enum { FT_SVF, FT_LADDER, FT_ZLP, FT_ZHP, FT_DYNAMIC, NFT };
-/* the LFO (the notebook 9.2-9.7): TP_LSPEED is one knob: 0..7 synced 2/1, 1, 1/2, 1/4, 1/8, 1/16, 1/32, 1/64
+/* filter types: lp24 (two state-variable stages, 24 dB, aggressive), ladder (Moog-like, saturating feedback),
+ * lp12 (one resonant stage, gentle 12 dB), hp12 (its high-pass), dynamic (drum tracks: low cut, compression,
+ * drive, hi cut on the Filter page's four knobs instead of cutoff / res / env / keytrack; on a synth voice a
+ * bypass), bp12 (the lp12 stage's band-pass, its peak at unity) */
+enum { FT_LP24, FT_LADDER, FT_LP12, FT_HP12, FT_DYNAMIC, FT_BP12, NFT };
+/* the LFO: TP_LSPEED is one knob: 0..7 synced 2/1, 1, 1/2, 1/4, 1/8, 1/16, 1/32, 1/64
  * (counter-clockwise), 8..127 free (clockwise, 0.1..30 Hz). Per type the five values TP_LSPEED / TP_LAMT /
  * TP_LDEST / TP_LX / TP_LX2 mean:
- *   value:   speed, amount -100..100 % (64 = 0), destination (LD_*: the module synth / envelope / filter / amp,
- *            + LD_FREE for the free-running version, as the OP-XY's list), parameter (TP_LX: the module's knob
+ *   wave:    speed, amount -100..100 % (64 = 0), destination (LD_*: the module synth / envelope / filter / amp,
+ *            + LD_FREE for the free-running version), parameter (TP_LX: the module's knob
  *            0..3: the engine's four, attack / decay / sustain / release, cutoff / reso / env / keytrack, volume /
  *            pitch / pan / -), shape (TP_LX2: square, sine, ramp, saw).
  *            100 % = the destination knob's whole range; pitch = +-12 semitones.
- *   random:  speed, amount 0..100 % (unipolar: the offset only adds), destination (LD_*), parameter (TP_LX),
+ *   drift:   speed, amount 0..100 % (unipolar: the offset only adds), destination (LD_*), parameter (TP_LX),
  *            envelope (TP_LX2: fade in / fade out, below)
- *   tremolo: rate, vibrato amount -100..100 % (64 = 0, 100 % = +-1 semitone), volume amount -100..100 % (TP_LDEST,
+ *   wobble:  rate, vibrato amount -100..100 % (64 = 0, 100 % = +-1 semitone), volume amount -100..100 % (TP_LDEST,
  *            64 = 0), envelope (TP_LX), shape (TP_LX2: sine, saw, exponential, square, blip)
- *   duck:    source (TP_LSPEED: 0..7 tracks 1-8, 8..10 brain / punch / tape, 11 metronome), amount 0..100 %,
+ *   pump:    source (TP_LSPEED: 0..7 tracks 1-8, 8..10 brain / punch / tape, 11 metronome), amount 0..100 %,
  *            hold (TP_LDEST, ms), release (TP_LX, ms)
- * Regular (not free): the LFO's phase restarts on every note of the track (random draws a fresh value too).
+ * Regular (not free): the LFO's phase restarts on every note of the track (drift draws a fresh value too).
  * The envelope knob: 64 = none; below, the LFO fades in from the note over up to 3 s (0 = 3 s, 63 = at once);
  * above, it fades out over up to 3 s (65 = 3 s, 127 = 50 ms). */
-enum { LT_OFF, LT_VALUE, LT_TREMOLO, LT_RANDOM, LT_DUCK, NLT };
+enum { LT_OFF, LT_WAVE, LT_WOBBLE, LT_DRIFT, LT_PUMP, NLT };
 enum { LD_SYNTH, LD_ENV, LD_FILTER, LD_AMP, LD_FREE = 4, NLD = 8 };   /* TP_LDEST: module, + LD_FREE = free-running */
 #define LS_SYNC_N 8                                /* TP_LSPEED values below this are synced divisions */
 enum { PL_OFF, PL_ARP, PL_STRUM, PL_HOLD, NPL };
-/* arp: P1 speed (1/4 1/4T 1/8 1/8T 1/16 1/16T 1/32 1/32T 1/64), P2 pattern (up, down, up-down 1, up-down 2 (the
- * ends repeated), as played, random), P3 range 1..4 octaves, P4 hold; its page 2 (the OP-XY's shift page) is
- * TP_AP1..AP4 = note length (short medium long), style (off A B C D E), glide (off low high), stereo (mono
- * narrow wide). strum: P1 roll 0..63 (63 = a note per sequencer step of the
+/* arp: P1 speed (1/4 1/4T 1/8 1/8T 1/16 1/16T 1/32 1/32T 1/64), P2 pattern (up, down, bounce (up and down, the
+ * ends once), bounce+ (the ends repeated), as played, random), P3 range 1..4 octaves, P4 hold; its page 2 is
+ * TP_AP1..AP4 = note length (short medium long), style (off, pedal, thirds, double, skip, swap: seq.c
+ * arp_style_pos), glide (off low high), stereo (mono narrow wide). strum: P1 roll 0..63 (63 = a note per sequencer step of the
  * track), P2 pattern (up down up-down random), P3 -, P4 hold */
 
 /* how a value is shown: a number, a percentage, bipolar (64 = 0), a name from the list, semitones, on / off,
- * milliseconds / seconds, the LFO speed (a division or Hz), 00..99 (the engine knobs, as the OP-XY prints them),
+ * milliseconds / seconds, the LFO speed (a division or Hz), 00..99 (the engine knobs),
  * Hz / kHz (cutoff), an LFO fade ("in 50 %" / "off" / "out 50 %"), dB */
 enum { PK_NUM, PK_PCT, PK_BIP, PK_NAMES, PK_SEMI, PK_SWITCH, PK_MS, PK_HZ_SYNC, PK_NN, PK_HZ, PK_FADE, PK_DB };
 typedef struct {

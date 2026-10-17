@@ -91,7 +91,7 @@ static void aux_defaults(void)
     int t, k;
     for (t = NTRK; t < NALLTRK; t++) {
         uint8_t *p = proj.trk[t].par;
-        sound_default(p, EG_SIMPLE);                     /* mix and sends at their defaults */
+        sound_default(p, EG_WEFT);                       /* mix and sends at their defaults */
         for (k = TP_ENGINE; k <= TP_E4; k++)
             p[k] = 0;
         p[TP_LEVEL] = 100;
@@ -125,7 +125,7 @@ static void aux_defaults(void)
 
 void project_defaults(void)
 {
-    static const uint8_t ORDER[NTRK] = {EG_DRUMLINE, EG_STACK, EG_SIMPLE, EG_WAVETABLE, EG_ORBIT, EG_EPIANO,
+    static const uint8_t ORDER[NTRK] = {EG_DRUMLINE, EG_STACK, EG_WEFT, EG_WAVETABLE, EG_ORBIT, EG_TINES,
                                         EG_ORGAN, EG_SYNC};
     int t, k;
     uint8_t *z = (uint8_t *)&proj, theme = proj.rsv[1];   /* a new project keeps the theme */
@@ -174,7 +174,7 @@ void project_defaults(void)
         tr->par[TP_BRAIN] = t ? 1 : 0;                    /* the melodic tracks follow the brain from the start
                                                            * (the notebook: "several tracks are routed by default") */
         tr->par[TP_CHAN] = 0;
-        tr->par[TP_SENDT] = 127;                          /* every instrument track feeds the tape (the notebook p. 131) */
+        tr->par[TP_SENDT] = 127;                          /* every instrument track feeds the tape */
     }
     aux_defaults();
     /* the master: blends off (neutral), the groups at unity, a touch of compression */

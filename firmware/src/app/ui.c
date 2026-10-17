@@ -206,10 +206,12 @@ static void set_mute(int trk, int on)
     pats.scene[cur_scene()].mute = m;
     mark_dirty();
 }
+/* a preset is the sound: the track's tape send (routing, as its level and pan) stays the track's own */
 static void load_preset(int trk, const preset_t *pr)
 {
-    uint8_t *par = proj.trk[trk].par;
+    uint8_t *par = proj.trk[trk].par, tape = par[TP_SENDT];
     memcpy(par, pr->par, NTP_SOUND);
+    par[TP_SENDT] = tape;
     for (int i = 0; i < NAME_LEN; i++)
         proj.trk[trk].name[i] = pr->name[i] ? pr->name[i] : 0;
     engine_set_all(trk);
@@ -285,9 +287,11 @@ static int preset_apply(int trk, int i)
     }
     {
         int u = i - NPRESETS;
+        uint8_t tape = proj.trk[trk].par[TP_SENDT];
         if (!user_presets[u].name[0] && !user_presets[u].par[TP_E1])
             return 0;
         memcpy(proj.trk[trk].par, user_presets[u].par, NTP_SOUND);
+        proj.trk[trk].par[TP_SENDT] = tape;
         proj.trk[trk].par[TP_ENGINE] = user_presets[u].engine;
         memcpy(proj.trk[trk].name, user_presets[u].name, NAME_LEN);
         engine_set_all(trk);
@@ -2643,7 +2647,7 @@ static void speak_dump(void)
         {"INSERTED", "S2"}, {"T3", 0}, {"SOUND", "snare"}, {"KEY", "snare"}, {"SCALE", "1/2"}, {"BAR", "2"}, {"CURSOR", "5"},
         {"OCTAVE", "+1"}, {"PRESET", "U3 stack"}, {"EFFECT", "delay"}, {"CLEARED", "notes"}, {"COPIED", "pattern"},
         {"PASTED", "pattern"}, {"WOVEN", "copied rhythm"}, {"ROTATED", "forward"}, {"DUPLICATED", "bar"}, {"NO ROOM", "four bars at most"},
-        {"SCRAMBLED", 0}, {"PRESET SAVED", "U2"}, {"RESET", "simple"}, {"SONG FULL", "64 slots"}, {"NO SLOT HERE", 0},
+        {"SCRAMBLED", 0}, {"PRESET SAVED", "U2"}, {"RESET", "weft"}, {"SONG FULL", "64 slots"}, {"NO SLOT HERE", 0},
         {"NO SONG", "white keys add scenes"}, {"LOADED", "slot 2"}, {"EMPTY SLOT", "defaults loaded"},
         {"NEW PROJECT", "unsaved"}, {"SCENE IN USE", "pick another first"}, {"ALL NOTES OFF", 0},
         {"STOP FIRST", "to change slots"}, {"FOUR SLOTS", "white keys 1 to 4"}, {"ENGINE", "stack"}, {"LIST", "nothing here"},
