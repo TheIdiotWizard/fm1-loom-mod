@@ -21,7 +21,7 @@ The bank holds 51 KB of data: about 4.1 s of sound in all (a bar at 120 BPM take
 On a track, the sample engine's (and the kit's sample model's) sample knob counts the factory samples first,
 then user 1, user 2 ...: a load replaces them all, in the order given.
 
-Protocol (firmware/src/app/samples.c): F0 7D 46 4C cmd ... F7; BEGIN 11, WRITE 12, HDR 16, END 13, ERASE 14,
+Protocol (app/samples.c): F0 7D 46 4C cmd ... F7; BEGIN 11, WRITE 12, HDR 16, END 13, ERASE 14,
 INFO 15. Needs mido and a backend (pip install mido python-rtmidi) for the device commands.
 """
 import sys

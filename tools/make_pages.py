@@ -5,13 +5,15 @@
   index.html                    what LOOM-8 is, and the ways in: try, install, download, manual, source
   manual/index.html             docs/MANUAL.md as a page (tools/make_manual.py), its screenshots in img/
   img/                          screenshots (docs/img)
-  emu/                          LOOM-8 in the browser (build/emu, from web/emu/build.sh)
-  words/                        the screen reader's words files (web/words, from firmware/words.tsv)
-  install/index.html            the web installer (web/xy_installer.html, with fm1pkg.js, fm1ota.js and
+  emu/                          LOOM-8 in the browser (app/build/emu, from ./build.sh --web)
+  words/                        the screen reader's words files (app/web/words, from app/words.tsv)
+  install/index.html            the web installer (fm1-base's web/installer.html, with fm1pkg.js, fm1ota.js and
                                 the package's metadata inlined; Chrome or Edge, Web MIDI)
+  backup/index.html             backup and restore in the browser (fm1-base's web/backup/index.html: the projects and
+                                the user presets)
   firmware/loom-VERSION.fwsc    the package the installer writes; also the download
 
-  tools/make_pages.py build/loom-0.1.fwsc 0.1 OUT_DIR
+  tools/make_pages.py app/build/loom-0.1.fwsc 0.1 OUT_DIR
 
 The package must be a release build (./build.sh --release X.Y): its identity, FM-1_10XXYYZZ, is what
 the installer checks the download against and what the FM-1 reports after the install."""
@@ -24,8 +26,9 @@ import sys
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SRC / "web"))
-from make_site import product_of, strip_module  # noqa: E402  (Felucca's: the package format)
+sys.path.insert(0, str(SRC / "base" / "tools"))
+import make_site as base_site  # noqa: E402  (fm1-base's: the installer, the backup page, the package format)
+from make_site import product_of, strip_module  # noqa: E402
 
 REPO = "https://github.com/charlesvestal/fm1-loom"
 TRACKS = ["#ff5caa", "#28ccc0", "#f4c83c", "#6898ff", "#ff8840", "#6ed86e", "#b288ff", "#d6b088"]
@@ -83,13 +86,14 @@ patterns into a third.</p>
   <img src="img/screen-weave.png" width="240" height="240" alt="The Steps list with WEAVE WITH COPIED picked, its way set to rhythm">
 </div>
 <div class="status"><strong>Version __VERSION__.</strong> It installs and
-uninstalls the way Felucca and X0X do, and the installer can put M-VAVE's own firmware back. Installing is at your own risk.</div>
+uninstalls the way every fm1-base firmware does, and the installer can put M-VAVE's own firmware back. Installing is at your own risk.</div>
 <nav class="ways" aria-label="Get LOOM-8">
   <a href="emu/"><strong>Try it in the browser</strong><span>The same code the FM-1 runs, with sound. No FM-1 needed.</span></a>
   <a href="manual/"><strong>Read the manual</strong><span>A ten-minute quick start, every page and gesture, with screenshots.</span></a>
   <a href="install/"><strong>Install</strong><span>From Chrome or Edge, with the FM-1 connected by USB. Nothing to install on the computer.</span></a>
-  <a href="firmware/__PKG__"><strong>Download __PKG__</strong><span>For the command-line installer: <code>python3 tools/fm1_install.py __PKG__</code></span></a>
-  <a href="__REPO__"><strong>Source</strong><span>GitHub, GPL-3.0. Built on Felucca by Hügelton Instruments.</span></a>
+  <a href="backup/"><strong>Backup</strong><span>Save your projects and presets to a file, and load them back later.</span></a>
+  <a href="firmware/__PKG__"><strong>Download __PKG__</strong><span>For the command-line installer: <code>python3 base/tools/fm1_install.py __PKG__</code></span></a>
+  <a href="__REPO__"><strong>Source</strong><span>GitHub, GPL-3.0. Built on fm1-base and felucca-bsp, from Felucca by Leo Kuroshita (Hügelton Instruments).</span></a>
 </nav>
 
 <h2>What's in it</h2>
@@ -124,17 +128,25 @@ def main(pkg, version, out):
     name = f"loom-{re.sub(r'[^A-Za-z0-9.-]', '-', version)}.fwsc"
     if out.exists():
         shutil.rmtree(out)
-    for d in ("install", "firmware"):
+    for d in ("install", "firmware", "backup"):
         (out / d).mkdir(parents=True)
     shutil.copy(pkg, out / "firmware" / name)
-    page = (SRC / "web" / "xy_installer.html").read_text(encoding="utf-8")
-    lib = strip_module((SRC / "web" / "fm1pkg.js").read_text(encoding="utf-8")) + "\n" + \
-        strip_module((SRC / "web" / "fm1ota.js").read_text(encoding="utf-8"))
+    page = (SRC / "base" / "web" / "installer.html").read_text(encoding="utf-8")
+    lib = strip_module((SRC / "base" / "web" / "fm1pkg.js").read_text(encoding="utf-8")) + "\n" + \
+        strip_module((SRC / "base" / "web" / "fm1ota.js").read_text(encoding="utf-8"))
     meta = json.dumps({"version": version, "product": product, "pkg": "../firmware/" + name})
     for mark in ("/*LIB*/", "/*META*/"):
         if page.count(mark) != 1:
-            raise SystemExit(f"xy_installer.html must contain {mark} once")
+            raise SystemExit(f"base/web/installer.html must contain {mark} once")
+    conf = base_site.read_conf(SRC / "app" / "fm1.toml")
+    credits = conf.get("credits", "").replace("Built on fm1-base and felucca-bsp, from Felucca by Leo Kuroshita (Hügelton "
+                                              "Instruments). ", "")        # (the page says that part itself)
+    for key, val in (("NAME", "LOOM-8"), ("REPO", REPO), ("REPO_SHORT", REPO.replace("https://", "")),
+                     ("LICENSE", conf.get("licence", "GPL-3.0-only")), ("CREDITS", " " + credits if credits else "")):
+        page = page.replace("{{" + key + "}}", val)
     (out / "install" / "index.html").write_text(page.replace("/*LIB*/", lib).replace("/*META*/", meta), encoding="utf-8")
+    tools = base_site.tool_pages(SRC / "app", conf, {"NAME": "LOOM-8"})
+    (out / "backup" / "index.html").write_text(tools["backup/index.html"], encoding="utf-8")
     shutil.copytree(SRC / "docs" / "img", out / "img")
     threads = "".join(f'<span style="background:{c}"></span>' for c in TRACKS)
     (out / "index.html").write_text(LANDING.replace("__VERSION__", html.escape(version)).replace("__PKG__", name)
@@ -144,14 +156,14 @@ def main(pkg, version, out):
                     str(out / "manual" / "index.html")], check=True)
     for f in (out / "manual" / "index.html",):    # the manual's pictures are the site's img/
         f.write_text(f.read_text(encoding="utf-8").replace('src="img/', 'src="../img/'), encoding="utf-8")
-    emu = SRC / "build" / "emu"
-    if not (emu / "xy.wasm").exists():
-        raise SystemExit("no build/emu/xy.wasm: run web/emu/build.sh (needs Emscripten)")
+    emu = SRC / "app" / "build" / "emu"
+    if not (emu / "app.wasm").exists():
+        raise SystemExit("no app/build/emu/app.wasm: run ./build.sh --web (needs Emscripten)")
     shutil.copytree(emu, out / "emu")
     # the screen reader's words files (fm1-reader): every one ever made, for the devices that point at them
-    shutil.copytree(SRC / "web" / "words", out / "words")
+    shutil.copytree(SRC / "app" / "web" / "words", out / "words")
     (out / ".nojekyll").write_text("")
-    print(f"site: {out}: index.html, manual/, install/ ({product}), emu/, words/, firmware/{name} ({len(raw)} B)")
+    print(f"site: {out}: index.html, manual/, install/ ({product}), backup/, emu/, words/, firmware/{name} ({len(raw)} B)")
 
 
 if __name__ == "__main__":

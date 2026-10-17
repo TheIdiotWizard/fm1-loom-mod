@@ -10,9 +10,9 @@ PY="${PYTHON:-python3}"
 mkdir -p build/gen build/host
 [ -f build/gen/wavetables.h ] || "$PY" tools/gen_wavetables.py build/gen/wavetables.h
 [ -f build/gen/samples.h ] || "$PY" tools/gen_samples.py build/gen/samples.h >/dev/null
-$CC -O2 -ffp-contract=off -std=c99 -Wall -Wextra -Wdouble-promotion -Werror -DXY_HOST -Ifirmware/src/dsp -Ibuild/gen \
-    -o build/host/dsp_hash tests/host/dsp_hash.c firmware/src/dsp/synth.c firmware/src/dsp/drumline.c \
-    firmware/src/dsp/sample.c firmware/src/dsp/fx.c
+$CC -O2 -ffp-contract=off -std=c99 -Wall -Wextra -Wdouble-promotion -Werror -DPLAT_HOST -Iapp/dsp -Ibase/include -Ibuild/gen \
+    -o build/host/dsp_hash tests/host/dsp_hash.c app/dsp/synth.c app/dsp/drumline.c \
+    app/dsp/sample.c app/dsp/fx.c
 build/host/dsp_hash > build/host/dsp_hash.txt
 if [ "${1:-}" = save ]; then
     cp build/host/dsp_hash.txt build/host/dsp_hash.ref

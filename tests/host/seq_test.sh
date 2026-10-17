@@ -7,7 +7,7 @@ set -eu
 cd "$(dirname "$0")/../.."
 CC="${CC:-cc}"
 mkdir -p build/host
-$CC -O2 -ffp-contract=off -std=c99 -Wall -Wextra -Wdouble-promotion -Werror -DXY_HOST \
-    -Ifirmware/src -Ifirmware/src/seq -Ifirmware/src/dsp \
-    -o build/host/seq_test tests/host/seq_test.c firmware/src/seq/seq.c firmware/src/seq/pattern.c
+$CC -O2 -ffp-contract=off -std=c99 -Wall -Wextra -Wdouble-promotion -Werror -DPLAT_HOST \
+    -Iapp -Iapp/seq -Iapp/dsp -Ibase/include \
+    -o build/host/seq_test tests/host/seq_test.c app/seq/seq.c app/seq/pattern.c
 build/host/seq_test

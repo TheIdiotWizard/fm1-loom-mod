@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* The factory presets for tools/render_presets.sh: for each preset a script for build/host/xy_host that
+/* The factory presets for tools/render_presets.sh: for each preset a script for app/build/host/loom_host that
  * loads it onto track 2 of a new project (the default FX I delay and FX II reverb) and plays a short phrase: three notes, then a four-note chord held, then its
  * tail; basses an octave down. And the same phrase through the voices alone (dsp/synth.c, dry, the
  * track's level at 100), its peak, RMS and loudest 100 ms in dBFS into OUTDIR/dry.txt: the levels to balance the presets

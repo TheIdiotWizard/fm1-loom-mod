@@ -11,14 +11,15 @@ cd "$(dirname "$0")/.."
 CC="${CC:-cc}"
 PY="${PYTHON:-python3}"
 OUT=build/presets
-sh host/build_host.sh >/dev/null
+PYTHON="$PY" sh build.sh --host >/dev/null
 mkdir -p "$OUT"
 rm -f "$OUT"/*.wav "$OUT"/*.xy
-$CC -O2 -std=c99 -DXY_HOST -Ifirmware/src/dsp -Ifirmware/src -Ibuild/gen -o build/host/preset_scripts \
-    tools/preset_scripts.c firmware/src/dsp/synth.c firmware/src/dsp/drumline.c firmware/src/dsp/sample.c -lm
+mkdir -p build/host
+$CC -O2 -std=c99 -DPLAT_HOST -Iapp/dsp -Iapp -Ibase/include -Iapp/build/gen -o build/host/preset_scripts \
+    tools/preset_scripts.c app/dsp/synth.c app/dsp/drumline.c app/dsp/sample.c -lm
 names=$(build/host/preset_scripts "$OUT")
 for n in $names; do
-    build/host/xy_host "$OUT/$n.xy" "$OUT" >/dev/null || { echo "render failed: $n"; exit 1; }
+    app/build/host/loom_host "$OUT/$n.xy" "$OUT" >/dev/null || { echo "render failed: $n"; exit 1; }
 done
 "$PY" tools/preset_levels.py "$OUT" $names
 echo "presets: $OUT/index.html, $OUT/levels.txt"

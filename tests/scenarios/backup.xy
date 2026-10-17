@@ -1,0 +1,42 @@
+# Backup and restore over USB (fm1-base's backup.c; the simulator makes and takes its image): the three project
+# slots and the user presets, as saved. A project saved at one tempo, backed up, saved again at another; the backup
+# put back: the first tempo, also after a restart. Refused while playing (STOP FIRST) and when the file is damaged.
+wait 300
+tap HOME
+expect page Arrange
+spin K1 20
+wait 40
+expect tempo 140
+tap SAVE
+wait 100
+expect dirty 0
+backup out:loom.bkp
+spin K1 -40
+wait 40
+expect tempo 100
+tap SAVE
+wait 100
+reboot
+wait 300
+expect tempo 100
+listen
+tap PLAY
+wait 200
+restore out:loom.bkp
+expect restore_rc 10
+said STOP FIRST
+tap PLAY
+wait 200
+restore out:loom.bkp
+expect restore_rc 0
+wait 100
+expect tempo 140
+expect dirty 0
+reboot
+wait 300
+expect tempo 140
+backup out:damaged.bkp
+backup_damage out:damaged.bkp
+restore out:damaged.bkp
+expect restore_rc >0
+expect tempo 140

@@ -4,6 +4,6 @@
 set -eu
 cd "$(dirname "$0")/../.."
 mkdir -p build/host
-${CC:-cc} -O2 -ffp-contract=off -std=c99 -Wall -Wextra -Wdouble-promotion -Werror -DXY_HOST -Ifirmware/src/dsp \
-    -o build/host/fx_test tests/host/fx_test.c firmware/src/dsp/fx.c
+${CC:-cc} -O2 -ffp-contract=off -std=c99 -Wall -Wextra -Wdouble-promotion -Werror -DPLAT_HOST -Iapp/dsp -Ibase/include \
+    -o build/host/fx_test tests/host/fx_test.c app/dsp/fx.c
 build/host/fx_test

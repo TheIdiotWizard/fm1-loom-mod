@@ -13,8 +13,8 @@ OUT=build/drum_renders
 mkdir -p "$OUT" build/gen build/host
 "$PY" tools/gen_samples.py build/gen/samples.h "$OUT/factory" >/dev/null
 [ -f build/gen/wavetables.h ] || "$PY" tools/gen_wavetables.py build/gen/wavetables.h >/dev/null
-$CC -O2 -std=c99 -DXY_HOST -Ifirmware/src/dsp -Ibuild/gen -o build/host/render_drums tools/render_drums.c \
-    firmware/src/dsp/drumline.c firmware/src/dsp/synth.c firmware/src/dsp/sample.c -lm
+$CC -O2 -std=c99 -DPLAT_HOST -Iapp/dsp -Ibase/include -Ibuild/gen -o build/host/render_drums tools/render_drums.c \
+    app/dsp/drumline.c app/dsp/synth.c app/dsp/sample.c -lm
 rm -f "$OUT"/*.wav
 build/host/render_drums "$OUT"
 sh tools/render_presets.sh >/dev/null

@@ -3,7 +3,7 @@
 # Instruments (Felucca's sample helpers).
 """LOOM-8's sample helpers, shared by tools/gen_samples.py (the factory bank compiled into the image) and
 tools/loom_samples.py (the user bank, uploaded over USB): WAV reading, resampling, IMA ADPCM with
-checkpoints, and the user bank's layout (firmware/src/dsp/sample.h).
+checkpoints, and the user bank's layout (app/dsp/sample.h).
 
 A sample is mono IMA ADPCM at 22050 Hz, 4 bits a sample, the low nibble first, from predictor 0 / index 0.
 Every SMP_BLK (64) samples a checkpoint: the decoder's state before that sample, (predictor & 0xFFFF) |

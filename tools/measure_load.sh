@@ -18,13 +18,12 @@
 # (the project shows unsaved: do not save it). Each case waits for the load's average to settle and reads
 # it three times (the median). A table is printed and appended to build/measure_load.csv with the label
 # (the firmware, e.g. --label "main" or --label "ram-dsp"), so builds can be compared:
-#   ./build.sh && python3 tools/fm1_install.py build/loom.fwsc --yes && tools/measure_load.sh --label default
-#   XY_RAM_DSP=1 ./build.sh && python3 tools/fm1_install.py build/loom.fwsc --yes && tools/measure_load.sh --label ram-dsp
-# FM1_REMOTE: the path of fm1_remote.py (default ../fm1-base/tools/fm1_remote.py); needs mido + python-rtmidi.
+#   ./build.sh && python3 base/tools/fm1_install.py app/build/loom.fwsc --yes && tools/measure_load.sh --label default
+# FM1_REMOTE: the path of fm1_remote.py (default base/tools/fm1_remote.py); needs mido + python-rtmidi.
 set -eu
 cd "$(dirname "$0")/.."
 PY="${PYTHON:-python3}"
-REMOTE="${FM1_REMOTE:-../fm1-base/tools/fm1_remote.py}"
+REMOTE="${FM1_REMOTE:-base/tools/fm1_remote.py}"
 [ -f "$REMOTE" ] || { echo "measure_load: no $REMOTE (set FM1_REMOTE)"; exit 1; }
 mkdir -p build
 exec "$PY" - "$REMOTE" "$@" <<'PY'

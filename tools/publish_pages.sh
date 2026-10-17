@@ -2,14 +2,16 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Build the GitHub Pages site for release VERSION (tools/make_pages.py) and push it to the gh-pages
 # branch of origin, replacing what was there (the branch holds only the generated site).
-#   tools/publish_pages.sh 0.1-beta          (after ./build.sh --release 0.1-beta)
+#   tools/publish_pages.sh 0.1-beta          (after ./build.sh --release 0.1-beta; PYTHON: one with Pillow)
 set -e
 cd "$(dirname "$0")/.."
 V="${1:?usage: tools/publish_pages.sh VERSION}"
-PKG="build/loom-$V.fwsc"
+PY="${PYTHON:-python3}"
+PKG="app/build/loom-$V.fwsc"
 [ -f "$PKG" ] || { echo "no $PKG: run ./build.sh --release $V first"; exit 1; }
-XY_VERSION="$V" sh web/emu/build.sh
-python3 tools/make_pages.py "$PKG" "$V" build/pages
+PYTHON="$PY" sh build.sh --web --release "$V"
+node tests/host/emu_test.mjs app/build/emu/app.wasm
+"$PY" tools/make_pages.py "$PKG" "$V" build/pages
 REMOTE="$(git remote get-url origin)"
 SHA="$(git rev-parse --short HEAD)"
 cd build/pages

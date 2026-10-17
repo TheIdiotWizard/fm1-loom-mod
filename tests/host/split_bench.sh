@@ -8,7 +8,7 @@ PY="${PYTHON:-python3}"
 mkdir -p build/gen build/host
 [ -f build/gen/wavetables.h ] || "$PY" tools/gen_wavetables.py build/gen/wavetables.h
 [ -f build/gen/samples.h ] || "$PY" tools/gen_samples.py build/gen/samples.h >/dev/null
-${CC:-cc} -O2 -ffp-contract=off -std=c99 -Wall -Wextra -Wdouble-promotion -Werror -DXY_HOST -Ifirmware/src/dsp -Ibuild/gen \
-    -o build/host/split_bench tests/host/split_bench.c firmware/src/dsp/synth.c firmware/src/dsp/drumline.c \
-    firmware/src/dsp/sample.c
+${CC:-cc} -O2 -ffp-contract=off -std=c99 -Wall -Wextra -Wdouble-promotion -Werror -DPLAT_HOST -Iapp/dsp -Ibase/include -Ibuild/gen \
+    -o build/host/split_bench tests/host/split_bench.c app/dsp/synth.c app/dsp/drumline.c \
+    app/dsp/sample.c
 build/host/split_bench

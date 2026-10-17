@@ -9,12 +9,12 @@ set -e
 cd "$(dirname "$0")/.."
 PY="${PYTHON:-python3}"
 OUT=build/slice_renders
-sh host/build_host.sh >/dev/null
+PYTHON="$PY" sh build.sh --host >/dev/null
 "$PY" tools/gen_samples.py build/gen/samples.h build/gen/wav >/dev/null
 mkdir -p "$OUT"
 rm -f "$OUT"/*.wav "$OUT"/*.png
 cp build/gen/wav/break.wav "$OUT/break_22k.wav"
-build/host/xy_host tests/scenarios/slice.xy "$OUT" >/dev/null || { echo "slice.xy failed"; exit 1; }
+app/build/host/loom_host tests/scenarios/slice.xy "$OUT" >/dev/null || { echo "slice.xy failed"; exit 1; }
 {
     echo '<!doctype html><meta charset="utf-8"><title>LOOM-8 slice renders</title>'
     echo '<style>body{font:15px system-ui;margin:24px;max-width:760px}li{margin:10px 0}audio{display:block;width:100%}</style>'
