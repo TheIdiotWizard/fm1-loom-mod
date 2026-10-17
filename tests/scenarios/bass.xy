@@ -40,13 +40,13 @@ tap OCT+
 wait 40
 shot bass_chance.png
 key w6 up
-# a lock: hold step 11, press FX, turn K1 (cutoff)
+# a lock: hold step 11, press FX (the Character page's knobs), turn K2 (the amount)
 key w10 down
 wait 100
 tap FX
 wait 40
 shot bass_lock.png
-spin K1 -20
+spin K2 -20
 key w10 up
 wait 40
 shot bass_done.png

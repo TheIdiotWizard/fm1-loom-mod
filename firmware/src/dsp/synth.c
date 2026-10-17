@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* LOOM-8 voices: sixteen voices playing eight engines (synth.h), each with two ADSRs, a filter (six
- * types), a steal fade and sends; per track an LFO, a mono stack, parameter locks and
+ * types), a character stage (six types: drive, fold, crush, ring, tilt, rectify), a steal fade and sends; per track an LFO, a mono stack, parameter locks and
  * performance offsets.
  *
  * Time runs in SY_CHUNK (64-sample) chunks: at a chunk boundary a voice reads its track's parameters
@@ -73,12 +73,18 @@ static const char *const SYNC_N[LS_SYNC_N] = {"2/1", "1", "1/2", "1/4", "1/8", "
 static const float SYNC_BEATS[LS_SYNC_N] = {8.0f, 4.0f, 2.0f, 1.0f, 0.5f, 0.25f, 0.125f, 0.0625f};
 static const char *const ENVP_N[4] = {"attack", "decay", "sustain", "release"};
 static const char *const FLTP_N[4] = {"cutoff", "reso", "env", "keytrack"};
-static const char *const AMPP_N[4] = {"volume", "pitch", "pan", "-"};
+static const char *const AMPP_N[4] = {"volume", "pitch", "pan", "character"};
+static const char *const CTYPE_N[NCT] = {"off", "drive", "fold", "crush", "ring", "tilt", "rectify"};
+/* ring: the modulator's ratios to the note, tone / 8 */
+static const float RING_R[16] = {0.25f, 0.5f, 0.75f, 1.0f, 1.25f, 1.414f, 1.5f, 1.75f, 2.0f, 2.5f, 2.76f, 3.0f, 3.5f,
+                                 4.0f, 5.0f, 7.0f};
+static const char *const RING_N[16] = {"0.25:1", "0.5:1", "0.75:1", "1:1", "1.25:1", "1.41:1", "1.5:1", "1.75:1", "2:1",
+                                       "2.5:1", "2.76:1", "3:1", "3.5:1", "4:1", "5:1", "7:1"};   /* (as stack's ratio) */
 /* the LFO's module / knob to a parameter index */
 static const int16_t LD_TP[4][4] = {{TP_E1, TP_E2, TP_E3, TP_E4},
                                     {TP_A, TP_D, TP_S, TP_R},
                                     {TP_CUT, TP_RES, TP_FENV, TP_KTRK},
-                                    {TP_VOLUME, LD_PITCH, TP_PAN, LD_NONE}};
+                                    {TP_VOLUME, LD_PITCH, TP_PAN, TP_CAMT}};
 
 /* --------------------------------------------------------------- structs --- */
 enum { ENV_OFF, ENV_ATTACK, ENV_DECAY, ENV_SUSTAIN, ENV_RELEASE };
@@ -98,7 +104,9 @@ typedef struct {
     float e[4];                       /* the engine knobs 0..1 */
     float ek[4];                      /* the same, raw (the discrete knobs: 1..8, a table index) */
     float ex[20];                     /* the engine's derived values (eng_prep) */
+    float cx[8];                      /* the character stage's values for the chunk (char_prep) */
     uint8_t ftype, stereo, mute, eng;
+    uint8_t ctype;                    /* the character stage running (CT_OFF: skipped, also at mix 0) */
 } cfg_t;
 
 typedef struct {
@@ -125,6 +133,7 @@ typedef struct {
     float pan_in, pan_l, pan_r;       /* the pan the gains were made from, and those gains */
     float pitch_in, e_in[4];          /* the pitch and the knobs the frequency and increments were made from */
     float o[16];                      /* the engine's state */
+    float cz[6];                      /* the character stage's: low-pass / hold L R, DC L R, phase, - */
 } voice_t;
 
 typedef struct {
@@ -917,6 +926,8 @@ static void voice_take(synth_t *s, int vi, int trk, int note, int vel, int glide
         v->amp.level = v->flt.level = 0.0f;
         for (i = 0; i < 8; i++)
             v->f[i] = 0.0f;
+        for (i = 0; i < 6; i++)
+            v->cz[i] = 0.0f;
         v->amp_cur = 0.0f;
         v->glc = v->grc = 0.0f;
         voice_start(s, v, note, vel, glide_ms, tag, 1, 0);
@@ -1250,6 +1261,232 @@ void synth_prepare(synth_t *s, uint32_t n)
     s->pos = (uint16_t)((s->pos + n) % SY_CHUNK);
 }
 
+/* ------------------------------------------------------ the character --- */
+/* the character stage's chunk values (synth.h CT_*): c.cx[] from the four knobs, the LFO's offset on the
+ * amount, and the note's frequency (ring). The state (cz) starts from 0 when the type changes. */
+static inline float sat_c(float x)               /* a soft saturation (tanh-like, cubic): flat at +-1 from |x| = 1.5 */
+{
+    x = fm_clampf(x, -1.5f, 1.5f);
+    return x - x * x * x * (4.0f / 27.0f);
+}
+static inline float sin_q(float ph)              /* a quick sine of a phase in turns (any), within 0.1 %: the folder's */
+{
+    float x = ph - fm_floorf(ph + 0.5f), y = 8.0f * x - 16.0f * x * fm_fabsf(x);
+    return y + 0.225f * (y * fm_fabsf(y) - y);
+}
+static float ch_lp_hz(float t) { return 400.0f * fm_exp2f(t * 5.64385619f); }      /* tone 0..1: 400 Hz .. 20 kHz */
+static float ch_pivot_hz(float a) { return 150.0f * fm_exp2f(a * 5.32192809f); }   /* amount 0..1: 150 Hz .. 6 kHz */
+static float ch_alpha(float hz) { return hz >= 19000.0f ? 1.0f : 1.0f - fm_expf(-FM_TWO_PI * hz * INV_SR); }
+#define CH_DC (FM_TWO_PI * 12.0f * INV_SR)       /* the DC blocker's one-pole: 12 Hz */
+#define CH_REF 0.7f                              /* the drive keeps the level of a peak here (an engine's, about) */
+#define CH_FOLD 0.6f                             /* the fold's level once it folds (a folded wave's RMS: about a saw's) */
+/* the type's values from the amount and tone (0..1) and the note's frequency (ring). tc: the tone as -1..1,
+ * 0 at 64 exactly (the page prints it so: the fold's bias, the crush's balance, the tilt) */
+static void char_coefs(int type, float a, float t, float freq, float *x)
+{
+    float tc = fm_clampf((t * 127.0f - 64.0f) * (1.0f / 63.0f), -1.0f, 1.0f);
+    switch (type) {
+    case CT_DRIVE: {                             /* gain 0.25 .. 32 (-12 .. +30 dB), made up at CH_REF */
+        float g = 0.25f * fm_exp2f(a * 7.0f);
+        x[0] = g;
+        x[1] = CH_REF / sat_c(g * CH_REF) * (1.0f - 0.25f * a);   /* (squarer as it drives: a little less) */
+        x[2] = ch_alpha(ch_lp_hz(t));
+        break;
+    }
+    case CT_FOLD: {                              /* sin(pi/2 (g x + bias)): g 0.3 .. 8, the bias +-1 */
+        float g = 0.3f * fm_exp2f(a * 4.74f), b = tc;
+        x[0] = g * 0.25f;                        /* (in turns) */
+        x[1] = fm_maxf(CH_FOLD, 2.0f / (FM_PI * g));   /* small g: linear, unity; large: about the input's level */
+        x[3] = b * 0.25f;
+        x[4] = fm_sin_turns(b * 0.25f);          /* the output at x = 0: taken off, so silence stays silent */
+        x[5] = CH_DC;
+        break;
+    }
+    case CT_CRUSH: {                             /* bits 16 .. 3 and the rate / 1 .. / 45, by the balance */
+        float wb = fm_minf(1.0f, 1.0f + tc), wr = fm_minf(1.0f, 1.0f - tc);
+        float q = fm_exp2f(15.0f - a * wb * 13.0f);
+        x[0] = q;
+        x[1] = 1.0f / q;
+        x[2] = fm_exp2f(-a * wr * 5.5f);
+        break;
+    }
+    case CT_RING: {                              /* x (1 - d + d sin): the level made up for the depth */
+        int k = (int)(t * 127.0f + 0.5f) >> 3;   /* (as tp_text_par prints it) */
+        float w = fm_minf(freq * RING_R[k < 0 ? 0 : k > 15 ? 15 : k] * INV_SR, 0.45f) * FM_TWO_PI;
+        float m = fm_rsqrtf((1.0f - a) * (1.0f - a) + 0.5f * a * a);
+        x[0] = (1.0f - a) * m;
+        x[1] = a * m;
+        x[2] = fm_cosf(w);                       /* the sine as a rotating phasor: cz[4] + i cz[5] */
+        x[3] = fm_sinf(w);
+        x[5] = CH_DC;
+        break;
+    }
+    case CT_TILT: {                              /* lows x 2^-tilt, highs x 2^tilt about the pivot */
+        float tl = tc;
+        x[0] = ch_alpha(ch_pivot_hz(a));
+        x[1] = fm_exp2f(-tl);
+        x[2] = fm_exp2f(tl);
+        break;
+    }
+    default: {                                   /* rectify: x .. max(x, 0) .. |x|, its DC off, made up */
+        x[0] = a;
+        x[1] = 1.0f + 1.6f * a - 0.3f * a * a;
+        x[2] = ch_alpha(ch_lp_hz(t));
+        x[5] = CH_DC;
+        break;
+    }
+    }
+}
+static void char_prep(synth_t *s, voice_t *v, int dest, float off)
+{
+    cfg_t *c = &v->c;
+    int trk = v->trk, type = P(s, trk, TP_CTYPE), mix = P(s, trk, TP_CMIX), i;
+    if (type >= NCT || mix == 0)
+        type = CT_OFF;
+    if (type != c->ctype) {
+        for (i = 0; i < 6; i++)
+            v->cz[i] = 0.0f;
+        c->ctype = (uint8_t)type;
+    }
+    if (type == CT_OFF)
+        return;
+    c->cx[7] = fm_minf((float)mix, 127.0f) * (1.0f / 127.0f);
+    char_coefs(type, fm_minf(pf(s, trk, TP_CAMT, dest, off), 127.0f) * (1.0f / 127.0f),
+               fm_minf((float)P(s, trk, TP_CTONE), 127.0f) * (1.0f / 127.0f), c->freq, c->cx);
+    if (type == CT_RING) {                       /* the phasor back to unit length, once a chunk (or at 1 + 0i) */
+        float re = v->cz[4], im = v->cz[5], r2 = re * re + im * im, g = r2 > 0.5f ? fm_rsqrtf(r2) : 0.0f;
+        v->cz[4] = g > 0.0f ? re * g : 1.0f;
+        v->cz[5] = im * g;
+    }
+}
+
+/* the Character page's picture (synth.h) */
+float char_picture(const uint8_t *par, float u)
+{
+    int type = par[TP_CTYPE] < NCT ? par[TP_CTYPE] : CT_OFF;
+    float a = (float)(par[TP_CAMT] & 127) * (1.0f / 127.0f), t = (float)(par[TP_CTONE] & 127) * (1.0f / 127.0f);
+    float wet = (float)(par[TP_CMIX] & 127) * (1.0f / 127.0f), x[8], d = u, y = u;
+    char_coefs(type, a, t, 220.0f, x);
+    switch (type) {
+    case CT_DRIVE: y = sat_c(u * x[0]) * x[1]; break;
+    case CT_FOLD: y = (sin_q(u * x[0] + x[3]) - x[4]) * x[1]; break;
+    case CT_RECTIFY: y = u + x[0] * (fm_fabsf(u) - u); break;
+    case CT_CRUSH: {                             /* a cycle of 200 samples, held and quantised */
+        float hold = 1.0f / x[2], n = fm_floorf(u * 200.0f / hold) * hold;
+        d = 0.9f * fm_sin_turns(u);
+        y = fm_floorf(0.9f * fm_sin_turns(n * (1.0f / 200.0f)) * x[0] + 0.5f) * x[1];
+        break;
+    }
+    case CT_RING: {                              /* two cycles of a sine, times the modulator (its peak at 1) */
+        int k = (par[TP_CTONE] & 127) >> 3;
+        d = fm_sin_turns(2.0f * u);
+        y = d * (x[0] + x[1] * fm_sin_turns(2.0f * u * RING_R[k])) / (x[0] + x[1]);
+        break;
+    }
+    case CT_TILT: {                              /* the response, 50 Hz .. 20 kHz: dB / 6 */
+        float w = 50.0f * fm_exp2f(u * 8.64385619f) / ch_pivot_hz(a), w2 = w * w;
+        d = 0.0f;
+        y = 3.01029996f * fm_log2f((x[1] * x[1] + x[2] * x[2] * w2) / (1.0f + w2)) * (1.0f / 6.0f);
+        break;
+    }
+    default: return u;
+    }
+    return d + wet * (y - d);
+}
+
+/* one sample of one side through the stage: d dry, back the mix of it and the effect. lp / dc: that side's
+ * states; mod: the ring's gain this sample; upd: the crush's hold takes a new sample */
+SY_INLINE float char_one(float d, const int type, float c0, float c1, float c2, float c3, float c4, float c5, float wet,
+                         float *lp, float *dc, float mod, int upd)
+{
+    float y;
+    switch (type) {
+    case CT_DRIVE:
+        y = sat_c(d * c0) * c1;
+        *lp += c2 * (y - *lp);
+        y = *lp;
+        break;
+    case CT_FOLD:
+        y = (sin_q(d * c0 + c3) - c4) * c1;
+        *dc += c5 * (y - *dc);
+        y -= *dc;
+        break;
+    case CT_CRUSH:
+        if (upd)
+            *lp = fm_floorf(d * c0 + 0.5f) * c1;
+        y = *lp;
+        break;
+    case CT_RING:                                /* (a sine times its own pitch has DC: blocked) */
+        y = d * mod;
+        *dc += c5 * (y - *dc);
+        y -= *dc;
+        break;
+    case CT_TILT:
+        *lp += c0 * (d - *lp);
+        y = *lp * c1 + (d - *lp) * c2;
+        break;
+    default:                                     /* rectify */
+        y = d + c0 * (fm_fabsf(d) - d);
+        *dc += c5 * (y - *dc);
+        y = (y - *dc) * c1;
+        *lp += c2 * (y - *lp);
+        y = *lp;
+        break;
+    }
+    (void)c4;
+    return d + wet * (y - d);
+}
+SY_INLINE void char_loop(voice_t *v, float *xl, float *xr, int k, const int type, const int stereo)
+{
+    const float *cx = v->c.cx;
+    const float c0 = cx[0], c1 = cx[1], c2 = cx[2], c3 = cx[3], c4 = cx[4], c5 = cx[5], wet = cx[7];
+    float z0 = v->cz[0], z1 = v->cz[1], z2 = v->cz[2], z3 = v->cz[3], ph = v->cz[4], qi = v->cz[5];
+    int j;
+    for (j = 0; j < k; j++) {
+        float mod = 0.0f;
+        int upd = 0;
+        if (type == CT_RING) {                   /* (ph, qi): the phasor, turned a step */
+            float nr = ph * c2 - qi * c3;
+            qi = ph * c3 + qi * c2;
+            ph = nr;
+            mod = c0 + c1 * qi;
+        } else if (type == CT_CRUSH) {
+            ph += c2;
+            if (ph >= 1.0f) {
+                ph -= 1.0f;
+                upd = 1;
+            }
+        }
+        xl[j] = char_one(xl[j], type, c0, c1, c2, c3, c4, c5, wet, &z0, &z2, mod, upd);
+        if (stereo)
+            xr[j] = char_one(xr[j], type, c0, c1, c2, c3, c4, c5, wet, &z1, &z3, mod, upd);
+    }
+    v->cz[0] = fm_flush(z0);
+    v->cz[1] = fm_flush(z1);
+    v->cz[2] = fm_flush(z2);
+    v->cz[3] = fm_flush(z3);
+    v->cz[4] = ph;
+    v->cz[5] = qi;
+}
+static void char_run(voice_t *v, float *xl, float *xr, int k)
+{
+    switch (v->c.ctype * 2 + (v->c.stereo != 0)) {
+    case CT_DRIVE * 2: char_loop(v, xl, xr, k, CT_DRIVE, 0); break;
+    case CT_DRIVE * 2 + 1: char_loop(v, xl, xr, k, CT_DRIVE, 1); break;
+    case CT_FOLD * 2: char_loop(v, xl, xr, k, CT_FOLD, 0); break;
+    case CT_FOLD * 2 + 1: char_loop(v, xl, xr, k, CT_FOLD, 1); break;
+    case CT_CRUSH * 2: char_loop(v, xl, xr, k, CT_CRUSH, 0); break;
+    case CT_CRUSH * 2 + 1: char_loop(v, xl, xr, k, CT_CRUSH, 1); break;
+    case CT_RING * 2: char_loop(v, xl, xr, k, CT_RING, 0); break;
+    case CT_RING * 2 + 1: char_loop(v, xl, xr, k, CT_RING, 1); break;
+    case CT_TILT * 2: char_loop(v, xl, xr, k, CT_TILT, 0); break;
+    case CT_TILT * 2 + 1: char_loop(v, xl, xr, k, CT_TILT, 1); break;
+    case CT_RECTIFY * 2: char_loop(v, xl, xr, k, CT_RECTIFY, 0); break;
+    case CT_RECTIFY * 2 + 1: char_loop(v, xl, xr, k, CT_RECTIFY, 1); break;
+    default: break;
+    }
+}
+
 /* ------------------------------------------------------------ the chunk --- */
 static void voice_pitch(synth_t *s, voice_t *v)
 {
@@ -1341,6 +1578,7 @@ static void voice_chunk(synth_t *s, voice_t *v)
         }
     }
     eng_chunk(v);
+    char_prep(s, v, dest, off);
 }
 
 /* the steal's turn: the old note has faded; start the pending one here, mid-chunk */
@@ -1371,6 +1609,8 @@ static void voice_subblock(synth_t *s, voice_t *v, int aligned)
         voice_steal(s, v);
         for (i = 0; i < 8; i++)
             v->f[i] = 0.0f;
+        for (i = 0; i < 6; i++)
+            v->cz[i] = 0.0f;
     }
     c = &v->c;
     v->fresh = 0;
@@ -1415,15 +1655,16 @@ static void voice_subblock(synth_t *s, voice_t *v, int aligned)
 
 /* the sample loop for one sub-block: the filter (one of six), the ramps, the outputs. Instantiated
  * for each filter type and for mono / stereo with constant arguments, so the compiler folds the
- * branches away; the generic switch is in voice_samples.
+ * branches away; the generic switch is in voice_samples. chr: the filter only, its output back into
+ * xl / xr for the character stage (char_run), then out_loop does the rest.
  *   lp24:    a TPT state-variable low-pass (resonant) into a second, flat one: 24 dB, aggressive
  *   ladder:  four one-poles in series with the last one's output fed back through a soft clip
  *   lp12:    the one resonant TPT stage, 12 dB
  *   hp12:    its high-pass output, 12 dB
  *   bp12:    its band-pass output, scaled by 1 / Q so the peak stays at unity
  *   dynamic: the drum tracks' filter (drumline.c): on a synth voice it is a bypass */
-SY_INLINE void sample_loop(voice_t *v, const float *xl, const float *xr, float *l, float *r, float *s1, float *s2,
-                               float *st, int k, const int ftype, const int stereo)
+SY_INLINE void sample_loop(voice_t *v, float *xl, float *xr, float *l, float *r, float *s1, float *s2,
+                               float *st, int k, const int ftype, const int stereo, const int chr)
 {
     const cfg_t *c = &v->c;
     const float a1 = v->a1, a2 = v->a2, a3 = v->a3, b1 = v->b1, b2 = v->b2, b3 = v->b3, kq = c->kq;
@@ -1482,6 +1723,12 @@ SY_INLINE void sample_loop(voice_t *v, const float *xl, const float *xr, float *
         } else {
             yr = yl;
         }
+        if (chr) {
+            xl[j] = yl;
+            if (stereo)
+                xr[j] = yr;
+            continue;
+        }
         e += es;
         sg += sgs;
         glc += gls;
@@ -1514,6 +1761,55 @@ SY_INLINE void sample_loop(voice_t *v, const float *xl, const float *xr, float *
     }
 }
 
+/* after the character stage: the ramps and the outputs (sample_loop's second half) */
+SY_INLINE void out_loop(voice_t *v, const float *xl, const float *xr, float *l, float *r, float *s1, float *s2,
+                        float *st, int k, const int stereo)
+{
+    const cfg_t *c = &v->c;
+    const float es = v->amp_step, sgs = v->sg_step, gls = v->gl_step, grs = v->gr_step;
+    const float g1 = c->g1, g2 = c->g2, gt = c->gt, wide = stereo ? 1.41421356f : 1.0f;
+    const int sends = g1 > 0.0f || g2 > 0.0f || gt > 0.0f;
+    float e = v->amp_cur, sg = v->steal_gain, glc = v->glc, grc = v->grc, pk = 0.0f;
+    int j;
+    for (j = 0; j < k; j++) {
+        float yl = xl[j], yr = stereo ? xr[j] : yl, ol, or_, a;
+        e += es;
+        sg += sgs;
+        glc += gls;
+        grc += grs;
+        a = e * sg * wide;
+        ol = yl * a * glc;
+        or_ = yr * a * grc;
+        l[j] += ol;
+        r[j] += or_;
+        if (sends) {
+            float mono = (ol + or_) * 0.5f;
+            s1[j] += mono * g1;
+            s2[j] += mono * g2;
+            st[j] += mono * gt;
+        }
+        yl = fm_fabsf(yl);
+        if (yl > pk)
+            pk = yl;
+    }
+    v->amp_cur = e;
+    v->steal_gain = sg;
+    v->glc = glc;
+    v->grc = grc;
+    pk *= e * sg * wide * (glc > grc ? glc : grc);
+    if (pk > v->peak)
+        v->peak = pk;
+}
+static void out_mono(voice_t *v, const float *xl, float *l, float *r, float *s1, float *s2, float *st, int k)
+{
+    out_loop(v, xl, xl, l, r, s1, s2, st, k, 0);
+}
+static void out_stereo(voice_t *v, const float *xl, const float *xr, float *l, float *r, float *s1, float *s2, float *st,
+                       int k)
+{
+    out_loop(v, xl, xr, l, r, s1, s2, st, k, 1);
+}
+
 /* m samples (inside a chunk) of one voice into the buffers */
 static void voice_samples(synth_t *s, voice_t *v, float *l, float *r, float *s1, float *s2, float *st, int m)
 {
@@ -1526,20 +1822,43 @@ static void voice_samples(synth_t *s, voice_t *v, float *l, float *r, float *s1,
         if ((v->pos & (SUB - 1)) == 0 || v->fresh)
             voice_subblock(s, v, (v->pos & (SUB - 1)) == 0);
         eng_run(v, xl, xr, k);
-        switch (v->c.ftype * 2 + (v->c.stereo != 0)) {
-        case FT_LP24 * 2: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_LP24, 0); break;
-        case FT_LP24 * 2 + 1: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_LP24, 1); break;
-        case FT_LADDER * 2: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_LADDER, 0); break;
-        case FT_LADDER * 2 + 1: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_LADDER, 1); break;
-        case FT_LP12 * 2: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_LP12, 0); break;
-        case FT_LP12 * 2 + 1: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_LP12, 1); break;
-        case FT_HP12 * 2: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_HP12, 0); break;
-        case FT_HP12 * 2 + 1: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_HP12, 1); break;
-        case FT_BP12 * 2: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_BP12, 0); break;
-        case FT_BP12 * 2 + 1: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_BP12, 1); break;
-        case FT_DYNAMIC * 2: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_DYNAMIC, 0); break;
-        default: sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, FT_DYNAMIC, 1); break;
+#define SL(ft, st_, ch) sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k, ft, st_, ch)
+        if (v->c.ctype == CT_OFF) {
+            switch (v->c.ftype * 2 + (v->c.stereo != 0)) {
+            case FT_LP24 * 2: SL(FT_LP24, 0, 0); break;
+            case FT_LP24 * 2 + 1: SL(FT_LP24, 1, 0); break;
+            case FT_LADDER * 2: SL(FT_LADDER, 0, 0); break;
+            case FT_LADDER * 2 + 1: SL(FT_LADDER, 1, 0); break;
+            case FT_LP12 * 2: SL(FT_LP12, 0, 0); break;
+            case FT_LP12 * 2 + 1: SL(FT_LP12, 1, 0); break;
+            case FT_HP12 * 2: SL(FT_HP12, 0, 0); break;
+            case FT_HP12 * 2 + 1: SL(FT_HP12, 1, 0); break;
+            case FT_BP12 * 2: SL(FT_BP12, 0, 0); break;
+            case FT_BP12 * 2 + 1: SL(FT_BP12, 1, 0); break;
+            case FT_DYNAMIC * 2: SL(FT_DYNAMIC, 0, 0); break;
+            default: SL(FT_DYNAMIC, 1, 0); break;
+            }
+        } else {                                 /* the filter, the character stage, then the outputs */
+            switch (v->c.ftype * 2 + (v->c.stereo != 0)) {
+            case FT_LP24 * 2: SL(FT_LP24, 0, 1); break;
+            case FT_LP24 * 2 + 1: SL(FT_LP24, 1, 1); break;
+            case FT_LADDER * 2: SL(FT_LADDER, 0, 1); break;
+            case FT_LADDER * 2 + 1: SL(FT_LADDER, 1, 1); break;
+            case FT_LP12 * 2: SL(FT_LP12, 0, 1); break;
+            case FT_LP12 * 2 + 1: SL(FT_LP12, 1, 1); break;
+            case FT_HP12 * 2: SL(FT_HP12, 0, 1); break;
+            case FT_HP12 * 2 + 1: SL(FT_HP12, 1, 1); break;
+            case FT_BP12 * 2: SL(FT_BP12, 0, 1); break;
+            case FT_BP12 * 2 + 1: SL(FT_BP12, 1, 1); break;
+            default: break;                      /* (dynamic: a bypass, xl / xr as they are) */
+            }
+            char_run(v, xl, xr, k);
+            if (v->c.stereo)
+                out_stereo(v, xl, xr, l + i, r + i, s1 + i, s2 + i, st + i, k);
+            else
+                out_mono(v, xl, l + i, r + i, s1 + i, s2 + i, st + i, k);
         }
+#undef SL
         i += k;
         v->pos = (uint16_t)(v->pos + k);
     }
@@ -1605,6 +1924,9 @@ static const tp_info_t FIXED[NTP_SOUND + 13] = {
     {"type", 0, NLT - 1, LT_OFF, PK_NAMES, LTYPE_N},    {"speed", 0, 127, 3, PK_HZ_SYNC, 0},
     {"amount", 0, 127, 64, PK_BIP, 0},                  {"dest", 0, NLD - 1, LD_FILTER, PK_NAMES, LDEST_N},
     {"param", 0, 3, 0, PK_NUM, 0},                      {"shape", 0, 3, 1, PK_NAMES, VSHAPE_N},
+    /* the character stage: its amount and tone print per type (tp_text_par) */
+    {"type", 0, NCT - 1, CT_OFF, PK_NAMES, CTYPE_N},    {"amount", 0, 127, 64, PK_PCT, 0},
+    {"tone", 0, 127, 64, PK_BIP, 0},                    {"mix", 0, 127, 127, PK_PCT, 0},
     /* TP_PLAYER .. TP_CHAN */
     {"player", 0, NPL - 1, PL_OFF, PK_NAMES, PLAYER_N}, {"speed", 0, 8, 4, PK_NAMES, ARPSPD_N},
     {"pattern", 0, 5, 0, PK_NAMES, ARPPAT_N},           {"range", 1, 4, 1, PK_NUM, 0},
@@ -1878,6 +2200,17 @@ static void tp_text_i(const tp_info_t *i, int p, int v, int engine, char *num, c
 void tp_text(int p, int v, int engine, char *num, char *unit) { tp_text_i(tp_info(p, engine), p, v, engine, num, unit); }
 void tp_text_par(int p, int v, const uint8_t *par, char *num, char *unit)
 {
+    int ct = par[TP_CTYPE];
+    if ((p == TP_CTONE && (ct == CT_DRIVE || ct == CT_RECTIFY)) || (p == TP_CAMT && ct == CT_TILT)) {
+        float t = (float)(v > 127 ? 127 : v) * (1.0f / 127.0f);   /* a low-pass, the tilt's pivot: Hz */
+        hz_text(p == TP_CTONE ? ch_lp_hz(t) : ch_pivot_hz(t), num, unit);
+        return;
+    }
+    if (p == TP_CTONE && ct == CT_RING) {                         /* the ratio */
+        put_s(num, RING_N[(v > 127 ? 127 : v) * 16 / 128]);
+        unit[0] = 0;
+        return;
+    }
     tp_text_i(tp_info_par(p, par), p, v, par[TP_ENGINE], num, unit);
 }
 
@@ -1898,95 +2231,101 @@ void sound_default(uint8_t *par, int engine)
 
 /* -------------------------------------------------------------- presets --- */
 /* ENGINE E1 E2 E3 E4 | MODE PORTA BEND VOL | A D S R | FA FD FS FR | CUT RES FENV KTRK TYPE | S1 S2 ST |
- * LTYPE LSPEED LAMT LDEST LX LX2. Eight an engine, the first of each the engine's sound in a new project
+ * LTYPE LSPEED LAMT LDEST LX LX2 | CTYPE CAMT CTONE CMIX (the character: every preset a whole sound, its own
+ * effect in it). Eight an engine, the first of each the engine's sound in a new project
  * (and what choosing the engine loads). The tape send is 127, as a new project's tracks have it (loading a
  * preset keeps the track's own anyway: ui.c load_preset). The LFO fields follow synth.h: wave / drift:
  * amount, module, knob, shape (or envelope); wobble: vibrato, volume, envelope, shape. Speeds: 0..7 synced
  * (3 = 1/4), above free: 20 is about 0.16 Hz, 40 0.45 Hz, 60 1.2 Hz, 80 3 Hz, 92 5.6 Hz.
  * Times: 32 is about 10 ms, 64 100 ms, 80 330 ms, 96 1.1 s, 110 3 s. Cutoff: 59 is 800 Hz, 80 2.2 kHz,
  * 100 5.6 kHz. Each engine is a material of the loom: weft cotton, stack ply, wavetable silk, orbit linen,
- * tines felt, organ reed, sync wire, swarm fleece. */
+ * tines felt, organ reed, sync wire, swarm fleece. Each engine's eight span it: a bass, a lead, a pad, something
+ * struck, a bright one and a dark one, one that moves; the volumes put each preset's phrase (tools/render_presets.sh)
+ * near -19.5 dBFS RMS dry, its peak under -1.5 dBFS. */
 #define LFO_(lt, ls, la, ld, lx, lx2) lt, ls, la, ld, lx, lx2
-#define PR(nm, eng, e1, e2, e3, e4, vm, po, vol, a, d, su, r, fa, fd, fs, fr, cut, res, fenv, kt, ft, s1, s2, lfo) \
-    {nm, {eng, e1, e2, e3, e4, vm, po, 2, vol, a, d, su, r, fa, fd, fs, fr, cut, res, fenv, kt, ft, s1, s2, 127, LFO_ lfo}}
+#define CH_(ct, ca, cto, cm) ct, ca, cto, cm
+#define PR(nm, eng, e1, e2, e3, e4, vm, po, vol, a, d, su, r, fa, fd, fs, fr, cut, res, fenv, kt, ft, s1, s2, lfo, ch) \
+    {nm, {eng, e1, e2, e3, e4, vm, po, 2, vol, a, d, su, r, fa, fd, fs, fr, cut, res, fenv, kt, ft, s1, s2, 127, LFO_ lfo, \
+          CH_ ch}}
 #define NOLFO (LT_OFF, 3, 64, LD_FILTER, 0, 1)
+#define NOCH (CT_OFF, 64, 64, 127)                         /* the character stage: off (type, amount, tone, mix) */
 #define VIB(fade) (LT_WOBBLE, 92, 74, 64, fade, 0)          /* a vibrato of about 16 cents at 5.6 Hz */
 const preset_t PRESETS[] = {
     /* weft: cotton, the everyday cloth. bend, wave (saw .. pulse .. resonant), sweep, spread */
-    PR("cotton keys", EG_WEFT, 70, 20, 0, 30, VM_POLY, 0, 86, 0, 88, 50, 72, 0, 72, 10, 60, 84, 10, 84, 64, FT_LP12, 15, 30, NOLFO),
-    PR("denim bass", EG_WEFT, 92, 40, 0, 0, VM_MONO, 0, 118, 0, 72, 95, 40, 0, 62, 0, 40, 58, 30, 100, 40, FT_LADDER, 0, 5, NOLFO),
-    PR("thread lead", EG_WEFT, 100, 10, 0, 20, VM_LEGATO, 28, 85, 2, 70, 100, 50, 0, 60, 40, 50, 98, 15, 76, 64, FT_LP24, 25, 20, VIB(30)),
-    PR("muslin pad", EG_WEFT, 45, 0, 0, 110, VM_POLY, 0, 70, 94, 90, 100, 100, 80, 90, 60, 90, 76, 8, 72, 50, FT_LP12, 10, 70, (LT_WAVE, 30, 100, LD_SYNTH + LD_FREE, 0, 1)),
-    PR("pulse yarn", EG_WEFT, 88, 64, 0, 40, VM_POLY, 0, 95, 0, 72, 40, 60, 0, 62, 0, 50, 90, 12, 82, 64, FT_LP12, 15, 25, (LT_WAVE, 60, 90, LD_SYNTH + LD_FREE, 0, 1)),
-    PR("burlap", EG_WEFT, 60, 90, 50, 60, VM_POLY, 0, 100, 10, 82, 70, 72, 0, 70, 40, 60, 95, 10, 70, 64, FT_LP24, 10, 35, (LT_DRIFT, 50, 60, LD_SYNTH + LD_FREE, 2, 64)),
-    PR("acid cord", EG_WEFT, 70, 127, 90, 0, VM_LEGATO, 20, 127, 0, 70, 90, 40, 0, 60, 30, 40, 100, 10, 72, 64, FT_LP24, 20, 5, (LT_WAVE, 4, 100, LD_SYNTH, 2, 3)),
-    PR("button", EG_WEFT, 80, 100, 30, 0, VM_POLY, 0, 120, 0, 78, 40, 60, 0, 50, 0, 40, 105, 5, 70, 64, FT_LP12, 25, 25, NOLFO),
+    PR("cotton keys", EG_WEFT, 70, 20, 0, 30, VM_POLY, 0, 94, 0, 88, 50, 72, 0, 72, 10, 60, 84, 10, 84, 64, FT_LP12, 15, 30, NOLFO, (CT_DRIVE, 30, 110, 127)),
+    PR("denim bass", EG_WEFT, 92, 40, 0, 0, VM_MONO, 0, 109, 0, 72, 95, 40, 0, 62, 0, 40, 58, 30, 100, 40, FT_LADDER, 0, 5, NOLFO, (CT_DRIVE, 60, 60, 127)),
+    PR("thread lead", EG_WEFT, 100, 10, 0, 20, VM_LEGATO, 28, 96, 2, 70, 100, 50, 0, 60, 40, 50, 98, 15, 76, 64, FT_LP24, 25, 20, VIB(30), (CT_DRIVE, 45, 115, 127)),
+    PR("muslin pad", EG_WEFT, 45, 0, 0, 110, VM_POLY, 0, 79, 94, 90, 100, 100, 80, 90, 60, 90, 76, 8, 72, 50, FT_LP12, 10, 70, (LT_WAVE, 30, 100, LD_SYNTH + LD_FREE, 0, 1), NOCH),
+    PR("pulse yarn", EG_WEFT, 88, 64, 0, 40, VM_POLY, 0, 95, 0, 72, 40, 60, 0, 62, 0, 50, 90, 12, 82, 64, FT_LP12, 15, 25, (LT_WAVE, 60, 90, LD_SYNTH + LD_FREE, 0, 1), (CT_CRUSH, 50, 100, 80)),
+    PR("burlap", EG_WEFT, 60, 90, 50, 60, VM_POLY, 0, 105, 10, 82, 70, 72, 0, 70, 40, 60, 95, 10, 70, 64, FT_LP24, 10, 35, (LT_DRIFT, 50, 60, LD_SYNTH + LD_FREE, 2, 64), (CT_FOLD, 45, 80, 127)),
+    PR("acid cord", EG_WEFT, 70, 127, 90, 0, VM_LEGATO, 20, 117, 0, 70, 90, 40, 0, 60, 30, 40, 100, 10, 72, 64, FT_LP24, 20, 5, (LT_WAVE, 4, 100, LD_SYNTH, 2, 3), (CT_DRIVE, 85, 105, 127)),
+    PR("button", EG_WEFT, 80, 100, 30, 0, VM_POLY, 0, 127, 0, 78, 40, 60, 0, 50, 0, 40, 105, 5, 70, 64, FT_LP12, 25, 25, NOLFO, (CT_CRUSH, 55, 20, 127)),
     /* stack: ply, strands twisted together. wave, ratio N:1, detune, spread */
-    PR("ply bass", EG_STACK, 20, 2, 4, 0, VM_MONO, 0, 118, 0, 70, 95, 35, 0, 62, 0, 30, 60, 15, 100, 20, FT_LP24, 0, 5, NOLFO),
-    PR("twine fifth", EG_STACK, 0, 3, 10, 50, VM_LEGATO, 30, 110, 2, 60, 100, 45, 0, 60, 30, 50, 92, 15, 72, 64, FT_LP24, 25, 20, VIB(30)),
-    PR("braid stab", EG_STACK, 0, 2, 20, 70, VM_POLY, 0, 127, 0, 66, 35, 45, 0, 52, 0, 40, 70, 30, 110, 64, FT_LP24, 25, 25, NOLFO),
-    PR("wool pad", EG_STACK, 30, 1, 45, 127, VM_POLY, 0, 67, 95, 90, 100, 100, 70, 90, 50, 90, 70, 10, 78, 50, FT_LP12, 10, 75, (LT_WAVE, 30, 84, LD_FILTER + LD_FREE, 0, 1)),
-    PR("glass bead", EG_STACK, 110, 4, 3, 60, VM_POLY, 0, 59, 0, 88, 0, 84, 0, 80, 0, 70, 105, 5, 70, 64, FT_LP12, 20, 50, NOLFO),
-    PR("rope sub", EG_STACK, 64, 1, 0, 0, VM_MONO, 0, 99, 0, 70, 90, 35, 0, 60, 0, 30, 40, 0, 76, 30, FT_LP24, 0, 0, NOLFO),
-    PR("tartan", EG_STACK, 40, 5, 10, 90, VM_POLY, 0, 82, 2, 82, 60, 70, 0, 70, 20, 60, 80, 12, 80, 64, FT_LP24, 10, 40, NOLFO),
-    PR("elastic", EG_STACK, 30, 2, 25, 20, VM_LEGATO, 60, 110, 0, 60, 90, 35, 0, 72, 30, 40, 50, 60, 115, 64, FT_LP24, 20, 10, NOLFO),
+    PR("ply bass", EG_STACK, 20, 2, 4, 0, VM_MONO, 0, 124, 0, 70, 95, 35, 0, 62, 0, 30, 60, 15, 100, 20, FT_LP24, 0, 5, NOLFO, (CT_DRIVE, 40, 70, 127)),
+    PR("twine fifth", EG_STACK, 0, 3, 10, 50, VM_LEGATO, 30, 110, 2, 60, 100, 45, 0, 60, 30, 50, 92, 15, 72, 64, FT_LP24, 25, 20, VIB(30), (CT_FOLD, 25, 64, 90)),
+    PR("braid stab", EG_STACK, 0, 2, 20, 70, VM_POLY, 0, 127, 0, 66, 35, 45, 0, 52, 0, 40, 70, 30, 110, 64, FT_LP24, 25, 25, NOLFO, (CT_DRIVE, 55, 110, 127)),
+    PR("wool pad", EG_STACK, 30, 1, 45, 127, VM_POLY, 0, 75, 95, 90, 100, 100, 70, 90, 50, 90, 70, 10, 78, 50, FT_LP12, 10, 75, (LT_WAVE, 30, 84, LD_FILTER + LD_FREE, 0, 1), (CT_TILT, 60, 45, 127)),
+    PR("glass bead", EG_STACK, 88, 4, 3, 60, VM_POLY, 0, 84, 0, 88, 0, 84, 0, 80, 0, 70, 105, 5, 70, 64, FT_LP12, 20, 50, NOLFO, (CT_RING, 30, 64, 127)),
+    PR("rope sub", EG_STACK, 64, 1, 0, 0, VM_MONO, 0, 108, 0, 70, 90, 35, 0, 60, 0, 30, 40, 0, 76, 30, FT_LP24, 0, 0, NOLFO, (CT_DRIVE, 35, 30, 127)),
+    PR("tartan", EG_STACK, 40, 5, 10, 90, VM_POLY, 0, 96, 2, 82, 60, 70, 0, 70, 20, 60, 80, 12, 80, 64, FT_LP24, 10, 40, NOLFO, (CT_FOLD, 40, 50, 127)),
+    PR("elastic", EG_STACK, 30, 2, 25, 20, VM_LEGATO, 60, 110, 0, 60, 90, 35, 0, 72, 30, 40, 50, 60, 115, 64, FT_LP24, 20, 10, NOLFO, (CT_DRIVE, 50, 90, 127)),
     /* wavetable: silk, woven fine. table, scan, bend, ripple. Tables: 0 shapes, 1 nasal, 2 grit, 3 vocal,
      * 4 spiral, 5 fold, 6 octaves, 7 glass, 8 chirp */
-    PR("silk pad", EG_WAVETABLE, 0, 40, 0, 0, VM_POLY, 0, 87, 90, 90, 100, 100, 60, 90, 60, 90, 90, 5, 70, 64, FT_LP12, 10, 70, (LT_WAVE, 25, 100, LD_SYNTH + LD_FREE, 1, 1)),
-    PR("satin lead", EG_WAVETABLE, 1, 50, 20, 0, VM_LEGATO, 30, 127, 2, 70, 100, 45, 0, 60, 40, 50, 100, 10, 72, 64, FT_LP12, 25, 25, VIB(30)),
-    PR("spool bell", EG_WAVETABLE, 7, 90, 0, 30, VM_POLY, 0, 127, 0, 95, 0, 90, 0, 90, 0, 80, 110, 0, 64, 64, FT_LP12, 15, 55, NOLFO),
-    PR("chiffon", EG_WAVETABLE, 6, 20, 40, 10, VM_POLY, 0, 98, 70, 85, 90, 92, 50, 80, 50, 80, 82, 10, 72, 64, FT_LP12, 10, 60, (LT_DRIFT, 45, 70, LD_SYNTH + LD_FREE, 1, 64)),
-    PR("indigo bass", EG_WAVETABLE, 5, 60, 30, 0, VM_MONO, 0, 124, 0, 70, 95, 35, 0, 62, 0, 30, 72, 10, 95, 40, FT_LADDER, 0, 5, NOLFO),
-    PR("lace keys", EG_WAVETABLE, 0, 70, 10, 0, VM_POLY, 0, 100, 0, 82, 40, 70, 0, 66, 0, 50, 95, 5, 80, 64, FT_LP12, 15, 35, NOLFO),
-    PR("spiral", EG_WAVETABLE, 4, 0, 30, 20, VM_POLY, 0, 83, 20, 82, 90, 82, 0, 60, 0, 40, 95, 10, 64, 64, FT_LP24, 20, 45, (LT_WAVE, 50, 127, LD_SYNTH + LD_FREE, 1, 1)),
-    PR("gauze choir", EG_WAVETABLE, 3, 30, 0, 15, VM_POLY, 0, 109, 90, 90, 100, 96, 60, 90, 60, 90, 85, 5, 70, 50, FT_LP12, 10, 80, (LT_WAVE, 20, 110, LD_SYNTH + LD_FREE, 1, 1)),
+    PR("silk pad", EG_WAVETABLE, 0, 40, 0, 0, VM_POLY, 0, 87, 90, 90, 100, 100, 60, 90, 60, 90, 90, 5, 70, 64, FT_LP12, 10, 70, (LT_WAVE, 25, 100, LD_SYNTH + LD_FREE, 1, 1), NOCH),
+    PR("satin lead", EG_WAVETABLE, 1, 50, 20, 0, VM_LEGATO, 30, 127, 2, 70, 100, 45, 0, 60, 40, 50, 100, 10, 72, 64, FT_LP12, 25, 25, VIB(30), (CT_DRIVE, 40, 110, 127)),
+    PR("spool bell", EG_WAVETABLE, 7, 90, 0, 30, VM_POLY, 0, 124, 0, 95, 0, 90, 0, 90, 0, 80, 110, 0, 64, 64, FT_LP12, 15, 55, NOLFO, (CT_RING, 25, 88, 127)),
+    PR("chiffon", EG_WAVETABLE, 6, 20, 40, 10, VM_POLY, 0, 92, 70, 85, 90, 92, 50, 80, 50, 80, 82, 10, 72, 64, FT_LP12, 10, 60, (LT_DRIFT, 45, 70, LD_SYNTH + LD_FREE, 1, 64), (CT_TILT, 64, 90, 127)),
+    PR("indigo bass", EG_WAVETABLE, 5, 60, 30, 0, VM_MONO, 0, 124, 0, 70, 95, 35, 0, 62, 0, 30, 72, 10, 95, 40, FT_LADDER, 0, 5, NOLFO, (CT_FOLD, 45, 64, 127)),
+    PR("lace keys", EG_WAVETABLE, 0, 70, 10, 0, VM_POLY, 0, 111, 0, 82, 40, 70, 0, 66, 0, 50, 95, 5, 80, 64, FT_LP12, 15, 35, NOLFO, (CT_TILT, 70, 80, 127)),
+    PR("spiral", EG_WAVETABLE, 4, 0, 30, 20, VM_POLY, 0, 87, 20, 82, 90, 82, 0, 60, 0, 40, 95, 10, 64, 64, FT_LP24, 20, 45, (LT_WAVE, 50, 127, LD_SYNTH + LD_FREE, 1, 1), (CT_FOLD, 30, 64, 127)),
+    PR("gauze choir", EG_WAVETABLE, 3, 30, 0, 15, VM_POLY, 0, 109, 90, 90, 100, 96, 60, 90, 60, 90, 85, 5, 70, 50, FT_LP12, 10, 80, (LT_WAVE, 20, 110, LD_SYNTH + LD_FREE, 1, 1), NOCH),
     /* orbit: linen, long fibres, bowed. bright, ratio (up to 50 a slow beat, above harmonic: 66 1/2,
      * 81 5/4, 92 3/2, 102 2, 107 3, 112 4), edge, wobble */
-    PR("bowed linen", EG_ORBIT, 45, 30, 20, 25, VM_POLY, 0, 75, 75, 82, 100, 86, 50, 80, 50, 80, 95, 5, 70, 64, FT_LP12, 5, 60, NOLFO),
-    PR("thimble", EG_ORBIT, 70, 112, 0, 0, VM_POLY, 0, 110, 0, 72, 0, 62, 0, 70, 0, 50, 115, 0, 64, 64, FT_LP12, 20, 30, NOLFO),
-    PR("cord bass", EG_ORBIT, 60, 0, 50, 0, VM_MONO, 0, 127, 0, 72, 95, 35, 0, 62, 0, 30, 82, 10, 90, 40, FT_LP24, 0, 5, NOLFO),
-    PR("warp fifth", EG_ORBIT, 50, 92, 10, 40, VM_POLY, 0, 82, 50, 82, 90, 82, 30, 70, 50, 70, 100, 5, 70, 64, FT_LP12, 10, 55, NOLFO),
-    PR("needle", EG_ORBIT, 80, 107, 30, 0, VM_LEGATO, 20, 100, 2, 70, 100, 45, 0, 60, 30, 50, 110, 5, 70, 64, FT_LP12, 25, 20, VIB(30)),
-    PR("hollow", EG_ORBIT, 50, 66, 0, 20, VM_POLY, 0, 81, 20, 82, 80, 72, 0, 70, 30, 60, 100, 5, 70, 64, FT_LP12, 10, 40, NOLFO),
-    PR("moire", EG_ORBIT, 55, 64, 0, 60, VM_POLY, 0, 76, 30, 90, 90, 90, 30, 80, 50, 80, 105, 5, 70, 64, FT_LP12, 10, 60, (LT_WAVE, 35, 90, LD_SYNTH + LD_FREE, 0, 1)),
-    PR("chime", EG_ORBIT, 65, 81, 0, 0, VM_POLY, 0, 91, 0, 100, 0, 98, 0, 96, 0, 90, 120, 0, 64, 64, FT_LP12, 15, 60, NOLFO),
+    PR("bowed linen", EG_ORBIT, 72, 30, 35, 25, VM_POLY, 0, 79, 75, 82, 100, 86, 50, 80, 50, 80, 100, 5, 70, 64, FT_LP12, 5, 60, NOLFO, (CT_TILT, 70, 88, 127)),
+    PR("thimble", EG_ORBIT, 90, 112, 20, 0, VM_POLY, 0, 96, 0, 92, 0, 62, 0, 70, 0, 50, 127, 0, 64, 64, FT_LP12, 20, 30, NOLFO, (CT_RING, 45, 80, 127)),
+    PR("cord bass", EG_ORBIT, 55, 0, 80, 0, VM_MONO, 0, 108, 0, 72, 95, 35, 0, 62, 0, 30, 82, 10, 90, 40, FT_LP24, 0, 5, NOLFO, (CT_DRIVE, 70, 50, 127)),
+    PR("warp fifth", EG_ORBIT, 70, 92, 10, 40, VM_POLY, 0, 77, 50, 82, 90, 82, 30, 70, 50, 70, 100, 5, 70, 64, FT_LP12, 10, 55, (LT_WAVE, 45, 100, LD_SYNTH + LD_FREE, 0, 1), (CT_FOLD, 35, 64, 90)),
+    PR("needle", EG_ORBIT, 105, 102, 50, 0, VM_LEGATO, 20, 100, 2, 70, 100, 45, 0, 60, 30, 50, 118, 5, 70, 64, FT_LP12, 25, 20, VIB(30), (CT_DRIVE, 55, 110, 127)),
+    PR("hollow", EG_ORBIT, 45, 66, 0, 20, VM_POLY, 0, 70, 20, 82, 80, 72, 0, 70, 30, 60, 70, 5, 70, 64, FT_LP24, 10, 40, NOLFO, (CT_TILT, 40, 30, 127)),
+    PR("moire", EG_ORBIT, 60, 45, 20, 70, VM_POLY, 0, 80, 30, 90, 90, 90, 30, 80, 50, 80, 105, 5, 70, 64, FT_LP12, 10, 60, (LT_DRIFT, 40, 70, LD_FILTER + LD_FREE, 0, 64), (CT_RING, 25, 40, 127)),
+    PR("chime", EG_ORBIT, 95, 81, 0, 0, VM_POLY, 0, 96, 0, 100, 0, 98, 0, 96, 0, 90, 127, 0, 64, 64, FT_LP12, 15, 60, NOLFO, (CT_RING, 40, 104, 127)),
     /* tines: felt, a hammer's soft face. bright, grit, bite, bell */
-    PR("felt piano", EG_TINES, 50, 0, 40, 50, VM_POLY, 0, 111, 0, 92, 55, 66, 0, 70, 0, 50, 105, 5, 64, 64, FT_LP12, 10, 30, (LT_WOBBLE, 84, 64, 82, 64, 0)),
-    PR("soft felt", EG_TINES, 20, 0, 10, 30, VM_POLY, 0, 91, 0, 95, 50, 72, 0, 70, 0, 50, 95, 0, 64, 64, FT_LP12, 5, 45, NOLFO),
-    PR("corduroy", EG_TINES, 75, 70, 60, 20, VM_POLY, 0, 113, 0, 86, 50, 62, 0, 66, 0, 50, 100, 10, 64, 64, FT_LP12, 15, 20, NOLFO),
-    PR("felt bass", EG_TINES, 60, 30, 70, 0, VM_MONO, 0, 120, 0, 82, 70, 35, 0, 66, 0, 30, 85, 5, 64, 40, FT_LP12, 0, 5, NOLFO),
-    PR("velvet lead", EG_TINES, 85, 30, 40, 30, VM_LEGATO, 20, 120, 0, 82, 90, 50, 0, 66, 0, 50, 110, 10, 64, 64, FT_LP12, 25, 25, VIB(40)),
-    PR("lullaby", EG_TINES, 40, 0, 0, 110, VM_POLY, 0, 107, 0, 86, 0, 76, 0, 70, 0, 50, 120, 0, 64, 64, FT_LP12, 15, 55, NOLFO),
-    PR("flannel pad", EG_TINES, 45, 10, 0, 15, VM_POLY, 0, 86, 80, 90, 90, 96, 50, 80, 50, 80, 95, 5, 64, 64, FT_LP12, 10, 65, (LT_WOBBLE, 30, 64, 84, 20, 0)),
-    PR("hammer", EG_TINES, 90, 50, 120, 60, VM_POLY, 0, 103, 0, 82, 40, 56, 0, 66, 0, 40, 110, 5, 64, 64, FT_LP12, 15, 25, NOLFO),
+    PR("felt piano", EG_TINES, 60, 0, 40, 55, VM_POLY, 0, 111, 0, 92, 55, 66, 0, 70, 0, 50, 110, 5, 64, 64, FT_LP12, 10, 30, (LT_WOBBLE, 84, 64, 82, 64, 0), (CT_DRIVE, 35, 100, 127)),
+    PR("soft felt", EG_TINES, 10, 0, 0, 10, VM_POLY, 0, 82, 0, 95, 50, 72, 0, 70, 0, 50, 70, 0, 64, 64, FT_LP12, 5, 45, NOLFO, (CT_TILT, 50, 30, 127)),
+    PR("corduroy", EG_TINES, 85, 90, 70, 20, VM_POLY, 0, 107, 0, 86, 50, 62, 0, 66, 0, 50, 115, 10, 64, 64, FT_LP12, 15, 20, NOLFO, (CT_DRIVE, 100, 100, 127)),
+    PR("felt bass", EG_TINES, 55, 40, 90, 0, VM_MONO, 0, 120, 0, 82, 70, 35, 0, 66, 0, 30, 80, 5, 64, 40, FT_LP12, 0, 5, NOLFO, (CT_DRIVE, 55, 60, 127)),
+    PR("velvet lead", EG_TINES, 95, 40, 40, 30, VM_LEGATO, 20, 127, 0, 82, 90, 50, 0, 66, 0, 50, 120, 10, 64, 64, FT_LP12, 25, 25, VIB(40), (CT_FOLD, 80, 80, 127)),
+    PR("lullaby", EG_TINES, 30, 0, 0, 127, VM_POLY, 0, 100, 0, 86, 12, 86, 0, 70, 0, 50, 127, 0, 64, 64, FT_LP12, 15, 55, NOLFO, (CT_RING, 45, 104, 127)),
+    PR("flannel pad", EG_TINES, 45, 10, 0, 15, VM_POLY, 0, 86, 80, 90, 90, 96, 50, 80, 50, 80, 95, 5, 64, 64, FT_LP12, 10, 65, (LT_WOBBLE, 30, 64, 84, 20, 0), (CT_TILT, 64, 80, 127)),
+    PR("hammer", EG_TINES, 127, 100, 127, 90, VM_POLY, 0, 125, 0, 70, 40, 56, 0, 66, 0, 40, 127, 5, 64, 64, FT_LP12, 15, 25, NOLFO, (CT_DRIVE, 75, 127, 127)),
     /* organ: reed, air through a tongue. stops (1 transistor, 2 combo, 3 jazz, 4 gospel, 5 rock, 6 theatre,
      * 7 pipe, 8 church), pedal, rotor, rate: 1..8 */
-    PR("reed combo", EG_ORGAN, 2, 3, 3, 6, VM_POLY, 0, 108, 0, 60, 100, 22, 0, 60, 0, 40, 110, 0, 64, 64, FT_LP12, 0, 25, NOLFO),
-    PR("parlour", EG_ORGAN, 3, 4, 5, 6, VM_POLY, 0, 106, 0, 60, 100, 26, 0, 60, 0, 40, 105, 0, 64, 64, FT_LP12, 5, 30, NOLFO),
-    PR("sunday", EG_ORGAN, 4, 6, 6, 7, VM_POLY, 0, 114, 0, 60, 100, 30, 0, 60, 0, 40, 110, 0, 64, 64, FT_LP12, 0, 35, NOLFO),
-    PR("cathedral", EG_ORGAN, 8, 7, 1, 1, VM_POLY, 0, 110, 40, 60, 100, 76, 0, 60, 0, 40, 100, 0, 64, 64, FT_LP12, 0, 100, NOLFO),
-    PR("pedal bass", EG_ORGAN, 1, 8, 1, 1, VM_MONO, 0, 127, 0, 60, 100, 26, 0, 60, 0, 40, 76, 0, 64, 40, FT_LP12, 0, 5, NOLFO),
-    PR("harmonium", EG_ORGAN, 1, 2, 2, 4, VM_POLY, 0, 100, 50, 60, 100, 56, 0, 60, 0, 40, 95, 0, 64, 64, FT_LP12, 0, 40, NOLFO),
-    PR("carousel", EG_ORGAN, 6, 3, 8, 8, VM_POLY, 0, 124, 0, 60, 100, 30, 0, 60, 0, 40, 105, 0, 64, 64, FT_LP12, 10, 30, NOLFO),
-    PR("chapel", EG_ORGAN, 7, 5, 2, 3, VM_POLY, 0, 109, 45, 60, 100, 66, 0, 60, 0, 40, 98, 0, 64, 64, FT_LP12, 0, 70, NOLFO),
+    PR("reed combo", EG_ORGAN, 2, 2, 4, 7, VM_POLY, 0, 78, 0, 60, 100, 22, 0, 60, 0, 40, 120, 0, 64, 64, FT_LP12, 0, 25, NOLFO, (CT_DRIVE, 90, 120, 127)),
+    PR("parlour", EG_ORGAN, 3, 4, 5, 6, VM_POLY, 0, 114, 0, 70, 60, 30, 0, 60, 0, 40, 90, 0, 64, 64, FT_LP12, 5, 30, NOLFO, (CT_TILT, 64, 45, 127)),
+    PR("sunday", EG_ORGAN, 4, 6, 7, 8, VM_POLY, 0, 81, 0, 60, 100, 30, 0, 60, 0, 40, 110, 0, 64, 64, FT_LP12, 0, 35, NOLFO, (CT_DRIVE, 100, 105, 127)),
+    PR("cathedral", EG_ORGAN, 8, 7, 1, 1, VM_POLY, 0, 84, 40, 60, 100, 76, 0, 60, 0, 40, 100, 0, 64, 64, FT_LP12, 0, 100, NOLFO, (CT_TILT, 45, 110, 127)),
+    PR("pedal bass", EG_ORGAN, 1, 8, 1, 1, VM_MONO, 0, 117, 0, 60, 100, 26, 0, 60, 0, 40, 70, 0, 64, 40, FT_LP12, 0, 5, NOLFO, NOCH),
+    PR("harmonium", EG_ORGAN, 1, 2, 2, 4, VM_POLY, 0, 89, 50, 60, 100, 56, 0, 60, 0, 40, 95, 0, 64, 64, FT_LP12, 0, 40, NOLFO, (CT_RECTIFY, 80, 100, 127)),
+    PR("carousel", EG_ORGAN, 6, 3, 8, 8, VM_POLY, 0, 85, 0, 60, 100, 30, 0, 60, 0, 40, 105, 0, 64, 64, FT_LP12, 10, 30, NOLFO, (CT_FOLD, 100, 80, 127)),
+    PR("chapel", EG_ORGAN, 7, 5, 2, 3, VM_POLY, 0, 92, 45, 60, 100, 66, 0, 60, 0, 40, 80, 0, 64, 64, FT_LP12, 0, 70, NOLFO, NOCH),
     /* sync: wire, drawn hard and bright. reach, sub, hiss, thin */
-    PR("wire stab", EG_SYNC, 50, 20, 0, 0, VM_POLY, 0, 115, 0, 66, 40, 40, 0, 52, 0, 40, 100, 20, 80, 64, FT_LP24, 15, 20, NOLFO),
-    PR("wire bass", EG_SYNC, 25, 70, 0, 0, VM_MONO, 0, 127, 0, 70, 90, 35, 0, 62, 0, 30, 86, 20, 90, 40, FT_LADDER, 0, 5, NOLFO),
-    PR("zipper", EG_SYNC, 60, 10, 0, 10, VM_LEGATO, 20, 119, 2, 60, 100, 45, 0, 60, 0, 50, 100, 15, 64, 64, FT_LP24, 20, 20, (LT_WAVE, 5, 110, LD_SYNTH, 0, 2)),
-    PR("staple", EG_SYNC, 90, 0, 60, 40, VM_POLY, 0, 120, 0, 66, 30, 34, 0, 40, 0, 30, 110, 10, 64, 64, FT_LP12, 20, 15, NOLFO),
-    PR("steel pad", EG_SYNC, 40, 30, 0, 20, VM_POLY, 0, 108, 85, 85, 90, 92, 60, 80, 40, 80, 72, 15, 80, 50, FT_LP24, 5, 70, (LT_WAVE, 28, 90, LD_SYNTH + LD_FREE, 0, 1)),
-    PR("frayed", EG_SYNC, 70, 10, 100, 50, VM_POLY, 0, 127, 10, 72, 50, 62, 0, 60, 0, 50, 95, 15, 70, 64, FT_LP24, 15, 40, (LT_DRIFT, 70, 60, LD_SYNTH, 0, 64)),
-    PR("filament", EG_SYNC, 100, 0, 0, 90, VM_LEGATO, 20, 121, 0, 60, 100, 40, 0, 60, 0, 40, 110, 10, 64, 64, FT_LP12, 25, 20, VIB(30)),
-    PR("tinsel", EG_SYNC, 80, 0, 20, 60, VM_POLY, 0, 124, 0, 72, 20, 70, 0, 60, 0, 50, 115, 5, 64, 64, FT_LP12, 25, 50, NOLFO),
+    PR("wire stab", EG_SYNC, 50, 20, 0, 0, VM_POLY, 0, 127, 0, 66, 40, 40, 0, 52, 0, 40, 100, 20, 80, 64, FT_LP24, 15, 20, NOLFO, (CT_DRIVE, 50, 110, 127)),
+    PR("wire bass", EG_SYNC, 25, 70, 0, 0, VM_MONO, 0, 119, 0, 70, 90, 35, 0, 62, 0, 30, 86, 20, 90, 40, FT_LADDER, 0, 5, NOLFO, (CT_DRIVE, 65, 60, 127)),
+    PR("zipper", EG_SYNC, 60, 10, 0, 10, VM_LEGATO, 20, 108, 2, 60, 100, 45, 0, 60, 0, 50, 100, 15, 64, 64, FT_LP24, 20, 20, (LT_WAVE, 5, 110, LD_SYNTH, 0, 2), (CT_CRUSH, 40, 64, 127)),
+    PR("staple", EG_SYNC, 90, 0, 60, 40, VM_POLY, 0, 118, 0, 66, 30, 34, 0, 40, 0, 30, 110, 10, 64, 64, FT_LP12, 20, 15, NOLFO, (CT_CRUSH, 70, 30, 127)),
+    PR("steel pad", EG_SYNC, 40, 30, 0, 20, VM_POLY, 0, 108, 85, 85, 90, 92, 60, 80, 40, 80, 72, 15, 80, 50, FT_LP24, 5, 70, (LT_WAVE, 28, 90, LD_SYNTH + LD_FREE, 0, 1), NOCH),
+    PR("frayed", EG_SYNC, 70, 10, 100, 50, VM_POLY, 0, 127, 10, 72, 50, 62, 0, 60, 0, 50, 95, 15, 70, 64, FT_LP24, 15, 40, (LT_DRIFT, 70, 60, LD_SYNTH, 0, 64), (CT_FOLD, 50, 80, 127)),
+    PR("filament", EG_SYNC, 100, 0, 0, 90, VM_LEGATO, 20, 108, 0, 60, 100, 40, 0, 60, 0, 40, 110, 10, 64, 64, FT_LP12, 25, 20, VIB(30), NOCH),
+    PR("tinsel", EG_SYNC, 80, 0, 20, 60, VM_POLY, 0, 124, 0, 72, 20, 70, 0, 60, 0, 50, 115, 5, 64, 64, FT_LP12, 25, 50, NOLFO, (CT_DRIVE, 60, 120, 127)),
     /* swarm: fleece, soft and a little wild. swarm, ring, tone, spread */
-    PR("mohair", EG_SWARM, 30, 0, 30, 20, VM_POLY, 0, 98, 30, 82, 90, 82, 0, 60, 0, 40, 105, 5, 64, 64, FT_LP12, 5, 50, NOLFO),
-    PR("fleece pad", EG_SWARM, 50, 20, 15, 50, VM_POLY, 0, 95, 92, 90, 100, 100, 70, 80, 40, 80, 95, 5, 64, 64, FT_LP12, 5, 80, NOLFO),
-    PR("glint lead", EG_SWARM, 15, 10, 75, 10, VM_LEGATO, 30, 112, 2, 60, 100, 45, 0, 60, 0, 40, 110, 10, 64, 64, FT_LP12, 20, 20, NOLFO),
-    PR("gossamer", EG_SWARM, 25, 0, 40, 80, VM_POLY, 0, 97, 70, 85, 90, 100, 0, 60, 0, 40, 115, 0, 64, 64, FT_LP12, 10, 90, (LT_WAVE, 30, 90, LD_SYNTH + LD_FREE, 2, 1)),
-    PR("fuzz bass", EG_SWARM, 10, 25, 80, 0, VM_MONO, 0, 127, 0, 70, 90, 35, 0, 60, 0, 30, 95, 10, 90, 40, FT_LP24, 0, 5, NOLFO),
-    PR("breeze", EG_SWARM, 100, 40, 45, 70, VM_POLY, 0, 100, 80, 90, 100, 96, 0, 60, 0, 40, 92, 20, 64, 64, FT_LP12, 0, 70, (LT_DRIFT, 30, 70, LD_FILTER + LD_FREE, 0, 64)),
-    PR("cashmere", EG_SWARM, 20, 0, 10, 30, VM_POLY, 0, 102, 40, 90, 70, 90, 0, 60, 0, 40, 90, 5, 64, 64, FT_LP12, 5, 60, NOLFO),
-    PR("burr", EG_SWARM, 70, 110, 50, 60, VM_POLY, 0, 122, 10, 72, 80, 56, 0, 60, 0, 40, 100, 10, 64, 64, FT_LP24, 15, 35, NOLFO),
+    PR("mohair", EG_SWARM, 30, 10, 55, 25, VM_POLY, 0, 91, 30, 82, 90, 82, 0, 60, 0, 40, 110, 5, 64, 64, FT_LP12, 5, 50, NOLFO, NOCH),
+    PR("fleece pad", EG_SWARM, 50, 20, 30, 70, VM_POLY, 0, 95, 92, 90, 100, 100, 70, 80, 40, 80, 95, 5, 64, 64, FT_LP12, 5, 80, (LT_WAVE, 35, 90, LD_SYNTH + LD_FREE, 1, 1), NOCH),
+    PR("glint lead", EG_SWARM, 15, 30, 110, 10, VM_LEGATO, 30, 118, 2, 60, 100, 45, 0, 60, 0, 40, 120, 10, 64, 64, FT_LP12, 20, 20, NOLFO, (CT_FOLD, 95, 70, 127)),
+    PR("gossamer", EG_SWARM, 110, 0, 80, 80, VM_POLY, 0, 84, 70, 85, 90, 100, 0, 60, 0, 40, 127, 0, 64, 64, FT_LP12, 10, 90, (LT_WAVE, 30, 90, LD_SYNTH + LD_FREE, 2, 1), (CT_RING, 90, 120, 127)),
+    PR("fuzz bass", EG_SWARM, 10, 25, 70, 0, VM_MONO, 0, 127, 0, 70, 90, 35, 0, 60, 0, 30, 90, 10, 90, 40, FT_LP24, 0, 5, NOLFO, (CT_FOLD, 75, 70, 127)),
+    PR("breeze", EG_SWARM, 127, 40, 45, 70, VM_POLY, 0, 105, 80, 90, 100, 96, 0, 60, 0, 40, 110, 20, 64, 64, FT_LP12, 0, 70, (LT_DRIFT, 30, 70, LD_FILTER + LD_FREE, 0, 64), (CT_TILT, 64, 100, 127)),
+    PR("cashmere", EG_SWARM, 15, 0, 0, 30, VM_POLY, 0, 97, 40, 90, 70, 90, 0, 60, 0, 40, 60, 5, 64, 64, FT_LP12, 5, 60, NOLFO, NOCH),
+    PR("burr", EG_SWARM, 70, 110, 70, 60, VM_POLY, 0, 127, 10, 70, 50, 56, 0, 60, 0, 40, 100, 10, 64, 64, FT_LP24, 15, 35, NOLFO, (CT_FOLD, 90, 90, 127)),
 };
 const int NPRESETS = (int)(sizeof PRESETS / sizeof PRESETS[0]);
 

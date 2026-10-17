@@ -35,7 +35,7 @@ uint8_t proj_slot;
 typedef char raw_fits[(RAW_LEN < 0x100000u) ? 1 : -1];   /* (lz.c packs up to 16 MB; the header's length is a u32) */
 typedef char settings_fit[(sizeof(settings_t) <= PLAT_STORE_MAX) ? 1 : -1];
 typedef char presets_fit[(sizeof user_presets + 4u <= PLAT_STORE_MAX) ? 1 : -1];
-#define PRESETS_FORMAT 2u                /* 2: engine 0 is weft (was simple) */
+#define PRESETS_FORMAT 3u                /* 3: the character stage (TP_CTYPE..TP_CMIX); 2: engine 0 is weft */
 
 static uint32_t packed_len;             /* the last save's (or load's) packed stream, bytes */
 int project_mem_pct(void) { return (int)((packed_len * 100u + STREAM_CAP - 1u) / STREAM_CAP); }
