@@ -1,7 +1,7 @@
 # LOOM-8 for the M-VAVE FM-1
 
 LOOM-8 turns the M-VAVE FM-1 into a pocket groovebox: eight instrument tracks, each in its own colour, on
-eight synth engines and a drum kit; a 64-step sequencer with step tricks and parameter locks; players (arp,
+eight synth engines, a sample player, a break slicer and a drum kit; a 64-step sequencer with step tricks and parameter locks; players (arp,
 strum, hold); weave, which crosses two patterns (bar by bar, step by step, or one's rhythm with the other's
 notes); throws (momentary effects); a conductor track that moves the song through a progression; two
 send-effect tracks (the reverb with the PlayStation's reverbs among its modes), a mixer with EQ, a tape

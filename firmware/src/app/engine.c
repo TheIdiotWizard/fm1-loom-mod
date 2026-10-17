@@ -101,6 +101,10 @@ void engine_set_core2(int (*run)(void (*)(uint32_t), uint32_t), int (*wait)(void
     c2_run = run;
     c2_wait = wait;
 }
+int engine_slice_now(int trk, int *slice, int32_t *pos)
+{
+    return trk >= 0 && trk < NTRK && synth_slice_now(SY, trk, slice, pos);
+}
 int engine_core2_state(void)
 {
     if (!c2_run)

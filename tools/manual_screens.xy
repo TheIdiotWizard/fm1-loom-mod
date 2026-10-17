@@ -269,9 +269,19 @@ shot weave.png
 tap SEL
 wait 1600
 shot woven.png
-# ---- the sample engine (on track 3, where weave left us)
+# ---- the sample engine (on track 3)
+spin ALGO 1
+expect trk 3
 tap EDIT
 param 3 0 9
 turn PRESET 1
 wait 1600
 shot sample_engine.png
+# ---- the slice engine: the break, a slice playing (A3: slice 5 of 8)
+param 3 0 10
+turn PRESET 1
+wait 1600
+key w2 down
+wait 120
+shot slice_engine.png
+key w2 up

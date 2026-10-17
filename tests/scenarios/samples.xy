@@ -156,7 +156,7 @@ shot sample_list.png
 tap HOME
 # the user bank: its samples after the factory's
 samples build/gen/user_bank.bin
-param 3 1 7
+param 3 1 8
 param 3 4 0
 wait 60
 shot sample_user.png
@@ -166,7 +166,7 @@ wait 400
 tapkey w7
 wait 600
 wavstop
-param 3 1 9
+param 3 1 10
 wait 60
 shot sample_user_empty.png
 listen

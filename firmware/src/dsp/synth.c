@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* LOOM-8 voices: sixteen voices playing nine engines (synth.h), each with two ADSRs, a filter (six
+/* LOOM-8 voices: sixteen voices playing ten engines (synth.h), each with two ADSRs, a filter (six
  * types), a character stage (six types: drive, fold, crush, ring, tilt, rectify), a steal fade and sends; per track an LFO, a mono stack, parameter locks and
  * performance offsets.
  *
@@ -40,16 +40,16 @@
 
 /* ------------------------------------------------------------------ names --- */
 const char *const EG_NAME[NENGINE] = {"weft", "stack", "wavetable", "orbit", "tines", "organ", "sync",
-                                      "swarm", "kit", "sample"};
+                                      "swarm", "kit", "sample", "slice"};
 const char *const EG_KNOB[NENGINE][4] = {
     {"bend", "wave", "sweep", "spread"},   {"wave", "ratio", "detune", "spread"}, {"table", "scan", "bend", "ripple"},
     {"bright", "ratio", "edge", "wobble"}, {"bright", "grit", "bite", "bell"},    {"stops", "pedal", "rotor", "rate"},
     {"reach", "sub", "hiss", "thin"},      {"swarm", "ring", "tone", "spread"},   {"-", "-", "-", "-"},
-    {"sample", "start", "length", "mode"}};
+    {"sample", "start", "length", "mode"},  {"sample", "slices", "pitch", "gate"}};
 /* each engine's plain sound (INIT), 0..127; the organ's four and stack's ratio are discrete 1..8 */
 static const uint8_t EG_DEF[NENGINE][4] = {{40, 0, 20, 0}, {0, 2, 12, 64}, {0, 40, 0, 0}, {40, 25, 0, 0},
                                            {50, 0, 40, 50}, {3, 4, 2, 5},  {30, 0, 0, 0}, {30, 0, 30, 20},
-                                           {0, 0, 0, 0},    {5, 0, 127, SM_ONESHOT}};
+                                           {0, 0, 0, 0},    {5, 0, 127, SM_ONESHOT}, {SMP_BREAK, 1, 64, 127}};
 static const char *const VMODE_N[3] = {"poly", "mono", "legato"};
 static const char *const FTYPE_N[NFT] = {"lp24", "ladder", "lp12", "hp12", "dynamic", "bp12"};
 static const char *const LTYPE_N[NLT] = {"off", "wave", "wobble", "drift", "pump"};
@@ -78,6 +78,7 @@ static const char *const FLTP_N[4] = {"cutoff", "reso", "env", "keytrack"};
 static const char *const AMPP_N[4] = {"volume", "pitch", "pan", "character"};
 static const char *const CTYPE_N[NCT] = {"off", "drive", "fold", "crush", "ring", "tilt", "rectify"};
 static const char *const SMODE_N[NSM] = {"one-shot", "loop", "reverse", "ping-pong"};
+static const char *const SLICES_N[SL_NCOUNT] = {"4", "8", "16", "32"};
 static const char *const DFTYPE_N[NDF] = {"off", "lp", "hp", "bp"};
 /* ring: the modulator's ratios to the note, tone / 8 */
 static const float RING_R[16] = {0.25f, 0.5f, 0.75f, 1.0f, 1.25f, 1.414f, 1.5f, 1.75f, 2.0f, 2.5f, 2.76f, 3.0f, 3.5f,
@@ -888,6 +889,157 @@ static void smp_run(voice_t *v, float *xl, float *xr, int m)
     v->o[2] = (float)dir;
 }
 
+/* slice: a loop cut into even slices (synth.h EG_SLICE), the note choosing one: (note - root) mod slices. Its
+ * rate: a sample that states its bars lasts that many bars at the tempo (n samples in bars * 4 beats), else
+ * its own (22.05 kHz); the pitch knob (and the bend, an LFO on the pitch) on top, so a slice pitched down
+ * plays longer than its place in the bar. The gate is the share of the slice that plays, then the voice
+ * ends (as one-shot); every slice fades in over SL_FADE_IN frames and out over the last SL_FADE_OUT before
+ * its gate's end, so a cut never clicks. A mono retrigger, or a legato note picking another slice, fades the
+ * old one out over SL_SWITCH frames first (one cache window a voice: no second read position to crossfade
+ * with); legato then goes on at the same place in the new slice, the time running on.
+ * o[0] the position, o[1] its fraction, o[2] the slice playing, o[3] 1 = done, o[4] 1 = started, o[5] frames
+ * into the slice (its fade in), o[6] the switch's fade (0 .. 1 = silent), o[7] a switch waiting: 1 the note's
+ * slice from its start (a retrigger), 2 the note's slice at the same place (legato), 3 the end (the gate
+ * turned down behind the position), o[8] the gate's end the last time (in the sample) */
+#define SL_FADE_IN 32.0f                         /* 0.7 ms */
+#define SL_FADE_OUT 96.0f                        /* 2.2 ms */
+#define SL_SWITCH 64.0f                          /* 1.5 ms */
+static void slc_prep(voice_t *v, float bpm)
+{
+    cfg_t *c = &v->c;
+    int idx = (int)fm_clampf(fm_floorf(c->ek[0] + 0.5f), 0.0f, (float)(smp_slots() - 1));
+    const smp_t *sm = smp_get(idx);
+    float rate, semi;
+    c->stereo = 0;
+    c->ex[6] = (float)idx;
+    c->ex[7] = (float)sl_count((int)(c->ek[1] + 0.5f));
+    if (!sm || sm->n < 64u) {
+        c->ex[0] = 0.0f;
+        return;
+    }
+    rate = sm->bars ? (float)sm->n * bpm * (1.0f / (240.0f * SY_SR)) / (float)sm->bars : (float)SMP_RATE / SY_SR;
+    semi = fm_clampf(c->ek[2], 40.0f, 88.0f) - 64.0f + c->pitch_off * 0.01f;
+    c->ex[0] = fm_clampf(rate * fm_exp2f(semi * (1.0f / 12.0f)), 0.01f, 8.0f);
+    c->ex[1] = fm_maxf(c->e[3], 0.02f);
+    c->ex[2] = (float)sm->root;
+    c->ex[3] = 1.0f / (c->ex[0] * SL_FADE_OUT);  /* source samples to the gate's end -> the fade out's gain */
+}
+/* slice k of ns: its first sample s0 and the gate's end e */
+static void slc_bounds(const smp_t *sm, int ns, int k, float gate, int32_t *s0, int32_t *e)
+{
+    int32_t a = (int32_t)((uint32_t)k * sm->n / (uint32_t)ns), b = (int32_t)((uint32_t)(k + 1) * sm->n / (uint32_t)ns);
+    int32_t g = (int32_t)(gate * (float)(b - a));
+    *s0 = a;
+    *e = a + (g < 32 ? 32 : g > b - a ? b - a : g);
+}
+static void slc_run(voice_t *v, float *xl, float *xr, int m)
+{
+    const cfg_t *c = &v->c;
+    const smp_t *sm = smp_get((int)c->ex[6]);
+    const int ns = (int)c->ex[7];
+    const float inc = c->ex[0], gate = c->ex[1];
+    smp_cache_t *ca = &smp_vc[v->vi % NVOICE];
+    float fr = v->o[1], fin = v->o[5], sw = v->o[6];
+    int32_t pos = (int32_t)v->o[0], s0 = 0, e = 0;
+    int cur = (int)v->o[2], pend = (int)v->o[7], want = 0, i = 0;
+    int done = !sm || inc <= 0.0f || v->o[3] > 0.5f || ns < 1;
+    (void)xr;
+    if (!done) {
+        int d = ((int)v->note - (int)c->ex[2]) % ns;
+        want = d < 0 ? d + ns : d;
+        if (v->o[4] < 0.5f) {                    /* the note's first sample: its slice's start */
+            v->o[4] = 1.0f;
+            cur = want;
+            pend = 0;
+            sw = fin = fr = 0.0f;
+            slc_bounds(sm, ns, cur, gate, &s0, &e);
+            pos = s0;
+        } else if (!pend && (want != cur || cur >= ns)) {
+            pend = 2;                            /* (a legato note on another slice, the slices turned) */
+        }
+    }
+    while (!done && i < m) {
+        int k, j, req = m - i;
+        float lo;
+        if (pend == 3 && sw >= 1.0f) {           /* faded out past a gate turned down: the end */
+            done = 1;
+            break;
+        }
+        if (pend && sw >= 1.0f) {                /* faded out: the switch */
+            int32_t off = 0;
+            if (pend == 2 && cur < ns) {
+                slc_bounds(sm, ns, cur, gate, &s0, &e);
+                off = pos - s0;
+            } else {
+                fr = 0.0f;
+            }
+            cur = want;
+            slc_bounds(sm, ns, cur, gate, &s0, &e);
+            pos = s0 + (off > 0 ? off : 0);
+            pend = 0;
+            sw = fin = 0.0f;
+            if (pos >= e) {
+                done = 1;
+                break;
+            }
+        }
+        slc_bounds(sm, ns, cur, gate, &s0, &e);
+        if (!pend && pos >= e && cur < ns) {     /* at the gate's end: it has played; or the gate was turned
+                                                  * down behind the position: a fade, then the end */
+            if ((float)e >= v->o[8]) {
+                done = 1;
+                break;
+            }
+            pend = 3;
+        }
+        v->o[8] = (float)e;
+        if (pend == 3)                           /* (meanwhile on into the slice, the gate's fade out of it) */
+            slc_bounds(sm, ns, cur, 1.0f, &s0, &e);
+        if (pend) {                              /* up to the switch */
+            int left = (int)((1.0f - sw) * SL_SWITCH + 0.999f);
+            req = left < 1 ? 1 : left < req ? left : req;
+        }
+        lo = pend == 3 ? 1e9f : ((float)(e - pos) - fr) * c->ex[3];
+        k = smp_play(ca, sm, &pos, &fr, inc, 1, s0, e, xl + i, req);
+        for (j = 0; j < k; j++) {                /* the fades: in, out at the gate's end, the switch's */
+            float g = fm_minf(fm_minf((fin + (float)j) * (1.0f / SL_FADE_IN), lo - (float)j * (1.0f / SL_FADE_OUT)), 1.0f);
+            if (pend)
+                g *= 1.0f - fm_minf(sw + (float)j * (1.0f / SL_SWITCH), 1.0f);
+            xl[i + j] *= fm_maxf(g, 0.0f);
+        }
+        fin = fm_minf(fin + (float)k, SL_FADE_IN);
+        if (pend)
+            sw = fm_minf(sw + (float)k * (1.0f / SL_SWITCH), 1.0f);
+        i += k;
+        if (k < req) {                           /* the gate's end: the slice has played */
+            if (pend)
+                sw = 1.0f;                       /* (a switch waiting: now) */
+            else
+                done = 1;
+        }
+    }
+    if (done) {                                  /* silence: the voice is free (as the sample engine's one-shot) */
+        for (; i < m; i++)
+            xl[i] = 0.0f;
+        v->o[3] = 1.0f;
+        v->amp.stage = ENV_OFF;
+        v->amp.level = 0.0f;
+    }
+    v->o[0] = (float)pos;
+    v->o[1] = fr;
+    v->o[2] = (float)cur;
+    v->o[5] = fin;
+    v->o[6] = sw;
+    v->o[7] = (float)pend;
+}
+static void slc_retrigger(voice_t *v)            /* a mono retrigger: the playing slice fades, the note's starts */
+{
+    if (v->o[4] > 0.5f && v->o[3] < 0.5f)
+        v->o[7] = 1.0f;
+    else
+        v->o[3] = v->o[4] = 0.0f;
+}
+
 static void eng_chunk(voice_t *v)                /* every chunk: the engines' own slow movements */
 {
     switch (v->engine) {
@@ -897,7 +1049,7 @@ static void eng_chunk(voice_t *v)                /* every chunk: the engines' ow
     default: break;
     }
 }
-static void eng_prep(voice_t *v)
+static void eng_prep(voice_t *v, float bpm)
 {
     switch (v->engine) {
     case EG_WEFT: weft_prep(v); break;
@@ -908,6 +1060,7 @@ static void eng_prep(voice_t *v)
     case EG_ORGAN: organ_prep(v); break;
     case EG_SYNC: hs_prep(v); break;
     case EG_SAMPLE: smp_prep(v); break;
+    case EG_SLICE: slc_prep(v, bpm); break;
     default: dis_prep(v); break;
     }
 }
@@ -922,6 +1075,7 @@ static void eng_run(voice_t *v, float *xl, float *xr, int m)
     case EG_ORGAN: organ_run(v, xl, xr, m); break;
     case EG_SYNC: hs_run(v, xl, xr, m); break;
     case EG_SAMPLE: smp_run(v, xl, xr, m); break;
+    case EG_SLICE: slc_run(v, xl, xr, m); break;
     default: dis_run(v, xl, xr, m); break;
     }
 }
@@ -959,8 +1113,10 @@ static void voice_start(synth_t *s, voice_t *v, int note, int vel, int glide_ms,
         v->o[14] = 1.0f;
         v->o[13] = 1.0f;
     }
-    if (v->engine == EG_SAMPLE)                  /* from the region's start again */
+    if (v->engine == EG_SAMPLE || v->engine == EG_SLICE) {   /* from the region's (the slice's) start again */
         v->o[3] = v->o[4] = 0.0f;
+        v->o[6] = v->o[7] = 0.0f;
+    }
     if (!in_render)
         t->last_pitch = v->pitch;
     v->fresh = 1;
@@ -1116,6 +1272,8 @@ void synth_note_on(synth_t *s, int trk, int note, int vel, int glide_ms, uint32_
                     v->o[15] = v->o[14] = v->o[13] = 1.0f;
                 if (v->engine == EG_SAMPLE)
                     v->o[3] = v->o[4] = 0.0f;
+                if (v->engine == EG_SLICE)
+                    slc_retrigger(v);
             }
             return;
         }
@@ -1601,11 +1759,10 @@ static void char_run(voice_t *v, float *xl, float *xr, int k)
 /* ------------------------------------------------------------ the chunk --- */
 static void voice_pitch(synth_t *s, voice_t *v)
 {
-    (void)s;
     v->c.freq = 440.0f * fm_exp2f((v->pitch_cur - 69.0f + v->c.pitch_off * 0.01f) * (1.0f / 12.0f));
     if (v->c.freq > 18000.0f)
         v->c.freq = 18000.0f;
-    eng_prep(v);
+    eng_prep(v, s->bpm);
 }
 
 /* a chunk boundary: the parameters into c */
@@ -2007,6 +2164,23 @@ int synth_sounding(const synth_t *s, int v0, int v1)
             return 1;
     return 0;
 }
+int synth_slice_now(const synth_t *s, int trk, int *slice, int32_t *pos)
+{
+    int i, best = -1;
+    for (i = 0; i < NVOICE; i++) {
+        const voice_t *v = &s->v[i];
+        if (v->trk != trk || v->engine != EG_SLICE || v->amp.stage == ENV_OFF || v->steal_phase == 1 ||
+            v->o[4] < 0.5f || v->o[3] > 0.5f)
+            continue;
+        if (best < 0 || v->age > s->v[best].age)
+            best = i;
+    }
+    if (best < 0)
+        return 0;
+    *slice = (int)s->v[best].o[2];
+    *pos = (int32_t)s->v[best].o[0];
+    return 1;
+}
 int synth_voices_used(const synth_t *s)
 {
     int i, n = 0;
@@ -2108,6 +2282,13 @@ static void eknob_init(void)
                 i->kind = k == 0 ? PK_SAMPLE : k == 3 ? PK_NAMES : PK_PCT;
                 i->hi = (uint8_t)(k == 0 ? smp_slots() - 1 : k == 3 ? NSM - 1 : 127);
                 i->names = k == 3 ? SMODE_N : 0;
+            }
+            if (e == EG_SLICE) {               /* sample, slices (4 8 16 32), pitch (+-24 st), gate */
+                static const uint8_t KIND[4] = {PK_SAMPLE, PK_NAMES, PK_BIPST, PK_PCT};
+                i->kind = KIND[k];
+                i->lo = (uint8_t)(k == 2 ? 40 : 0);
+                i->hi = (uint8_t)(k == 0 ? smp_slots() - 1 : k == 1 ? SL_NCOUNT - 1 : k == 2 ? 88 : 127);
+                i->names = k == 1 ? SLICES_N : 0;
             }
         }
         lparam[e] = LFO_PARAM_ENV;
@@ -2388,7 +2569,7 @@ void sound_default(uint8_t *par, int engine)
  * (3 = 1/4), above free: 20 is about 0.16 Hz, 40 0.45 Hz, 60 1.2 Hz, 80 3 Hz, 92 5.6 Hz.
  * Times: 32 is about 10 ms, 64 100 ms, 80 330 ms, 96 1.1 s, 110 3 s. Cutoff: 59 is 800 Hz, 80 2.2 kHz,
  * 100 5.6 kHz. Each engine is a material of the loom: weft cotton, stack ply, wavetable silk, orbit linen,
- * tines felt, organ reed, sync wire, swarm fleece, sample jute. Each engine's eight span it: a bass, a lead, a pad, something
+ * tines felt, organ reed, sync wire, swarm fleece, sample jute, slice the loom itself. Each engine's eight span it: a bass, a lead, a pad, something
  * struck, a bright one and a dark one, one that moves; the volumes put each preset's phrase (tools/render_presets.sh)
  * near -19.5 dBFS RMS dry, its peak under -1.5 dBFS. */
 #define LFO_(lt, ls, la, ld, lx, lx2) lt, ls, la, ld, lx, lx2
@@ -2476,7 +2657,7 @@ const preset_t PRESETS[] = {
     PR("cashmere", EG_SWARM, 15, 0, 0, 30, VM_POLY, 0, 97, 40, 90, 70, 90, 0, 60, 0, 40, 60, 5, 64, 64, FT_LP12, 5, 60, NOLFO, NOCH),
     PR("burr", EG_SWARM, 70, 110, 70, 60, VM_POLY, 0, 127, 10, 70, 50, 56, 0, 60, 0, 40, 100, 10, 64, 64, FT_LP24, 15, 35, NOLFO, (CT_FOLD, 90, 90, 127)),
     /* sample: jute and the bast fibres, the bank's own sounds played by the keys. sample (0 kick, 1 snare, 2 hat,
-     * 3 clap, 4 ah, 5 piano, 6 sweep; then the user bank), start, length, mode (one-shot, loop, reverse, pingpong) */
+     * 3 clap, 4 ah, 5 piano, 6 sweep, 7 break; then the user bank), start, length, mode (one-shot, loop, reverse, pingpong) */
     PR("jute keys", EG_SAMPLE, 5, 0, 127, SM_ONESHOT, VM_POLY, 0, 120, 0, 80, 100, 66, 0, 70, 0, 50, 110, 5, 64, 64, FT_LP12, 10, 30, NOLFO, (CT_DRIVE, 25, 110, 127)),
     PR("jute choir", EG_SAMPLE, 4, 0, 127, SM_LOOP, VM_POLY, 0, 90, 88, 90, 100, 92, 60, 90, 60, 90, 92, 8, 70, 50, FT_LP12, 10, 75, (LT_WAVE, 25, 90, LD_FILTER + LD_FREE, 0, 1), NOCH),
     PR("hessian", EG_SAMPLE, 4, 0, 127, SM_PINGPONG, VM_LEGATO, 25, 116, 10, 80, 100, 60, 0, 66, 40, 50, 96, 15, 76, 64, FT_LP24, 25, 25, VIB(30), (CT_DRIVE, 40, 115, 127)),
@@ -2485,6 +2666,17 @@ const preset_t PRESETS[] = {
     PR("raffia", EG_SAMPLE, 5, 0, 127, SM_REVERSE, VM_POLY, 0, 127, 30, 80, 100, 60, 0, 70, 0, 50, 100, 5, 64, 64, FT_LP12, 20, 60, NOLFO, (CT_TILT, 60, 80, 127)),
     PR("coir", EG_SAMPLE, 1, 0, 30, SM_PINGPONG, VM_POLY, 0, 127, 0, 80, 70, 60, 0, 50, 0, 40, 100, 40, 90, 64, FT_LP12, 15, 35, NOLFO, (CT_CRUSH, 45, 60, 127)),
     PR("flax bell", EG_SAMPLE, 5, 4, 127, SM_ONESHOT, VM_POLY, 0, 127, 0, 92, 0, 85, 0, 80, 0, 70, 120, 0, 64, 64, FT_LP12, 15, 60, NOLFO, (CT_RING, 40, 104, 127)),
+    /* slice: the loom itself and its parts, a break cut and woven again. sample (7 the break), slices (0 4, 1 8,
+     * 2 16, 3 32), pitch (64 = 0, +-24 semitones), gate. Keytrack 0 (every slice the same filter), sustain full
+     * and a long release: the gate decides how much plays, not the step's length */
+    PR("loom break", EG_SLICE, SMP_BREAK, 1, 64, 127, VM_POLY, 0, 118, 0, 80, 127, 120, 0, 60, 0, 40, 127, 0, 64, 0, FT_LP12, 0, 15, NOLFO, NOCH),
+    PR("chop", EG_SLICE, SMP_BREAK, 2, 64, 70, VM_MONO, 0, 122, 0, 80, 127, 50, 0, 60, 0, 40, 110, 10, 64, 0, FT_LP12, 10, 15, NOLFO, (CT_DRIVE, 50, 100, 127)),
+    PR("shuttle", EG_SLICE, SMP_BREAK, 3, 64, 85, VM_POLY, 0, 127, 0, 80, 127, 80, 0, 60, 0, 40, 118, 5, 64, 0, FT_LP12, 15, 20, NOLFO, (CT_DRIVE, 60, 105, 127)),
+    PR("heddle", EG_SLICE, SMP_BREAK, 0, 52, 127, VM_MONO, 0, 110, 0, 80, 127, 90, 0, 60, 0, 40, 90, 15, 64, 0, FT_LP24, 0, 20, NOLFO, (CT_DRIVE, 60, 70, 127)),
+    PR("treadle", EG_SLICE, SMP_BREAK, 1, 71, 80, VM_POLY, 0, 118, 0, 80, 127, 70, 0, 60, 0, 40, 127, 0, 64, 0, FT_LP12, 10, 20, NOLFO, (CT_TILT, 50, 90, 127)),
+    PR("bobbin", EG_SLICE, SMP_BREAK, 2, 64, 25, VM_POLY, 0, 127, 0, 80, 127, 40, 0, 50, 0, 30, 70, 40, 104, 0, FT_LP12, 15, 25, NOLFO, (CT_RING, 30, 70, 60)),
+    PR("selvedge", EG_SLICE, SMP_BREAK, 1, 64, 100, VM_POLY, 0, 113, 0, 80, 127, 80, 0, 60, 0, 40, 70, 20, 64, 0, FT_HP12, 10, 40, NOLFO, (CT_TILT, 60, 100, 127)),
+    PR("warp beam", EG_SLICE, SMP_BREAK, 1, 59, 127, VM_LEGATO, 0, 127, 0, 80, 127, 90, 0, 60, 0, 40, 85, 30, 64, 0, FT_LP24, 10, 25, (LT_WAVE, 2, 90, LD_FILTER, 0, 1), (CT_CRUSH, 50, 30, 127)),
 };
 const int NPRESETS = (int)(sizeof PRESETS / sizeof PRESETS[0]);
 

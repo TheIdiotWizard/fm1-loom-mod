@@ -4,6 +4,7 @@
  * the block's checkpoint. */
 #include "sample.h"
 #include "samples.h"                      /* build/gen: tools/gen_samples.py */
+_Static_assert(SMP_FACT_BREAK == SMP_BREAK, "the break's place in the factory bank (sample.h SMP_BREAK)");
 
 static const int16_t IMA_STEP[89] = {
     7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88, 97,
@@ -32,6 +33,7 @@ static void fact_init(void)
         s->ls = SMP_FACT[i].ls;
         s->le = SMP_FACT[i].le;
         s->root = SMP_FACT[i].root;
+        s->bars = SMP_FACT[i].bars;
         for (k = 0; k < SMP_NAME - 1 && SMP_FACT[i].name[k]; k++)
             s->name[k] = SMP_FACT[i].name[k];
         s->name[k] = 0;
@@ -211,7 +213,8 @@ void smp_user_attach(const uint8_t *base) { user_base = base; }
 void smp_user_drop(void) { user_n = 0; }
 
 /* the header (tools/sampleio.py user_bank): magic, version 1, count, data length, CRC, 16 x 36-byte
- * entries; each entry checked against the data it points into, the data against its CRC */
+ * entries; each entry checked against the data it points into, the data against its CRC. An entry's byte 34
+ * is its bars (a spare byte before: 0 in older banks, which then state none) */
 int smp_user_scan(void)
 {
     const uint8_t *h = user_base, *d;
@@ -241,6 +244,7 @@ int smp_user_scan(void)
         s->ls = ls;
         s->le = le;
         s->root = e[32];
+        s->bars = e[34] <= SMP_BARS_MAX ? e[34] : 0u;
         for (k = 0; k < SMP_NAME - 1 && e[k] >= 32u && e[k] < 127u; k++)
             s->name[k] = (char)e[k];
         s->name[k] = 0;
