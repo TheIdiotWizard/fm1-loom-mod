@@ -288,6 +288,13 @@ static void loom_text_box(uint32_t x, uint32_t y, uint32_t w, const loom_font_t 
     lcd_sync();
 }
 
+/* fm1-base's own screens in LOOM-8's faces (base/device/sys_text.c, APP_SYS_TEXT): the body, a heading, the big
+ * one (the panel's screens: the heading's face, as before) */
+static const loom_font_t *const SYS_FACE[3] = {&LFONT_S, &LFONT_B, &LFONT_B};
+static int32_t app_sys_h(int face) { return SYS_FACE[face]->h; }
+static int32_t app_sys_w(int face, const char *s) { return loom_text_w(SYS_FACE[face], s); }
+static void app_sys_text(int32_t x, int32_t y, int face, const char *s, uint16_t c) { loom_text(x, y, SYS_FACE[face], s, c); }
+
 /* from here on, the app draws with these */
 #define felucca_font_t loom_font_t
 #define FONT_XS LFONT_XS

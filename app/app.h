@@ -14,7 +14,8 @@
                                          * at most (felucca-bsp usb.c); LOOM-8's own platform had 512-frame halves,
                                          * each rendered as two 256-frame calls, which is what the simulator always did */
 #define APP_CANVAS_PX (240u * 120u)     /* the tallest band, the main one, is 240 x 120 */
-#define APP_BIG_FONT FONT_B             /* fm1-base's panel screens (OCT- + OCT+ at power-on): a face it has anyway */
+#define APP_SYS_TEXT                    /* fm1-base's own screens (crash, update, restore, calibration) in LOOM-8's faces:
+                                         * gfx_loom.c app_sys_*; fm1-base's are then not linked (18 KB) */
 
 /* the store, all in the data area: the panel calibration (the platform's, where every fm1-base firmware keeps it),
  * the user presets at 0xDE000, then NPROJ project slots of PROJ_NOBJ objects each (the settings, then the LZ chunks
