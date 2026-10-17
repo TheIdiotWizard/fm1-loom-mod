@@ -2058,19 +2058,43 @@ static void draw_bar(void)
 
 /* the engines' pictures */
 /* the engines' pictures: each follows its four knobs (p[TP_E1..E4], 0..127), redrawn as they turn */
-static void pic_simple(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
+static float weft_pic_v(float ph, float d, float kd, float kd2, float mo, float r, int reso)   /* synth.c weft_wave */
 {
-    /* shape: saw to square; pw: the square's duty; noise: grain on the line; stereo: a second line apart */
-    int32_t cy = y0 + h / 2, amp = h / 2 - 8, per = 50, duty = per * (16 + p[TP_E2] * 96 / 127) / 128;
-    uint32_t r = 77u;
-    (void)f;
-    for (int line = 0; line < (p[TP_E4] > 16 ? 2 : 1); line++) {
-        int32_t py = -1, off = line ? 4 + p[TP_E4] / 12 : 0;
+    float qs = ph < d ? ph * kd : 0.5f + (ph - d) * kd2;
+    float qp = ph < 0.5f ? fm_minf(ph * kd, 0.5f) : 0.5f + fm_minf((ph - 0.5f) * kd, 0.5f);
+    if (!reso)
+        return fm_sin_turns(qs + (qp - qs) * mo + 0.25f);
+    {
+        float pl = fm_sin_turns(qp + 0.25f), rs = (1.0f - ph) * fm_sin_turns(r * qs);
+        return pl + (rs - pl) * mo;
+    }
+}
+static void pic_weft(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
+{
+    /* two cycles of the wave over its bent phase (the faint ramp): bend moves the bend point, wave turns
+     * saw into pulse into the resonant sine under its falling window, sweep packs that sine's cycles in,
+     * spread draws the detuned copy drifting beside it */
+    float b = (float)p[TP_E1] * (1.0f / 127.0f), wv = (float)p[TP_E2] * (1.0f / 127.0f);
+    float r = 1.0f + 15.0f * (float)p[TP_E3] * (1.0f / 127.0f), d = 0.5f * fm_exp2f(-4.64f * b);
+    float kd = 0.5f / d, kd2 = 0.5f / (1.0f - d), mo = wv < 0.5f ? wv * 2.0f : wv * 2.0f - 1.0f;
+    int reso = wv >= 0.5f, sp = p[TP_E4];
+    int32_t per = w / 2, cy = y0 + h / 2, amp = h / 2 - 8, py = -1;
+    for (int32_t x = 0; x < w; x++) {                /* the bent phase, a faint ramp each cycle */
+        float ph = (float)(x % per) / (float)per;
+        float qs = ph < d ? ph * kd : 0.5f + (ph - d) * kd2;
+        float qp = ph < 0.5f ? fm_minf(ph * kd, 0.5f) : 0.5f + fm_minf((ph - 0.5f) * kd, 0.5f);
+        float q = reso ? qp + (qs - qp) * mo : qs + (qp - qs) * mo;
+        int32_t y = y0 + h - 4 - (int32_t)(q * (float)(h - 8));
+        if (py >= 0 && x % per)
+            cv_line(x0 + x - 1, py, x0 + x, y, K_LINE);
+        py = y;
+    }
+    for (int line = sp > 8 ? 1 : 0; line >= 0; line--) {   /* the copy first, the wave on top */
+        int32_t off = line ? (int32_t)((f * (1u + (uint32_t)sp / 24u)) % (uint32_t)per) : 0;
+        py = -1;
         for (int32_t x = 0; x < w; x++) {
-            int32_t ph = (x + off) % per, saw = amp - 2 * amp * ph / per, sq = ph < duty ? -amp : amp;
-            int32_t y = cy + (saw * (127 - p[TP_E1]) + sq * p[TP_E1]) / 127;
-            r = r * 1664525u + 1013904223u;
-            y += (int32_t)((r >> 24) % 17u) * p[TP_E3] / 127 - 8 * p[TP_E3] / 127;
+            float ph = (float)((x + off) % per) / (float)per;
+            int32_t y = cy - (int32_t)(weft_pic_v(ph, d, kd, kd2, mo, r, reso) * (float)amp);
             if (py >= 0)
                 cv_line(x0 + x - 1, py, x0 + x, y, line ? K_DIM : K_NOW);
             py = y;
@@ -2079,8 +2103,8 @@ static void pic_simple(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8
 }
 static void pic_stack(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
 {
-    /* two oscillators stacked: shape bends the first from sine to saw; ratio: the second's cycles over it
-     * (1..8); detune: the second slides against the first; stereo: the two drawn apart */
+    /* two oscillators stacked: wave bends the first from sine to saw; ratio: the second's cycles over it
+     * (1..8); detune: the second slides against the first; spread: the two drawn apart */
     int32_t gap = 6 + p[TP_E4] * 18 / 127, amp = (h - gap) / 4 - 2, ratio = p[TP_E2] < 1 ? 1 : p[TP_E2] > 8 ? 8 : p[TP_E2];
     int32_t cy0 = y0 + h / 2 - gap / 2 - amp, cy1 = y0 + h / 2 + gap / 2 + amp;
     uint32_t slide = p[TP_E3] ? f * (1u + p[TP_E3] / 16u) / 2u : 0u;
@@ -2100,7 +2124,7 @@ static void pic_stack(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_
 }
 static void pic_wave(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
 {
-    /* table: the harmonics; position: their mix; warp: the phase bent; drift: a second cycle sliding */
+    /* table: the harmonics; scan: their mix; bend: the phase bent; ripple: a second cycle sliding */
     int32_t cy = y0 + h / 2, amp = h / 2 - 8, py = -1, harm = 1 + p[TP_E1] * 7 / 127;
     (void)f;
     cv_rect(x0, cy, w, 1, K_LINE);
@@ -2115,7 +2139,7 @@ static void pic_wave(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t
 }
 static void pic_orbit(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
 {
-    /* tone: the ring's size; ratio: the modulator's orbit; shape: its dots; tremolo: its speed */
+    /* bright: the ring's size; ratio: the modulator's orbit; edge: its dots; wobble: its speed */
     int32_t cx = x0 + w / 2, cy = y0 + h / 2, r1 = 14 + p[TP_E1] * (h / 2 - 20) / 127, r2 = 4 + p[TP_E2] * 16 / 127;
     uint32_t k = f * (1u + p[TP_E4] / 32u) / 2u, dots = 4u + p[TP_E3] / 10u;
     for (uint32_t i = 0; i < 32; i++)
@@ -2127,9 +2151,9 @@ static void pic_orbit(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_
         cv_line(cx, cy, mx, my, K_DIM);
     }
 }
-static void pic_epiano(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
+static void pic_tines(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
 {
-    /* tone: the bar's brightness; texture: grit on it; punch: how far the keys sink; tine: the tine's place */
+    /* bright: the bar's brightness; grit: specks on it; bite: how far the keys sink; bell: the tine's place */
     int32_t kw = w / 8, sink = p[TP_E3] * 10 / 127;
     uint32_t r = 5u;
     (void)f;
@@ -2147,7 +2171,7 @@ static void pic_epiano(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8
 static void pic_organ(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
 {
     (void)f;
-    for (int k = 0; k < 4; k++) {                    /* four drawbars: the four knobs */
+    for (int k = 0; k < 4; k++) {                    /* four drawbars: stops, pedal, rotor, rate */
         int32_t x = x0 + 20 + k * (w - 40) / 3 - 6, v = p[TP_E1 + k] * (h - 20) / 127;
         cv_round(x, y0 + 4, 12, h - 8, 3, K_PANEL2);
         cv_round(x, y0 + h - 4 - v - 8, 12, v + 8, 3, k ? K_DIM : K_NOW);
@@ -2155,7 +2179,7 @@ static void pic_organ(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_
 }
 static void pic_sync(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
 {
-    /* freq: the reset's period; sub: a square under it; noise: grain; lowcut: the line lifted */
+    /* reach: the reset's period; sub: a square under it; hiss: grain; thin: the line lifted */
     int32_t base = y0 + h - 6 - p[TP_E4] * 12 / 127, period = 10 + (127 - p[TP_E1]) * 50 / 127, py = base, top = h - 24;
     uint32_t r = 9u;
     (void)f;
@@ -2171,7 +2195,7 @@ static void pic_sync(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t
 }
 static void pic_swarm(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
 {
-    /* swarm: how many; am: squashed tall; fm: smeared wide; detune: two clouds apart */
+    /* swarm: how many; ring: squashed tall; tone: smeared wide; spread: two clouds apart */
     uint32_t r = 0x9E3779B9u ^ (f / 3);
     int32_t sep = p[TP_E4] * 40 / 127, rx = w / 4 + p[TP_E3] * (w / 4) / 127, ry = h / 2 - p[TP_E2] * (h / 4) / 127;
     for (int k = 0; k < 30 + p[TP_E1] / 2; k++) {
@@ -2225,11 +2249,11 @@ static void draw_engine(void)
             text_r(230, 3, &FONT_S, nm, K_DIM);
     }
     switch (eg) {
-    case EG_SIMPLE: pic_simple(20, 24, 200, 88, p, ui.frame); break;
+    case EG_WEFT: pic_weft(20, 24, 200, 88, p, ui.frame); break;
     case EG_STACK: pic_stack(20, 24, 200, 88, p, ui.frame); break;
     case EG_WAVETABLE: pic_wave(20, 24, 200, 88, p, ui.frame); break;
     case EG_ORBIT: pic_orbit(20, 24, 200, 88, p, ui.frame); break;
-    case EG_EPIANO: pic_epiano(20, 24, 200, 88, p, ui.frame); break;
+    case EG_TINES: pic_tines(20, 24, 200, 88, p, ui.frame); break;
     case EG_ORGAN: pic_organ(20, 24, 200, 88, p, ui.frame); break;
     case EG_SYNC: pic_sync(20, 24, 200, 88, p, ui.frame); break;
     case EG_SWARM: pic_swarm(20, 24, 200, 88, p, ui.frame); break;
@@ -2496,9 +2520,11 @@ static void draw_filter(void)
     }
     for (int32_t x = x0; x < x0 + w; x++) {
         int32_t dist = x - fc, y, g;
-        g = dist < 0 ? 0 : dist * (ft == FT_SVF || ft == FT_LADDER ? 2 : 1);
-        if (ft == FT_ZHP)
+        g = dist < 0 ? 0 : dist * (ft == FT_LP24 || ft == FT_LADDER ? 2 : 1);
+        if (ft == FT_HP12)
             g = dist > 0 ? 0 : -dist;
+        if (ft == FT_BP12)
+            g = dist < 0 ? -dist : dist;
         g = g > hh - 8 ? hh - 8 : g;
         {
             int32_t bump = dist > -8 && dist < 8 ? (8 - (dist < 0 ? -dist : dist)) * res / 30 : 0;
@@ -2555,9 +2581,9 @@ static void draw_lfo(void)
     for (int32_t x = 0; lt && x < w; x += 2) {
         int32_t y = cy;
         uint32_t ph = (uint32_t)(x / 4) + ui.frame / 2;
-        if (lt == LT_VALUE || lt == LT_TREMOLO)
+        if (lt == LT_WAVE || lt == LT_WOBBLE)
             y = cy - sin100(ph) * amp / 100;
-        else if (lt == LT_RANDOM) {
+        else if (lt == LT_DRIFT) {
             if (x % 24 == 0)
                 r = r * 1664525u + 1013904223u + (ph / 6);
             y = cy - (int32_t)((r >> 16) % (uint32_t)(2 * amp + 1)) + amp;
@@ -2565,7 +2591,7 @@ static void draw_lfo(void)
             y = cy + amp - (x % 48 < 6 ? 2 * amp : 2 * amp * (48 - x % 48) / 48);
         cv_rect(x0 + x, y, 2, 2, K_NOW);
     }
-    if (lt == LT_VALUE || lt == LT_RANDOM) {
+    if (lt == LT_WAVE || lt == LT_DRIFT) {
         char t[40], num[12], unit[6], *e = s_cat(t, "to ");
         tp_text_par(TP_LDEST, p[TP_LDEST], p, num, unit);
         e = s_cat(s_cat(e, num), " ");

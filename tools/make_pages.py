@@ -94,7 +94,7 @@ uninstalls the way Felucca and X0X do, and the installer can put M-VAVE's own fi
 
 <h2>What's in it</h2>
 <ul class="feat">
-  <li><b>Eight tracks</b>, each with eight patterns of up to 64 steps: simple, stack, wavetable, orbit, epiano, organ, sync and swarm synths, or the kit, eleven drum voices on the black keys.</li>
+  <li><b>Eight tracks</b>, each with eight patterns of up to 64 steps: weft, stack, wavetable, orbit, tines, organ, sync and swarm synths, or the kit, eleven drum voices on the black keys.</li>
   <li><b>Tricks</b> on any step: pulse, hold, multiply, ramps, bends, jumps, skips and more; <b>locks</b> for any knob on any step.</li>
   <li><b>Weave</b> a pattern with a copied one: bars or steps in turn, or one's rhythm playing the other's notes.</li>
   <li><b>Players</b>: arp, strum (one key plays a recorded chord) and hold.</li>
