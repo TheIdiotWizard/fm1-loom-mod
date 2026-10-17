@@ -1,11 +1,11 @@
-# XY-1 for the M-VAVE FM-1
+# LOOM-8 for the M-VAVE FM-1
 
-XY-1 turns the M-VAVE FM-1 into a pocket groovebox, inspired by the OP-XY's way of working: eight
-instrument tracks with synth engines and a drum machine, a 64-step sequencer with step components
-and parameter locks, players (arp, maestro, hold), punch-in FX, a brain track that transposes the
-song, a tape track, two send-effect tracks, a mixer with EQ, saturator and compressor, scenes and a
-song. Built on Felucca's platform layer with X0X's sequencer discipline, NuSaw's second core and
-Polly's menu paradigm.
+LOOM-8 turns the M-VAVE FM-1 into a pocket groovebox: eight instrument tracks, each in its own colour, on
+eight synth engines and a drum kit; a 64-step sequencer with step tricks and parameter locks; players (arp,
+strum, hold); weave, which crosses two patterns (bar by bar, step by step, or one's rhythm with the other's
+notes); throws (momentary effects); a conductor track that moves the song through a progression; a tape
+track, two send-effect tracks, a mixer with EQ, saturator and compressor, scenes and a song. Built on
+Felucca's platform layer with X0X's sequencer discipline, NuSaw's second core and Polly's menu paradigm.
 
 - **Read the manual**: [docs/MANUAL.md](docs/MANUAL.md), with a ten-minute quick start, every page and gesture, and screenshots
 - **Try it in your browser** (no FM-1 needed): <https://charlesvestal.github.io/fm1-xy/emu/>
@@ -22,4 +22,5 @@ The design is in `docs/superpowers/specs/2026-10-15-xy1-design.md`.
 See `BUILDING.md`. `tests/run_tests.sh` runs everything on the host, silently (the audio goes to
 WAV files). `LICENSING.md` says where the code comes from.
 
-XY-1 is not affiliated with teenage engineering; "OP-XY" is used only to say what inspired it.
+LOOM-8's way of working owes a great deal to teenage engineering's OP-XY; LOOM-8 is not affiliated with
+teenage engineering.

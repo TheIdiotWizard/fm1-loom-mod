@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* XY-1 pattern store: the plain-data helpers of pattern.h (main loop side; the sequencer only reads). */
+/* LOOM-8 pattern store: the plain-data helpers of pattern.h (main loop side; the sequencer only reads). */
 #include "pattern.h"
 
 /* the value a component starts with (the notebook p. 139, 0-based): pulse 4, hold 4, multiply 2, velocity 64,
@@ -173,4 +173,62 @@ int step_empty(const step_t *st)
         if (st->note[i])
             return 0;
     return 1;
+}
+
+/* ----------------------------------------------------------------- weave --- */
+static const step_t *wrap_step(const tpat_t *p, int i) { return &p->st[p->len ? i % p->len : 0]; }
+
+/* the next step of p with notes, from *k on (wrapping); 0 = p has none */
+static const step_t *next_notes(const tpat_t *p, int *k)
+{
+    for (int n = 0; n < p->len; n++, (*k)++) {
+        const step_t *st = &p->st[*k % p->len];
+        if (!step_empty(st)) {
+            (*k)++;
+            return st;
+        }
+    }
+    return 0;
+}
+
+/* a's rhythm (which steps play, and how) with b's notes, in their order, cycled */
+static void weave_rhythm(tpat_t *out, const tpat_t *a, const tpat_t *b)
+{
+    int k = 0;
+    out->len = a->len;
+    for (int i = 0; i < NSTEP; i++) {
+        const step_t *n;
+        out->st[i] = a->st[i];
+        if (i >= a->len || step_empty(&a->st[i]) || !(n = next_notes(b, &k)))
+            continue;
+        for (int j = 0; j < SN; j++)
+            out->st[i].note[j] = n->note[j];
+    }
+}
+
+void pattern_weave(tpat_t *out, const tpat_t *a, const tpat_t *b, int mode)
+{
+    int len = a->len > b->len ? a->len : b->len;
+    *out = *a;                        /* scale, groove, quantise, note length: a's */
+    switch (mode) {
+    case WV_BARS:                     /* bars 1 and 3 from a, 2 and 4 from b; the shorter one loops */
+    case WV_STEPS:                    /* odd steps from a, even from b */
+        out->len = (uint8_t)len;
+        for (int i = 0; i < NSTEP; i++) {
+            int from_b = mode == WV_BARS ? (i / 16) & 1 : i & 1;
+            out->st[i] = i < len ? *wrap_step(from_b ? b : a, i) : a->st[i];
+        }
+        break;
+    case WV_RHYTHM:
+        weave_rhythm(out, a, b);
+        break;
+    default:                          /* WV_NOTES: b's rhythm with a's notes */
+        weave_rhythm(out, b, a);
+        out->scale = a->scale;
+        out->groove = a->groove;
+        out->quant = a->quant;
+        out->nlen = a->nlen;
+        out->shape = a->shape;
+        break;
+    }
 }

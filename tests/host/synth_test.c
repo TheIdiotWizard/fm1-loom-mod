@@ -237,7 +237,7 @@ int main(void)
     /* the parameter tables */
     check("every parameter has info and text", 1);
     for (k = 0; k < NTP; k++) {
-        const tp_info_t *i = tp_info(k, EG_PRISM);
+        const tp_info_t *i = tp_info(k, EG_STACK);
         int v;
         if (!i->name || i->lo > i->hi || i->def < i->lo || i->def > i->hi) {
             printf("    parameter %d\n", k);
@@ -245,7 +245,7 @@ int main(void)
             break;
         }
         for (v = i->lo; v <= i->hi; v++)
-            tp_text(k, v, EG_PRISM, num, unit);
+            tp_text(k, v, EG_STACK, num, unit);
     }
     for (e = 0; e < NENGINE; e++)
         for (k = 0; k < 4; k++) {
@@ -288,8 +288,8 @@ int main(void)
     }
     {
         uint8_t p[NTP];
-        sound_default(p, EG_PRISM);
-        p[TP_PLAYER] = PL_MAESTRO;
+        sound_default(p, EG_STACK);
+        p[TP_PLAYER] = PL_STRUM;
         check("player knob names follow the player", !strcmp(tp_info_par(TP_P1, p)->name, "roll"));
         p[TP_PLAYER] = PL_ARP;
         check("the arp's second page", !strcmp(tp_info_par(TP_AP2, p)->name, "style"));
@@ -312,7 +312,7 @@ int main(void)
         tp_text_par(TP_LSPEED, 11, p, num, unit);
         check("duck source 11 is the metronome", !strcmp(num, "metro"));
         tp_text_par(TP_LSPEED, 8, p, num, unit);
-        check("duck source 8 is the brain", !strcmp(num, "brain"));
+        check("duck source 8 is the conductor", !strcmp(num, "conductor"));
         p[TP_LTYPE] = LT_TREMOLO;
         check("tremolo: vibrato / volume / envelope / shape", !strcmp(tp_info_par(TP_LAMT, p)->name, "vibrato")
                                                                && !strcmp(tp_info_par(TP_LDEST, p)->name, "volume")
@@ -349,12 +349,12 @@ int main(void)
             }
         }
         check("the engines' defaults display as the notebook prints them", ok);
-        tp_text(TP_E1, 51, EG_AXIS, num, unit);
+        tp_text(TP_E1, 51, EG_ORBIT, num, unit);
         check("engine knobs show two digits 00..99", !strcmp(num, "40") && !unit[0]);
-        tp_text(TP_E1, 0, EG_AXIS, num, unit);
+        tp_text(TP_E1, 0, EG_ORBIT, num, unit);
         check("engine knob 0 shows 00", !strcmp(num, "00"));
-        tp_text(TP_E2, 2, EG_PRISM, num, unit);
-        check("prism ratio shows N:1", !strcmp(num, "2:1") && tp_info(TP_E2, EG_PRISM)->lo == 1 && tp_info(TP_E2, EG_PRISM)->hi == 8);
+        tp_text(TP_E2, 2, EG_STACK, num, unit);
+        check("stack ratio shows N:1", !strcmp(num, "2:1") && tp_info(TP_E2, EG_STACK)->lo == 1 && tp_info(TP_E2, EG_STACK)->hi == 8);
         check("organ knobs are discrete 1..8", tp_info(TP_E1, EG_ORGAN)->lo == 1 && tp_info(TP_E1, EG_ORGAN)->hi == 8
                                                    && tp_info(TP_E4, EG_ORGAN)->hi == 8);
         check("nine wavetables", tp_info(TP_E1, EG_WAVETABLE)->hi == 8);
@@ -578,7 +578,7 @@ int main(void)
     /* the pool: 16 voices, stealing */
     reset();
     for (t = 0; t < NTRK; t++)
-        sound_default(par[t], EG_PRISM);
+        sound_default(par[t], EG_STACK);
     for (k = 0; k < 16; k++)
         synth_note_on(S, k % NTRK, 40 + k, 100, 0, (uint32_t)k);
     check("16 notes: 16 voices", synth_voices_used(S) == 16);

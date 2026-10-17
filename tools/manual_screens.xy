@@ -162,19 +162,19 @@ shot drum_key.png
 tap ENV
 wait 1600
 shot drum_envelope.png
-# ---- the brain
+# ---- the conductor
 turn ALGO 8
 tap EDIT
 wait 1600
-shot brain.png
-# ---- punch-in
+shot conductor.png
+# ---- throws
 turn ALGO 1
 tap EDIT
 tap PLAY
 wait 400
 key 1 down
 wait 1600
-shot punch.png
+shot throws.png
 key 1 up
 # ---- tape
 turn ALGO 1
@@ -221,3 +221,29 @@ tap SEL
 wait 1600
 shot list.png
 tap HOME
+# ---- weave: T2's bass line copied, pattern 2 written, woven by rhythm
+turn ALGO 1
+tap SEQ
+wait 60
+tap SEL
+turn SELECT 3
+tap SEL
+wait 60
+turn K1 1
+press SEQ
+key 4 down
+wait 40
+key 4 up
+release SEQ
+tapkey w2
+tapkey w3
+tapkey w7
+tapkey w10
+tap SEL
+turn SELECT 5
+turn ALGO 2
+wait 1600
+shot weave.png
+tap SEL
+wait 1600
+shot woven.png

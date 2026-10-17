@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
- * X0X / XY-1: object map changed (see below). */
+ * X0X / LOOM-8: object map changed (see below). */
 /* Persistent storage on the SPI NOR.
  *
  * Every object has an A/B sector pair. A save goes to the copy that is not
@@ -17,7 +17,7 @@
 #define ST_PAYLOAD_OFF 256u
 #define ST_PAYLOAD_MAX (ST_SECTOR - ST_PAYLOAD_OFF)
 
-/* flash map, XY-1 (plat.h OBJ_*), all in Felucca's data area 0x97000..0xDFFFF: the four project slots'
+/* flash map, LOOM-8 (plat.h OBJ_*), all in Felucca's data area 0x97000..0xDFFFF: the four project slots'
  * objects (PROJ_NOBJ each, two 4 KB sectors an object) from 0x97000 up to 0xCF000, the panel calibration
  * at 0xDC000 (Felucca's user-preset area, as FoMni), the user presets at 0xDE000. Nothing above
  * 0xDFFFF: 0xE0000.. is the update loader's staging area (FL_OTA_LO). The magic is X0X's, so a project

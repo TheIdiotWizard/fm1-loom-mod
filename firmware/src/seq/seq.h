@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* XY-1 sequencer: runs in the audio interrupt, sample accurate (X0X's shape):
+/* LOOM-8 sequencer: runs in the audio interrupt, sample accurate (X0X's shape):
  *
  *     while (n) {
  *         k = seq_until_event(&seq, n);        // samples until the next due event (>= 1)

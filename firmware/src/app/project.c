@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* XY-1 project: the settings (tempo, tracks' sounds and mix, master), the patterns, lanes, scenes
+/* LOOM-8 project: the settings (tempo, tracks' sounds and mix, master), the patterns, lanes, scenes
  * and song, and the user presets; four slots in flash.
  *
  * The settings are one storage object, stored raw (small, validated on load). The patterns, lanes,
@@ -100,8 +100,8 @@ static void aux_defaults(void)
         p[TP_CHAN] = 0;
         p[TP_BRAIN] = 0;
     }
-    set_name(&proj.trk[AUX_BRAIN], "brain");
-    set_name(&proj.trk[AUX_PUNCH], "punch");
+    set_name(&proj.trk[AUX_BRAIN], "conductor");
+    set_name(&proj.trk[AUX_PUNCH], "throws");
     set_name(&proj.trk[AUX_TAPE], "tape");
     set_name(&proj.trk[AUX_FX1], "delay");
     set_name(&proj.trk[AUX_FX2], "reverb");
@@ -125,8 +125,8 @@ static void aux_defaults(void)
 
 void project_defaults(void)
 {
-    static const uint8_t ORDER[NTRK] = {EG_DRUMLINE, EG_PRISM, EG_SIMPLE, EG_WAVETABLE, EG_AXIS, EG_EPIANO,
-                                        EG_ORGAN, EG_HARDSYNC};
+    static const uint8_t ORDER[NTRK] = {EG_DRUMLINE, EG_STACK, EG_SIMPLE, EG_WAVETABLE, EG_ORBIT, EG_EPIANO,
+                                        EG_ORGAN, EG_SYNC};
     int t, k;
     uint8_t *z = (uint8_t *)&proj;
     for (k = 0; k < (int)sizeof proj; k++)
@@ -161,9 +161,9 @@ void project_defaults(void)
             tr->par[TP_D] = 0;                            /* funk 0, attack 0, random 0, length 64 */
             tr->par[TP_S] = 0;
             tr->par[TP_R] = 64;
-            set_name(tr, "drumline");
+            set_name(tr, "kit");
         } else if (t == 1) {
-            apply_preset(tr, preset_named(EG_PRISM, "bass"));   /* a prism bass under everything */
+            apply_preset(tr, preset_named(EG_STACK, "bass"));   /* a stack bass under everything */
         } else {
             apply_preset(tr, preset_first(ORDER[t]));
         }

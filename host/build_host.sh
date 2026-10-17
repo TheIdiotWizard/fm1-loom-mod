@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-only
-# Build the XY-1 host simulator (the whole app on this machine) into build/host/xy_host.
+# Build the LOOM-8 host simulator (the whole app on this machine) into build/host/xy_host.
 # Same sources as the firmware, -ffp-contract=off like the device (no fused multiply-add); the DSP
 # units are compiled as on the device (separate units), the rest is the unity build. No libm but
 # the WAV writer's (fastmath.h everywhere else). -Wdouble-promotion -Werror: no double in the app.

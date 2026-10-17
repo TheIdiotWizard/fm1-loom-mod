@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* XY-1 sequencer tests: a recording sink logs every event with its sample time; each test builds a
+/* LOOM-8 sequencer tests: a recording sink logs every event with its sample time; each test builds a
  * pattern, runs the sequencer the way the engine does (seq_until_event / seq_advance) and checks the
  * log. Prints "ok name" per test; exits 1 on the first failure. */
 #include <stdio.h>
@@ -1030,7 +1030,7 @@ static void t_maestro(void)
     static const uint8_t chord[3] = {60, 64, 67};
     cur = "maestro";
     reset();
-    par[0][TP_PLAYER] = PL_MAESTRO;
+    par[0][TP_PLAYER] = PL_STRUM;
     seq_maestro_record(&S, 0, chord, 3);
     seq_key(&S, 0, 62, 1, 90);
     run(10);
@@ -1672,9 +1672,44 @@ static void t_pattern_helpers(void)
     printf("ok %s\n", cur);
 }
 
+static void t_weave(void)
+{
+    static tpat_t a, b, o;
+    cur = "weave";
+    pattern_init(&a);
+    pattern_init(&b);
+    a.len = 32;                                    /* a: notes 60 on steps 1, 5, 9 ... over two bars */
+    for (int i = 0; i < 32; i += 4)
+        a.st[i].note[0] = 60, a.st[i].vel = 90;
+    a.scale = TS_2;
+    b.len = 16;                                    /* b: 72, 74, 76 on steps 3, 4, 8 of one bar */
+    b.st[2].note[0] = 72, b.st[3].note[0] = 74, b.st[7].note[0] = 76;
+    b.st[2].vel = b.st[3].vel = b.st[7].vel = 50;
+    pattern_weave(&o, &a, &b, WV_BARS);            /* bar 1 a's, bar 2 b's */
+    CHECK(o.len == 32 && o.scale == TS_2);
+    CHECK(o.st[0].note[0] == 60 && o.st[4].note[0] == 60 && o.st[2].note[0] == 0);
+    CHECK(o.st[16].note[0] == 0 && o.st[18].note[0] == 72 && o.st[23].note[0] == 76 && o.st[20].note[0] == 0);
+    pattern_weave(&o, &b, &a, WV_BARS);            /* b loops to a's length: bar 1 b's, bar 2 a's */
+    CHECK(o.len == 32 && o.st[2].note[0] == 72 && o.st[16].note[0] == 60 && o.st[18].note[0] == 0);
+    pattern_weave(&o, &a, &b, WV_STEPS);           /* odd steps a's, even b's */
+    CHECK(o.st[0].note[0] == 60 && o.st[2].note[0] == 0 && o.st[3].note[0] == 74 && o.st[7].note[0] == 76);
+    CHECK(o.st[19].note[0] == 74);                 /* b looped: step 20 is b's step 4 */
+    pattern_weave(&o, &a, &b, WV_RHYTHM);          /* a's hits, b's notes in turn, a's velocity */
+    CHECK(o.len == 32 && o.st[0].note[0] == 72 && o.st[4].note[0] == 74 && o.st[8].note[0] == 76);
+    CHECK(o.st[12].note[0] == 72 && o.st[0].vel == 90 && o.st[1].note[0] == 0);
+    pattern_weave(&o, &a, &b, WV_NOTES);           /* b's hits, a's notes; a's settings */
+    CHECK(o.len == 16 && o.scale == TS_2 && o.st[2].note[0] == 60 && o.st[3].note[0] == 60);
+    CHECK(o.st[2].vel == 50 && o.st[0].note[0] == 0);
+    pattern_init(&b);                              /* no notes to take: the rhythm stays as it was */
+    pattern_weave(&o, &a, &b, WV_RHYTHM);
+    CHECK(o.st[0].note[0] == 60 && o.st[4].note[0] == 60);
+    printf("ok %s\n", cur);
+}
+
 int main(void)
 {
     t_pattern_helpers();
+    t_weave();
     t_timing();
     t_scale();
     t_groove();

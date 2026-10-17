@@ -208,13 +208,13 @@ static const uint8_t STR0[4] = {4, 3, 0x09, 0x04};
 static const uint8_t STR1[] = {42, 3, 'H', 0, 0xFC, 0, 'g', 0, 'e', 0, 'l', 0, 't', 0, 'o', 0, 'n', 0, ' ', 0, 'I', 0,
                                'n', 0, 's', 0, 't', 0, 'r', 0, 'u', 0, 'm', 0, 'e', 0, 'n', 0, 't', 0, 's', 0};
 #else
-static const uint8_t STR1[] = {10, 3, 'X', 0, 'Y', 0, '-', 0, '1', 0};   /* XY-1: manufacturer */
+static const uint8_t STR1[] = {14, 3, 'L', 0, 'O', 0, 'O', 0, 'M', 0, '-', 0, '8', 0};   /* LOOM-8: manufacturer */
 #endif
 #ifdef FELUCCA_LOADER
 static const uint8_t STR2[] = {30, 3, 'F', 0, 'e', 0, 'l', 0, 'u', 0, 'c', 0, 'c', 0, 'a', 0, ' ', 0, 'U', 0, 'p', 0,
                                'd', 0, 'a', 0, 't', 0, 'e', 0};
 #else
-static const uint8_t STR2[] = {20, 3, 'X', 0, 'Y', 0, '-', 0, '1', 0, ' ', 0, 'F', 0, 'M', 0, '-', 0, '1', 0};   /* XY-1 */
+static const uint8_t STR2[] = {24, 3, 'L', 0, 'O', 0, 'O', 0, 'M', 0, '-', 0, '8', 0, ' ', 0, 'F', 0, 'M', 0, '-', 0, '1', 0};   /* LOOM-8 */
 #endif
 
 static int get_desc(uint32_t wvalue, const uint8_t **d, uint16_t *l)

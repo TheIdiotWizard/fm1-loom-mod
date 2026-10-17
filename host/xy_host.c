@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* XY-1 on the host: the whole app (UI, project, sequencer, engine) against a simulated FM-1 driven
+/* LOOM-8 on the host: the whole app (UI, project, sequencer, engine) against a simulated FM-1 driven
  * by a script. Audio goes to a WAV (never played), the screen to PNGs, the lights to text, MIDI out
  * to a log. The device-only parts (HAL, USB, OTA, flash driver) are replaced by plat.h implemented
  * here. (From FoMni's omni_host, with X0X / SPH-16's engine commands.)
@@ -200,7 +200,7 @@ int plat_last_crash(uint32_t v[5]) { (void)v; return 0; }
 /* -------------------------------------------------------------- app --- */
 #include "../firmware/src/app/app.h"
 #include "../firmware/src/app/engine.h"
-#define ANN_NAME "XY-1 " XY_VERSION
+#define ANN_NAME "LOOM-8 " XY_VERSION
 #include "ann_words.h"                                  /* the words file's link (tools/gen_words.py) */
 #include "../firmware/src/announce.c"
 /* what the reader is told: every SAY to stdout with "said:" (listen), and kept for the "said" check */

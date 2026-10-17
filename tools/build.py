@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
-"""Build XY-1 (built on Felucca, as X0X is): the app, the update loader and an installable .fwsc package.
+"""Build LOOM-8 (built on Felucca, as X0X is): the app, the update loader and an installable .fwsc package.
 
   tools/build.py [--release X.Y[-suffix]]
 
-Outputs in build/: xy.bin (app), loader/ota.bin (update loader, Felucca's, unchanged),
-xy.fwsc (package). See BUILDING.md for the toolchain and the SDK.
+Outputs in build/: loom.bin (app), loader/ota.bin (update loader, Felucca's, unchanged),
+loom.fwsc (package). See BUILDING.md for the toolchain and the SDK.
 
 The JieLi toolchain is Linux x86-64 only. JIELI_TOOLCHAIN points at it; on
 macOS (or with JIELI_DOCKER=1) each tool runs in a linux/amd64 container.
@@ -124,7 +124,7 @@ def tc_all(*cmds):
         return list(ex.map(lambda c: tc(*c), cmds))
 
 
-WORDS_MIN = """# XY-1's words for the screen reader (fm1-reader): the screen's text <TAB> what to say. "#" a number,
+WORDS_MIN = """# LOOM-8's words for the screen reader (fm1-reader): the screen's text <TAB> what to say. "#" a number,
 # "*" a word left out. tools/gen_words.py makes web/words/<id>.json (published with the site) and the link
 # the FM-1 sends. Change a line and a new file is made: keep the old ones (devices point at them).
 # url: https://charlesvestal.github.io/fm1-xy/words/
@@ -240,7 +240,7 @@ def build_app():
         units.append(("cc", *o2, "-c", FW / "src" / u, "-o", o))
         objs.append(o)
     tc_all(*units)
-    elf = OUT / "xy.elf"
+    elf = OUT / "loom.elf"
     # unreferenced functions (each in its own section: -ffunction-sections) are dropped: the DSP keeps
     # mono reference paths for the host tests that the firmware no longer calls
     tc("pi32v2/bin/ld", "--gc-sections", "-e", "_start", "-T", FW / "app.ld", *objs, "-o", elf)
@@ -253,7 +253,7 @@ def build_app():
                                ("common/bin/objdump", "-t", elf),
                                ("common/bin/objdump", "-d", elf),
                                ("common/bin/objdump", "-d", "-j", ".ram_text", elf))
-    (OUT / "xy.dis").write_text(dis)
+    (OUT / "loom.dis").write_text(dis)
 
     def symv(name):
         return int(re.search(r"^([0-9a-f]+) .*\s" + name + r"$", syms, re.M).group(1), 16)
@@ -270,7 +270,7 @@ def build_app():
             img += b"\xff" * (load - APP_XIP - len(img))
             img += blob
     img += b"\xff" * (-len(img) % 4)
-    (OUT / "xy.bin").write_bytes(img)
+    (OUT / "loom.bin").write_bytes(img)
     return bytes(img), syms, dis, rt
 
 
@@ -366,7 +366,7 @@ def main():
     ap.add_argument("--release", metavar="X.Y[.Z]", help="release build: identity FM-1_10XXYYZZ, version string X.Y[.Z]")
     ap.add_argument("--sdk", type=Path, help="JieLi AC79 SDK checkout (default: $AC79_SDK)")
     a = ap.parse_args()
-    name = "xy.fwsc"
+    name = "loom.fwsc"
     if a.release:
         # identity FM-1_10 + major, minor, patch as two digits each (0.1 -> FM-1_10000100): FM-1 is the
         # model the update tools match on; the number is ours (every single digit is taken: X0X 9, FoMni
@@ -376,7 +376,7 @@ def main():
             raise SystemExit(f"--release {a.release}: use X.Y[.Z][-suffix], up to two digits each")
         PRODUCT = "FM-1_10%02d%02d%02d" % (int(m[1]), int(m[2]), int(m[3] or 0))
         VERSION = a.release.upper() if "BETA" in a.release.upper() else a.release.upper() + " BETA"
-        name = f"xy-{a.release}.fwsc"
+        name = f"loom-{a.release}.fwsc"
     fm1pkg_make.SDK = a.sdk
     for rel, sha in SDK_SHA256.items():          # fail early without the SDK
         if hashlib.sha256(fm1pkg_make.sdk_file(rel)).hexdigest() != sha:
@@ -400,7 +400,7 @@ def main():
         raise SystemExit("build: checks failed")
     pkg = fm1pkg_make.ufw(fm1pkg_make.flash_image(img, fm1pkg_make.KEY), ota, PRODUCT)
     (OUT / name).write_bytes(pkg)
-    print(f"app      {OUT / 'xy.bin'}  {len(img)} B")
+    print(f"app      {OUT / 'loom.bin'}  {len(img)} B")
     print(f"loader   {LDR / 'ota.bin'}  {len(ota)} B")
     print(f"package  {OUT / name}  {len(pkg)} B, identity {PRODUCT}")
     return 0

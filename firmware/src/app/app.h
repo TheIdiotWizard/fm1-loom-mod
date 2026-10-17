@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* XY-1 app: the project (everything that is saved) and the app's entry points. Included by the unity
+/* LOOM-8 app: the project (everything that is saved) and the app's entry points. Included by the unity
  * build after gfx.c (drawing helpers in scope) and by the host simulator. */
 #pragma once
 #include <stdint.h>

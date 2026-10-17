@@ -28,9 +28,9 @@ static int st_prog(uint32_t off, const void *src, uint32_t n)
         nor[off + i] &= s[i];
     return 0;
 }
-#include "../firmware/src/app/plat.h"     /* XY-1: the object map */
+#include "../firmware/src/app/plat.h"     /* LOOM-8: the object map */
 #include "../firmware/src/storage.c"
-#define OBJ_PROJECT0 OBJ_PROJ(0, 0)            /* XY-1: project slot 0, its settings object */
+#define OBJ_PROJECT0 OBJ_PROJ(0, 0)            /* LOOM-8: project slot 0, its settings object */
 #define OBJ_SETTINGS OBJ_PANEL
 
 static int check(const char *what, int ok)
@@ -90,7 +90,7 @@ int main(void)
     nor[st_sector(OBJ_PANEL, 0) + 8] ^= 0x01;    /* both headers broken */
     nor[st_sector(OBJ_PANEL, 1) + 8] ^= 0x01;
     bad += check("both headers broken -> nothing", st_load(OBJ_PANEL, got, sizeof got) < 0);
-    {   /* XY-1 map: every object in Felucca's data area (0x97000..0xDFFFF: no sample slots here) or its
+    {   /* LOOM-8 map: every object in Felucca's data area (0x97000..0xDFFFF: no sample slots here) or its
          * globals area, never in the update loader's staging area (0xE0000..), no overlaps */
         uint32_t o, p, ok = 1;
         for (o = 0; o < OBJ_NOBJ; o++) {

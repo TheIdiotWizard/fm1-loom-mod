@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-only
-# XY-1 host tests: the maths, the platform pieces kept from Felucca / X0X, the units' own tests (the
+# LOOM-8 host tests: the maths, the platform pieces kept from Felucca / X0X, the units' own tests (the
 # synth, the drumline, the FX, the sequencer: tests/host/*_test.sh, when present), storage, the update
 # path, the host simulator, the browser build, and the whole firmware app in the simulator
 # (tests/scenarios/*.xy: UI, patterns, persistence), with screenshots and audio in build/scenarios/.
@@ -39,18 +39,18 @@ for t in synth drumline fx seq; do
     fi
 done
 # the update path, against the firmware package (Felucca's tests; needs ./build.sh)
-if [ -f build/xy.fwsc ]; then
-    run ota-entry sh -c "$CC -o $OUT/ota_test tests/ota_test.c && $OUT/ota_test build/xy.fwsc"
+if [ -f build/loom.fwsc ]; then
+    run ota-entry sh -c "$CC -o $OUT/ota_test tests/ota_test.c && $OUT/ota_test build/loom.fwsc"
     if [ -z "${AC79_SDK:-}" ]; then
         echo "  skip update-loader (needs AC79_SDK, as the build)"
     else
-    run update-loader sh -c "head -c 200000 build/xy.bin > $OUT/old_app.bin && \
+    run update-loader sh -c "head -c 200000 build/loom.bin > $OUT/old_app.bin && \
         $PY tools/fm1pkg_make.py $OUT/old_app.bin build/loader/ota.bin $OUT/old.fwsc >/dev/null && \
-        $CC -o $OUT/ldr_test tests/ldr_test.c && $OUT/ldr_test $OUT/old.fwsc build/xy.fwsc"
+        $CC -o $OUT/ldr_test tests/ldr_test.c && $OUT/ldr_test $OUT/old.fwsc build/loom.fwsc"
     fi
     run installer "$PY" tests/install_test.py
 else
-    echo "  skip update-path tests (no build/xy.fwsc: run ./build.sh)"
+    echo "  skip update-path tests (no build/loom.fwsc: run ./build.sh)"
 fi
 run host-build sh host/build_host.sh
 if command -v emcc >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then   # the browser build, when it can be built

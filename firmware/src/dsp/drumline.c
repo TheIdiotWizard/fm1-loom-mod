@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* XY-1 drumline (drumline.h): the OP-XY's ten drum models, analytic, on NDVOICE voices.
+/* LOOM-8 drumline (drumline.h): the OP-XY's ten drum models, analytic, on NDVOICE voices.
  *
  * Every sound is a few oscillators, a noise source and a filter or two, shaped by exponential
  * envelopes (env *= k a sample): no samples, no tables, so a kit costs nothing in flash and a voice

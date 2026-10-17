@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* XY-1 platform interface (from X0X's): everything the app needs from the hardware.
+/* LOOM-8 platform interface (from X0X's): everything the app needs from the hardware.
  *
  * The device implementation (plat_fm1.c) wraps Felucca's HAL and panel map; the
  * host implementation (host/xy_host.c) is a simulator fed by a script, which is

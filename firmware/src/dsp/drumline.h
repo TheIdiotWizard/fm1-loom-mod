@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* XY-1 drumline: a drum synth with eleven keys on the black keys, each a model instance with the
+/* LOOM-8 drumline: a drum synth with eleven keys on the black keys, each a model instance with the
  * model's own four knobs, random, pan, volume and a play mode (synth.h TP_DRUM(key, DP_*)). The ten
  * models (DP_MODEL, DM_*) are the OP-XY's: kick, snare, hi-hat, clap, shaker, tambourine, resonator,
  * congas, tom, fm. Analytic (sines with pitch envelopes, filtered noise bursts, six-square metal, a

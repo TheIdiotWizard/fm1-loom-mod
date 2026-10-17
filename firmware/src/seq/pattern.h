@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* XY-1 data model: tracks, patterns, steps, lanes (parameter locks), scenes and the song.
+/* LOOM-8 data model: tracks, patterns, steps, lanes (parameter locks), scenes and the song.
  *
  * Plain data, no pointers, so a pattern copies with an assignment and the project stores the bytes
  * (X0X's rule). The UI edits these in place from the main loop while the sequencer reads them in the
@@ -8,6 +8,8 @@
 #pragma once
 #include <stdint.h>
 
+/* The code keeps its first names; the screen and the manual say: AUX_BRAIN the conductor (COND), AUX_PUNCH the
+ * throws (THROW), components (SC_*) tricks, the drumline engine the kit, the maestro player strum. */
 #define NTRK 8                        /* instrument tracks 1-8 */
 enum { AUX_BRAIN = NTRK, AUX_PUNCH, AUX_TAPE, AUX_FX1, AUX_FX2, NALLTRK };
 #define NSEQT (AUX_TAPE + 1)          /* sequenced tracks: 1-8, brain, punch, tape */
@@ -129,3 +131,8 @@ int step_has_lock(const lane_t *L, int trk, int pat, int step);
 void step_clear_locks(lane_t *L, int trk, int pat, int step);
 void pattern_clear_locks(lane_t *L, int trk, int pat);
 void cond_ab(int k, int *a, int *b);  /* COND_AB + k -> A:B */
+/* weave two patterns into out (not a or b): WV_BARS alternates their bars (a, b, a, b), WV_STEPS their steps; the
+ * shorter one loops to the longer one's length. WV_RHYTHM keeps a's rhythm and plays b's notes on it, in their
+ * order, cycled; WV_NOTES the other way: b's rhythm, a's notes. The pattern's settings are always a's. */
+enum { WV_BARS, WV_STEPS, WV_RHYTHM, WV_NOTES, NWV };
+void pattern_weave(tpat_t *out, const tpat_t *a, const tpat_t *b, int mode);

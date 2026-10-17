@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* XY-1 sequencer; see seq.h for the model.
+/* LOOM-8 sequencer; see seq.h for the model.
  *
  * Time. Every timer is a count of samples left in Q8 (a 24.8 fixed point: the fraction keeps the
  * tempo exact across steps, X0X's trick), counted down by seq_advance and due when under 256. NEVER
@@ -1737,7 +1737,7 @@ static void key_in(seq_t *s, int t, int note, int on, int vel, int raw, const se
             }
         }
         break;
-    case PL_MAESTRO:
+    case PL_STRUM:
         if (on)
             maestro_play(s, t, shifted, vel, o);
         else if (!s->par[t][TP_P4] && pl->maestro_root == shifted && !pl->nphys)

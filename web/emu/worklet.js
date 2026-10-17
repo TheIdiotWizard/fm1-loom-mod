@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// XY-1 in an AudioWorklet: xy.wasm is the whole FM-1 app (web/emu/xy_web.c). Each render
+// LOOM-8 in an AudioWorklet: xy.wasm is the whole FM-1 app (web/emu/xy_web.c). Each render
 // quantum asks it for 128 frames, which runs the device's clock forward; between quanta the page's
 // input goes in and, about 30 times a second, the screen, the lights and any saved objects go out.
 

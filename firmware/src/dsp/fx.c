@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* XY-1 effects (fx.h): the send slots, the tape loop and the master section.
+/* LOOM-8 effects (fx.h): the send slots, the tape loop and the master section.
  *
  * Send slots: each takes a mono send and adds a stereo return. The reverb is 9W9's (X0X's fxbus.c):
  * four int16 combs with damping in the loop and two allpasses a side, the right side reading the

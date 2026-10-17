@@ -1,12 +1,12 @@
-# Building XY-1
+# Building LOOM-8
 
 The build makes three files in `build/`:
 
 | File | What |
 | --- | --- |
-| `xy.bin` | the firmware app |
+| `loom.bin` | the firmware app |
 | `loader/ota.bin` | the update loader |
-| `xy.fwsc` | the installable package (app + loader) |
+| `loom.fwsc` | the installable package (app + loader) |
 
 ## Prerequisites (macOS)
 
@@ -41,7 +41,7 @@ On Linux x86-64 the toolchain runs natively and Docker is not needed.
 `JIELI_TOOLCHAIN` and `AC79_SDK` override the default locations
 (`~/.jieli/toolchain`, `~/fw-AC79_AIoT_SDK`).
 
-`./build.sh --release 0.1` makes a release build; the package is `build/xy-0.1.fwsc`.
+`./build.sh --release 0.1` makes a release build; the package is `build/loom-0.1.fwsc`.
 
 On macOS with podman instead of Docker, put a `docker` script that runs `exec podman "$@"` first
 on your PATH. `OM_JOBS` (default 4) limits parallel compiles: a podman machine drops
@@ -61,7 +61,7 @@ tests/run_tests.sh
 
 Runs, on the build machine: the maths library against libm; the units' own tests (the synth, the
 drumline, the FX, the sequencer: `tests/host/*_test.sh`); flash
-storage; Felucca's update-path tests against `build/xy.fwsc`; and the whole app in the simulator
+storage; Felucca's update-path tests against `build/loom.fwsc`; and the whole app in the simulator
 (`tests/scenarios/*.xy`), with its screenshots and audio in `build/scenarios/`.
 
 `host/build_host.sh` builds the simulator alone; `build/host/xy_host SCRIPT OUTDIR` runs one
@@ -72,7 +72,7 @@ script (the command list is at the top of `host/xy_host.c`).
 From the command line (needs `pip3 install mido python-rtmidi`):
 
 ```
-python3 tools/fm1_install.py build/xy.fwsc
+python3 tools/fm1_install.py build/loom.fwsc
 python3 tools/fm1_install.py --info          # identity of the connected FM-1
 ```
 
@@ -87,4 +87,4 @@ mode. If the FM-1 no longer starts but reaches the chip's update mode (4C4A:8057
 2. `tools/publish_pages.sh X.Y`: builds the site (landing page, browser emulator, web installer,
    firmware) with `tools/make_pages.py` and pushes it to the `gh-pages` branch, which GitHub Pages
    serves at <https://charlesvestal.github.io/fm1-xy/>.
-3. `gh release create vX.Y build/xy-X.Y.fwsc` for the command-line download.
+3. `gh release create vX.Y build/loom-X.Y.fwsc` for the command-line download.

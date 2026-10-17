@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* XY-1 synth: a pool of voices playing eight engines (simple, prism, wavetable, axis, epiano, organ,
- * hardsync, dissolve), each voice with two ADSRs, a state-variable filter, an LFO and sends.
+/* LOOM-8 synth: a pool of voices playing eight engines (simple, stack, wavetable, orbit, epiano, organ,
+ * sync, swarm), each voice with two ADSRs, a state-variable filter, an LFO and sends.
  *
  * A track's sound is a flat byte array par[NTP] (the OP-XY's four modules, four knobs each, plus the
  * play page, sends, player and mix). Continuous values are 0..127, switches small integers (ranges in
@@ -18,9 +18,9 @@
 #define NVOICE 16                     /* synth voices, all tracks */
 #define NVOICE_TRK 6                  /* the most one track takes */
 
-enum { EG_SIMPLE, EG_PRISM, EG_WAVETABLE, EG_AXIS, EG_EPIANO, EG_ORGAN, EG_HARDSYNC, EG_DISSOLVE, EG_DRUMLINE,
+enum { EG_SIMPLE, EG_STACK, EG_WAVETABLE, EG_ORBIT, EG_EPIANO, EG_ORGAN, EG_SYNC, EG_SWARM, EG_DRUMLINE,
        NENGINE };
-extern const char *const EG_NAME[NENGINE];         /* "simple", "prism", ... "drumline" */
+extern const char *const EG_NAME[NENGINE];         /* "simple", "stack", ... "kit" */
 extern const char *const EG_KNOB[NENGINE][4];      /* each engine's four knob names, as the OP-XY prints them */
 
 enum {
@@ -35,7 +35,7 @@ enum {
     TP_LTYPE, TP_LSPEED, TP_LAMT, TP_LDEST, TP_LX,  /* LFO: type (off, value, tremolo, random, duck), then its four
                                                      * knobs as the comment below the enum says */
     TP_LX2,                                         /* a fifth LFO value: shape (value, tremolo) or envelope (random) */
-    TP_PLAYER, TP_P1, TP_P2, TP_P3, TP_P4,          /* Players: off / arp / maestro / hold and its four knobs */
+    TP_PLAYER, TP_P1, TP_P2, TP_P3, TP_P4,          /* Players: off / arp / strum / hold and its four knobs */
     TP_AP1, TP_AP2, TP_AP3, TP_AP4,                 /* the arp's second page: length, style, glide, stereo */
     TP_LEVEL, TP_PAN,                               /* Mix */
     TP_BRAIN,                                       /* follows the brain: 0 no, 1 diatonic, 2 transpose only */
@@ -76,11 +76,11 @@ enum { FT_SVF, FT_LADDER, FT_ZLP, FT_ZHP, FT_DYNAMIC, NFT };
 enum { LT_OFF, LT_VALUE, LT_TREMOLO, LT_RANDOM, LT_DUCK, NLT };
 enum { LD_SYNTH, LD_ENV, LD_FILTER, LD_AMP, LD_FREE = 4, NLD = 8 };   /* TP_LDEST: module, + LD_FREE = free-running */
 #define LS_SYNC_N 8                                /* TP_LSPEED values below this are synced divisions */
-enum { PL_OFF, PL_ARP, PL_MAESTRO, PL_HOLD, NPL };
+enum { PL_OFF, PL_ARP, PL_STRUM, PL_HOLD, NPL };
 /* arp: P1 speed (1/4 1/4T 1/8 1/8T 1/16 1/16T 1/32 1/32T 1/64), P2 pattern (up, down, up-down 1, up-down 2 (the
  * ends repeated), as played, random), P3 range 1..4 octaves, P4 hold; its page 2 (the OP-XY's shift page) is
  * TP_AP1..AP4 = note length (short medium long), style (off A B C D E), glide (off low high), stereo (mono
- * narrow wide). maestro: P1 roll 0..63 (63 = a note per sequencer step of the
+ * narrow wide). strum: P1 roll 0..63 (63 = a note per sequencer step of the
  * track), P2 pattern (up down up-down random), P3 -, P4 hold */
 
 /* how a value is shown: a number, a percentage, bipolar (64 = 0), a name from the list, semitones, on / off,

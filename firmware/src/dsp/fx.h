@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* XY-1 effects: the two send-effect tracks (fx I, fx II: one of chorus, delay, distortion, lofi,
+/* LOOM-8 effects: the two send-effect tracks (fx I, fx II: one of chorus, delay, distortion, lofi,
  * phaser, reverb each, four knobs as the OP-XY names them), the tape loop and the master section
  * (3-band EQ with blend, saturator, compressor, limiter, group levels).
  *

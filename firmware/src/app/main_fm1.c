@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Boot, audio ISR and main loop adapted from Felucca's main.c / audio.c, Copyright (C) 2026
  * Leo Kuroshita (@kurogedelic), Hugelton Instruments. */
-/* XY-1 on the FM-1 (NuSaw's, from X0X's): boot (WDT first, boot-loop guard, guards), LCD, input (TIMER5
+/* LOOM-8 on the FM-1 (NuSaw's, from X0X's): boot (WDT first, boot-loop guard, guards), LCD, input (TIMER5
  * 10 kHz), audio (ALNK0), USB; then the main loop: UI at ~60 frames/s, input polled in between. */
 extern uint32_t _data_start[], _data_end[], _data_load[], _bss_start[], _bss_end[];
 extern uint32_t _pool_start[], _pool_end[], _rt_start[], _rt_end[], _rt_load[], _c1_start[], _c1_end[], _c1_load[];
@@ -151,7 +151,7 @@ static void fm1_fault(const fm1_crash_t *c)
         fm1_cpu1_bar();                             /* a crash beside the second core: one core until power-off */
     fm1_audio_stop();
     lcd_fill(0, 0, 240, 240, RGB(160, 0, 0));
-    draw_text_box(0, 8, 240, &FONT_S, "XY-1 CRASH", C_WHITE, 1);
+    draw_text_box(0, 8, 240, &FONT_S, "LOOM-8 CRASH", C_WHITE, 1);
     hexs(b, c->vec);
     draw_text_box(10, 40, 220, &FONT_S, b, C_WHITE, 0);
     hexs(b, c->pc);
@@ -180,15 +180,15 @@ static void enter_uboot(const char *why)
     fm1_enter_uboot();
 }
 
-/* SAFE MODE: XY-1 crashed (or hung) twice while starting. Nothing that makes sound runs: no audio,
- * no engine, no UI; USB is on, so the web installer (XY-1, or the stock firmware) and M-UPGRADE can
- * reach it. PLAY tries XY-1 again. The chip's own update mode stays the last resort (fm1_cstart). */
+/* SAFE MODE: LOOM-8 crashed (or hung) twice while starting. Nothing that makes sound runs: no audio,
+ * no engine, no UI; USB is on, so the web installer (LOOM-8, or the stock firmware) and M-UPGRADE can
+ * reach it. PLAY tries LOOM-8 again. The chip's own update mode stays the last resort (fm1_cstart). */
 static void safe_main(void)
 {
     char b[24];
     uint32_t t0, play, both, t_oct;
     lcd_fill(0, 0, 240, 240, C_BLACK);
-    draw_text_box(0, 18, 240, &FONT_B, "XY-1 SAFE MODE", C_HI, 1);
+    draw_text_box(0, 18, 240, &FONT_B, "LOOM-8 SAFE MODE", C_HI, 1);
     draw_text_box(0, 52, 240, &FONT_S, "IT CRASHED TWICE", C_WHITE, 1);
     draw_text_box(0, 72, 240, &FONT_S, "WHILE STARTING.", C_WHITE, 1);
     draw_text_box(0, 102, 240, &FONT_S, "NO SOUND. USB IS ON:", C_WHITE, 1);
@@ -218,9 +218,9 @@ static void safe_main(void)
         if (bootguard.pending && fm1_ms - t0 > 10000u)
             bootguard.pending = 0;                  /* safe mode itself is up: not another failed boot */
         if ((fm1_in.buttons & play) && fm1_ms - t0 > 500u) {
-            bootguard.failed = 0;                   /* try XY-1 again, from scratch */
+            bootguard.failed = 0;                   /* try LOOM-8 again, from scratch */
             bootguard.pending = 0;
-            draw_text_box(0, 172, 240, &FONT_S, "STARTING XY-1...", C_HI, 1);
+            draw_text_box(0, 172, 240, &FONT_S, "STARTING LOOM-8...", C_HI, 1);
             usb_detach();
             fm1_delay_ms(30);
             fm1_reboot();
@@ -243,15 +243,21 @@ static void safe_main(void)
 
 static void splash(void)
 {
-    lcd_fill(0, 0, 240, 240, RGB(251, 248, 241));
-    cv_begin(240, 64, RGB(251, 248, 241));
+    /* the name over the eight tracks' inks woven as threads (pages.c TRK_INK) */
+    static const uint16_t INK[8] = {RGB(255, 92, 170), RGB(40, 204, 192), RGB(244, 200, 60), RGB(104, 152, 255),
+                                    RGB(255, 136, 64), RGB(110, 216, 110), RGB(178, 136, 255), RGB(214, 176, 136)};
+    lcd_fill(0, 0, 240, 240, C_BLACK);
+    cv_begin(240, 96, C_BLACK);
     {
-        int32_t w = text_w(&FONT_L, "XY-1");
-        cv_text((240 - w) / 2, 0, &FONT_L, "XY-1", RGB(229, 72, 46));
+        int32_t w = text_w(&FONT_L, "LOOM-8");
+        cv_text((240 - w) / 2, 0, &FONT_L, "LOOM-8", RGB(235, 235, 238));
+        for (int i = 0; i < 8; i++)                  /* the warp: eight threads, each over and under the weft */
+            for (int j = 0; j < 12; j++)
+                cv_rect(56 + i * 16, 44 + j * 3, 8, (i + j) & 1 ? 3 : 2, (i + j) & 1 ? INK[i] : RGB(46, 46, 52));
         w = text_w(&FONT_S, "a pocket groovebox");
-        cv_text((240 - w) / 2, 42, &FONT_S, "a pocket groovebox", RGB(122, 128, 152));
+        cv_text((240 - w) / 2, 76, &FONT_S, "a pocket groovebox", RGB(150, 150, 156));
     }
-    cv_blit(0, 92);
+    cv_blit(0, 76);
     lcd_sync();
 }
 

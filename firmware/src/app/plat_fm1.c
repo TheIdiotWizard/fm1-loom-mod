@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* XY-1 platform on the FM-1 (NuSaw's, with X0X's cycle counter): plat.h over Felucca's HAL, panel
+/* LOOM-8 platform on the FM-1 (NuSaw's, with X0X's cycle counter): plat.h over Felucca's HAL, panel
  * map, USB rings and storage. Part of the unity build (main.c), after the HAL, usb.c, storage.c and
  * panel.c. */
 

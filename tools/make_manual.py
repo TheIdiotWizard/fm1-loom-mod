@@ -170,7 +170,7 @@ def render(md):
 def main():
     src, dst = Path(sys.argv[1]), Path(sys.argv[2])
     body = render(src.read_text())
-    page = f"<title>XY-1 manual</title>{STYLE}<main>{body}</main>"
+    page = f"<title>LOOM-8 manual</title>{STYLE}<main>{body}</main>"
     if "--fragment" not in sys.argv:
         page = f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">{page}</html>'.replace("<main>", "</head><body><main>").replace("</main>", "</main></body>")
     dst.write_text(page)

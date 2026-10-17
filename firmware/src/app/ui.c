@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* XY-1's input: the panel's buttons, keys and encoders, what they do on each page, and the screen reader.
+/* LOOM-8's input: the panel's buttons, keys and encoders, what they do on each page, and the screen reader.
  * Part of the unity build, after pages.c; the host simulator includes it too. The gestures are the OP-XY
  * notebook's, with HOME as shift and a held step as "what is on it":
  *
@@ -38,7 +38,7 @@ static void say_as(const char *a, const char *b, uint32_t flags)
     {
         static const char *const DONE[] = {"SAVED", "CLEARED", "COPIED", "PASTED", "ROTATED", "DUPLICATED", "RECORDED",
                                            "CHORD RECORDED", "LOCKS CLEARED", "NEW PROJECT", "LOADED", "SCRAMBLED",
-                                           "RESET", "INSERTED", "DELETED", "PRESET SAVED", "ALL NOTES OFF", "REMOVED"};
+                                           "RESET", "INSERTED", "DELETED", "PRESET SAVED", "ALL NOTES OFF", "REMOVED", "WOVEN"};
         const char *m = ui.msg[0];
         ui.msg_kind = AL_INFO;
         if (m[0] == 'U' && m[1] == 'N' && m[2] == 'D' && m[3] == 'O')
@@ -405,9 +405,9 @@ static void rec_tap(void)                        /* REC released, unused, while 
         say("RECORD OFF", 0);
         return;
     }
-    if ((ui.page == P_PLAYERS || ui.page == P_PLAYERS2 || ui.page == P_PLAYERS3) && pl_type(trk) == PL_MAESTRO) {
+    if ((ui.page == P_PLAYERS || ui.page == P_PLAYERS2 || ui.page == P_PLAYERS3) && pl_type(trk) == PL_STRUM) {
         ui.maestro_rec = 1;
-        say("HOLD A CHORD", "for maestro");
+        say("HOLD A CHORD", "for strum");
         return;
     }
     if (playing())
@@ -541,7 +541,7 @@ static void comp_toggle(int c)
             }
         }
     ui.ccomp = (uint8_t)(any ? c : 0);
-    say(any ? COMP_NAME[c] : "COMPONENT OFF", any ? "on the step" : COMP_NAME[c]);
+    say(any ? COMP_NAME[c] : "TRICK OFF", any ? "on the step" : COMP_NAME[c]);
     mark_dirty();
 }
 /* HOME + a step + black key b: the value of the component last added (0..8 = 1..9, 9 = random; black key 11 cycles
@@ -577,7 +577,7 @@ static void comp_value(int b)
     if (any)
         say(COMP_NAME[c % NSC], s_eq(vt, COMP_NAME[c % NSC]) ? "any" : vt);
     else
-        say_no("NO COMPONENT", "white key first");
+        say_no("NO TRICK", "white key first");
     mark_dirty();
 }
 static void step_knob(int k, int32_t e)
@@ -1572,6 +1572,7 @@ static void list_change(int32_t e)
     case LK_PICK:
         switch (lst.row[lst.sel].id) {
         case A_ENGINE: ui.pick_engine = (uint8_t)clampi(ui.pick_engine + d, 0, NENGINE - 1); break;
+        case A_WEAVE: ui.pick_weave = (uint8_t)clampi(ui.pick_weave + d, 0, NWV - 1); break;
         case A_EFFECT: {
             int t = ui.pick_fx, trk = fx_page(ui.page) ? (ui.page == P_FX1 ? AUX_FX1 : AUX_FX2) : sel_trk();
             for (int tries = 0; tries < NFXT; tries++) {
@@ -1672,6 +1673,21 @@ static void act_rotate(int d)
             }
         }
     mark_dirty();
+}
+/* the pattern woven with the copied one (pattern_weave): bars or steps in turn, or one's rhythm with the
+ * other's notes; HOME + REC undoes it */
+static void act_weave(void)
+{
+    static tpat_t out XY_POOL;
+    static const char *const SAID[NWV] = {"bars in turn", "steps in turn", "copied notes", "copied rhythm"};
+    int m = ui.pick_weave % NWV;
+    undo_keep();
+    pattern_weave(&out, tpat(sel_trk()), &clip, m);
+    *tpat(sel_trk()) = out;
+    if (ui.bar * 16 >= out.len)
+        ui.bar = 0;
+    mark_dirty();
+    say("WOVEN", SAID[m]);
 }
 static void act_dup_bar(void)
 {
@@ -1876,6 +1892,7 @@ static void action_run(int a)
     case A_CLEAR_BOTH: act_clear_notes(); act_clear_locks(); say("CLEARED", "notes and locks"); break;
     case A_COPY_PAT: clip = *tpat(sel_trk()); clip_ok = 1; say("COPIED", "pattern"); break;
     case A_PASTE_PAT: undo_keep(); *tpat(sel_trk()) = clip; mark_dirty(); say("PASTED", "pattern"); break;
+    case A_WEAVE: act_weave(); break;
     case A_ROT_FWD: act_rotate(1); say("ROTATED", "forward"); break;
     case A_ROT_BACK: act_rotate(-1); say("ROTATED", "back"); break;
     case A_DUP_BAR: act_dup_bar(); break;
@@ -2616,16 +2633,16 @@ static void speak_dump(void)
     static const char *const MSG[][2] = {
         {"SAVED", 0}, {"NOT SAVED", "flash error"}, {"UNDO", "T1 P1"}, {"REDO", "T1 P1"}, {"NOTHING TO UNDO", 0},
         {"NOTHING TO REDO", 0}, {"COUNT-IN", "then recording"}, {"RECORDING", "latched"}, {"RECORDING", "play to start"},
-        {"RECORD OFF", 0}, {"STEP RECORD", "keys write steps"}, {"HOLD A CHORD", "for maestro"}, {"CHORD RECORDED", 0},
-        {"LENGTH", "to step 4"}, {"COMPONENT OFF", "pulse"}, {"NO COMPONENT", "white key first"}, {"NUDGE", "+2"},
+        {"RECORD OFF", 0}, {"STEP RECORD", "keys write steps"}, {"HOLD A CHORD", "for strum"}, {"CHORD RECORDED", 0},
+        {"LENGTH", "to step 4"}, {"TRICK OFF", "pulse"}, {"NO TRICK", "white key first"}, {"NUDGE", "+2"},
         {"NO LANE LEFT", "clear locks first"}, {"LOCKS CLEARED", 0}, {"NEW", "S3"}, {"MUTED", "T1"}, {"UNMUTED", "T1"},
         {"INSERTED", "S2"}, {"T3", 0}, {"SOUND", "snare"}, {"KEY", "snare"}, {"SCALE", "1/2"}, {"BAR", "2"}, {"CURSOR", "5"},
-        {"OCTAVE", "+1"}, {"PRESET", "U3 prism"}, {"EFFECT", "delay"}, {"CLEARED", "notes"}, {"COPIED", "pattern"},
-        {"PASTED", "pattern"}, {"ROTATED", "forward"}, {"DUPLICATED", "bar"}, {"NO ROOM", "four bars at most"},
+        {"OCTAVE", "+1"}, {"PRESET", "U3 stack"}, {"EFFECT", "delay"}, {"CLEARED", "notes"}, {"COPIED", "pattern"},
+        {"PASTED", "pattern"}, {"WOVEN", "copied rhythm"}, {"ROTATED", "forward"}, {"DUPLICATED", "bar"}, {"NO ROOM", "four bars at most"},
         {"SCRAMBLED", 0}, {"PRESET SAVED", "U2"}, {"RESET", "simple"}, {"SONG FULL", "64 slots"}, {"NO SLOT HERE", 0},
         {"NO SONG", "white keys add scenes"}, {"LOADED", "slot 2"}, {"EMPTY SLOT", "defaults loaded"},
         {"NEW PROJECT", "unsaved"}, {"SCENE IN USE", "pick another first"}, {"ALL NOTES OFF", 0},
-        {"STOP FIRST", "to change slots"}, {"FOUR SLOTS", "white keys 1 to 4"}, {"ENGINE", "prism"}, {"LIST", "nothing here"},
+        {"STOP FIRST", "to change slots"}, {"FOUR SLOTS", "white keys 1 to 4"}, {"ENGINE", "stack"}, {"LIST", "nothing here"},
         {"DELETED", "slot"}, {"REMOVED", 0}, {"NO EFFECT YET", "play a key on EDIT"}, {"NO SEGMENT YET", "play a key on EDIT"},
         {"snare", "on the step"}, {"snare", "off the step"}, {"T2", "follows"}, {"T2", "on its own"},
         {"UPDATE MODE IN", "3.."}, {"UPDATE MODE", "CANCELLED"}};
@@ -2759,6 +2776,7 @@ void ui_frame(void)
         if (ui.bar * 16 >= tpat(sel_trk())->len)
             ui.bar = 0;
     }
+    ink_follow();
     draw_header();
     draw_page();
     draw_rec_strip();

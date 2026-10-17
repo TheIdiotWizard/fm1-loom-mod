@@ -1,11 +1,11 @@
-# XY-1 licensing
+# LOOM-8 licensing
 
-XY-1 is free software under the GNU General Public License, version 3 only (`GPL-3.0-only`, full
+LOOM-8 is free software under the GNU General Public License, version 3 only (`GPL-3.0-only`, full
 text in `LICENSE`). It is built on Felucca's platform layer (through X0X and FoMni) and keeps
-Felucca's licence. If you distribute XY-1, or firmware derived from it, you must give your
+Felucca's licence. If you distribute LOOM-8, or firmware derived from it, you must give your
 recipients its complete corresponding source under the same licence.
 
-XY-1 is inspired by the teenage engineering OP-XY's way of working. It is not affiliated with,
+LOOM-8 is inspired by the teenage engineering OP-XY's way of working. It is not affiliated with,
 endorsed by or derived from teenage engineering; the name is only used descriptively.
 
 ## Where the code comes from
@@ -18,7 +18,7 @@ endorsed by or derived from teenage engineering; the name is only used descripti
 | The menu paradigm (a button per set of knobs, SELECT turns the pages) | [Polly](https://github.com/charlesvestal/fm1-polly) | GPL-3.0-only |
 | The screen reader protocol (`firmware/src/announce.c`, `tools/gen_words.py`) | [fm1-reader](https://github.com/charlesvestal/fm1-reader) | GPL-3.0-only |
 | The idea of a browser emulator for FM-1 firmware (`web/emu/`) | [Groove OS](https://www.groove-os.com/) by Peter Gombos, whose site runs its firmware in the browser; no code from it | credit only |
-| Everything else in `firmware/src/{app,dsp,seq}`, `tests/` | XY-1 | GPL-3.0-only |
+| Everything else in `firmware/src/{app,dsp,seq}`, `tests/` | LOOM-8 | GPL-3.0-only |
 
 ## Third-party material
 

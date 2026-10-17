@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-only
-# XY-1 in the browser: the host simulator compiled to WebAssembly (Emscripten), plus its page.
+# LOOM-8 in the browser: the host simulator compiled to WebAssembly (Emscripten), plus its page.
 #   [XY_VERSION=0.1] web/emu/build.sh  ->  build/emu/{index.html, worklet.js, xy.wasm}
 # Same sources and flags as host/build_host.sh (-ffp-contract=off, like the device).
 set -e

@@ -14,7 +14,7 @@ typedef struct {               /* proportional, see tools/gen_font.py */
 } felucca_font_t;
 #include "felucca_font.h"
 
-#define CV_MAX (240u * 120u)      /* XY-1: the tallest band, the main one, is 240 x 120 */
+#define CV_MAX (240u * 120u)      /* LOOM-8: the tallest band, the main one, is 240 x 120 */
 static uint16_t cv_px[CV_MAX] __attribute__((section(".pool")));
 static uint32_t cv_w, cv_h;
 static int32_t cv_oy;            /* y offset for graph drawing */

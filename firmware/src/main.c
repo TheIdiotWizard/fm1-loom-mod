@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* XY-1 firmware for the M-VAVE FM-1: one compilation unit for the platform and the app
+/* LOOM-8 firmware for the M-VAVE FM-1: one compilation unit for the platform and the app
  * (Felucca's layout, as X0X: the HAL is header-only, so everything that touches it is here).
  * The DSP units (dsp/synth.c, dsp/drumline.c, dsp/fx.c) and the sequencer (seq/pattern.c, seq/seq.c)
  * are separate units compiled at -O2 by tools/build.py; this one is -Os. Order matters. */
@@ -125,9 +125,9 @@ static void ota_commit(const uint8_t *parm)
 
 #include "app/app.h"
 #include "app/engine.h"
-#define ANN_NAME "XY-1 " XY_VERSION
+#define ANN_NAME "LOOM-8 " XY_VERSION
 #define ANN_DATA XY_POOL
-#include "ann_words.h"            /* the link to XY-1's words file (tools/gen_words.py, from firmware/words.tsv) */
+#include "ann_words.h"            /* the link to LOOM-8's words file (tools/gen_words.py, from firmware/words.tsv) */
 #include "announce.c"             /* the screen as text for a screen reader (fm1-reader) */
 static int ann_wire_send(const uint8_t *p, uint32_t n)   /* never waits: no room (nobody reading), not sent */
 {

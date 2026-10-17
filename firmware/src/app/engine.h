@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* XY-1 audio engine: the sequencer, the voices (synth + drumline per track), the sends, the two FX
+/* LOOM-8 audio engine: the sequencer, the voices (synth + drumline per track), the sends, the two FX
  * tracks, the tape, the master; the two cores and the overload guard. engine_render() runs in the
  * audio interrupt; everything else is called from the main loop and reaches the interrupt through
  * the command queue (one 32-bit word a command, single producer / consumer), so the engines' state
