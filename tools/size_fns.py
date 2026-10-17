@@ -13,7 +13,13 @@ Safety net: nothing an interrupt can reach is marked. The roots are the C bodies
 global they name is followed (a function pointer in a table counts as a call), and whatever is reached
 keeps -Os, whichever file it is in. Functions placed in a section (.ram_text, .c1_text) are left alone.
 
-    size_fns.py IN.ll OUT.ll        (XY_SIZE=0: copy unchanged)"""
+The DSP units (build.py O2_UNITS, built at -O2) name theirs in COLD: what runs once a note, a hit, a step
+or a setting change (and the UI's text), never once a sample or a block. The same IR round trip.
+
+Code built for size computes the same samples: the FPU is single precision only and no fused multiply-add
+or reassociation is allowed at any level (-ffp-contract=off); only its speed differs.
+
+    size_fns.py IN.ll OUT.ll [UNIT]        (XY_SIZE=0: copy unchanged)"""
 import os
 import re
 import sys
@@ -22,6 +28,19 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parents[1] / "firmware" / "src"
 SIZE_FILES = ["app/ui.c", "app/pages.c", "app/project.c", "app/lz.c", "app/panel.c", "app/samples.c",
               "app/main_fm1.c", "gfx.c", "storage.c", "ota.c", "announce.c"]
+COLD = {
+    "dsp/drumline.c": ["start", "knob", "drumline_filter", "drumline_hit", "reso_set", "drumline_init"],
+    "dsp/fx.c": ["fx_derive", "ts_set", "eq_coefs", "fx_filter", "master_set", "master_init", "comp_coefs",
+                 "fx_set", "fx_init"],
+    "dsp/sample.c": ["smp_user_scan", "fact_init"],
+    "dsp/synth.c": ["tp_text_i", "tp_text_par", "tp_info_par", "tp_text", "char_picture", "voice_start",
+                    "voice_take", "synth_note_on", "synth_note_off", "synth_duck_trigger", "synth_all_off",
+                    "sound_default", "synth_init", "eknob_init"],
+    "seq/pattern.c": [],
+    "seq/seq.c": ["fire_notes", "key_in", "seq_init", "bar_end", "do_start", "emit_drum", "rec_key_off",
+                  "rec_key_on", "restart", "track_reset", "seq_rec_pos", "deg_to_note", "seq_cue_pattern",
+                  "arp_stop", "keys_all_off"],
+}
 ROOTS = re.compile(r"^(?:\w+_irq|fm1_fault_c|fm1_fatal_common|core2_job)$")
 DEF = re.compile(r"^(?:static\s+|inline\s+|const\s+|unsigned\s+|signed\s+|struct\s+\w+\s+|__attribute__\s*\(\(.*?\)\)\s*)*"
                  r"(?:void|int|char|float|uint\d+_t|int\d+_t|size_t|\w+_t)\s*\**\s*([A-Za-z_]\w*)\s*\(", re.M)
@@ -70,16 +89,22 @@ def reachable(funcs, glob):
     return seen
 
 
-def main(src, dst):
+def main(src, dst, unit=None):
     ir = Path(src).read_text()
     if os.environ.get("XY_SIZE") == "0":
         Path(dst).write_text(ir)
         return 0
     funcs, glob = ir_bodies(ir)
-    hot = reachable(funcs, glob)
-    names = set()
-    for f in SIZE_FILES:
-        names.update(definitions((SRC / f).read_text()))
+    if unit:
+        names, hot = set(COLD[unit]), set()
+        missing = names - set(funcs)
+        if missing:                   # renamed or gone: the list is out of date
+            raise SystemExit(f"size_fns: {unit} defines no {sorted(missing)}")
+    else:
+        hot = reachable(funcs, glob)
+        names = set()
+        for f in SIZE_FILES:
+            names.update(definitions((SRC / f).read_text()))
     pick = {n for n in names & set(funcs) if n not in hot and " section " not in funcs[n][0]}
 
     # each picked definition gets its own attribute group: the old one plus minsize
@@ -99,10 +124,16 @@ def main(src, dst):
         return m.group(0)[:m.start(1) - m.start(0)] + str(made[g]) + m.group(0)[m.end(1) - m.start(0):]
     ir = re.sub(r"^define [^\n]* #(\d+) [^\n]*\{$", mark, ir, flags=re.M)
     for g, new in made.items():
-        ir += f"\nattributes #{new} = {{ minsize {groups[g]} }}\n"
+        a = groups[g] if "optsize" in groups[g].split() else "optsize " + groups[g]
+        if unit and "noinline" not in a.split():
+            a = "noinline " + a           # (inlined, a cold function would take its hot caller's code with it)
+        ir += f"\nattributes #{new} = {{ minsize {a} }}\n"
     Path(dst).write_text(ir)
-    print(f"size: {len(pick)} main-loop functions built for size; {len(names & set(funcs) & hot)} in those "
-          f"files reachable from an interrupt keep -Os")
+    if unit:
+        print(f"size: {unit}: {len(pick)} functions built for size")
+    else:
+        print(f"size: {len(pick)} main-loop functions built for size; {len(names & set(funcs) & hot)} in those "
+              f"files reachable from an interrupt keep -Os")
     return 0
 
 

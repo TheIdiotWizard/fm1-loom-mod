@@ -41,7 +41,8 @@ CFLAGS = ["-Os", "-ffunction-sections", "-fno-builtin", "-Wall", "-Wno-unused-fu
 # the AC79's single-precision FPU (the SDK's own flags); no fused multiply-add, so the host
 # build (-ffp-contract=off) computes the same samples
 FPU = ["-mcpu=r3", "-mfprev1", "-ffp-contract=off"]
-# the DSP units and the sequencer: separate units at -O2 (the rest, the unity build firmware/src/main.c, is -Os)
+# the DSP units and the sequencer: separate units at -O2 (the rest, the unity build firmware/src/main.c, is -Os);
+# tools/size_fns.py builds what never runs per sample for size (minsize)
 O2_UNITS = ["dsp/synth.c", "dsp/drumline.c", "dsp/sample.c", "dsp/fx.c", "seq/pattern.c", "seq/seq.c"]
 LINE = re.compile(r"^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2} )+)\s*\t(.*)$")
 
@@ -238,15 +239,21 @@ def build_app():
               "-o", OUT / "main.ll")]
     objs = [OUT / "crt0.o", OUT / "fm1_vec.o", OUT / "fm1_isr.o", OUT / "fm1_cpu1.o", OUT / "main.o"]
     (OUT / "o2").mkdir(parents=True, exist_ok=True)
-    for u in O2_UNITS:
-        o = OUT / "o2" / (u.replace("/", "_")[:-2] + ".o")
-        units.append(("cc", *o2, "-c", FW / "src" / u, "-o", o))
-        objs.append(o)
+    o2objs = [OUT / "o2" / (u.replace("/", "_")[:-2] + ".o") for u in O2_UNITS]
+    for u, o in zip(O2_UNITS, o2objs):
+        units.append(("cc", *o2, "-S", "-emit-llvm", "-Xclang", "-disable-llvm-optzns", "-c", FW / "src" / u,
+                      "-o", o.with_suffix(".ll")))
+    objs += o2objs
     tc_all(*units)
-    # the unity build's main-loop code for size (tools/size_fns.py marks it minsize), then optimised at -Os
+    # tools/size_fns.py marks the code that never runs per sample minsize: the unity build's main-loop
+    # code (then optimised at -Os), the DSP units' per-note and per-setting functions (then at -O2)
     size_fns.main(OUT / "main.ll", OUT / "main_size.ll")
-    tc("cc", *[f for f in flags if not f.startswith(("-I", "-D", "-W"))], "-c", OUT / "main_size.ll",
-       "-o", OUT / "main.o")
+    for u, o in zip(O2_UNITS, o2objs):
+        size_fns.main(o.with_suffix(".ll"), o.with_suffix(".size.ll"), u)
+    opt = [f for f in flags if not f.startswith(("-I", "-D", "-W"))]
+    tc_all(("cc", *opt, "-c", OUT / "main_size.ll", "-o", OUT / "main.o"),
+           *[("cc", *[f if f != "-Os" else "-O2" for f in opt], "-c", o.with_suffix(".size.ll"), "-o", o)
+             for o in o2objs])
     elf = OUT / "loom.elf"
     # unreferenced functions (each in its own section: -ffunction-sections) are dropped: the DSP keeps
     # mono reference paths for the host tests that the firmware no longer calls
