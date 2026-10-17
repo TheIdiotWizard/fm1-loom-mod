@@ -67,8 +67,8 @@ static const char *const ARPSTE_N[3] = {"mono", "narrow", "wide"};
 static const char *const MPAT_N[4] = {"up", "down", "updown", "random"};
 static const char *const BRAIN_N[3] = {"no", "diatonic", "transp"};
 static const char *const BEND_N[9] = {"off", "1", "2", "3", "4", "5", "6", "7", "octave"};
-static const char *const WTNAME_N[WT_NTABLE] = {"basic", "buzz", "crush", "drawbars", "fibonacci", "fractal", "geometric",
-                                                "primes", "zap"};
+static const char *const WTNAME_N[WT_NTABLE] = {"shapes", "nasal", "grit", "vocal", "spiral", "fold", "octaves",
+                                                "glass", "chirp"};
 static const char *const SYNC_N[LS_SYNC_N] = {"2/1", "1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/64"};
 static const float SYNC_BEATS[LS_SYNC_N] = {8.0f, 4.0f, 2.0f, 1.0f, 0.5f, 0.25f, 0.125f, 0.0625f};
 static const char *const ENVP_N[4] = {"attack", "decay", "sustain", "release"};
@@ -1567,7 +1567,7 @@ static const tp_info_t DRUMP[DP_N] = {{"model", 0, NDM - 1, 0, PK_NAMES, DM_NAME
                                       {"pan", 0, 127, 64, PK_BIP, 0}, {"volume", 0, 127, 76, PK_DB, 0},
                                       {"mode", 0, NPM - 1, PM_ONESHOT, PK_NAMES, PM_NAME}};
 /* a drumline track's Envelope and Filter pages */
-static const tp_info_t DRUMENV[4] = {{"funk", 0, 127, 0, PK_PCT, 0}, {"attack", 0, 127, 0, PK_PCT, 0},
+static const tp_info_t DRUMENV[4] = {{"lag", 0, 127, 0, PK_PCT, 0}, {"attack", 0, 127, 0, PK_PCT, 0},
                                      {"random", 0, 127, 0, PK_PCT, 0}, {"length", 0, 127, 64, PK_PCT, 0}};
 static const tp_info_t DRUMFLT[4] = {{"lowcut", 0, 127, 0, PK_HZ, 0}, {"comp", 0, 127, 0, PK_PCT, 0},
                                      {"drive", 0, 127, 0, PK_PCT, 0}, {"hicut", 0, 127, 127, PK_HZ, 0}};

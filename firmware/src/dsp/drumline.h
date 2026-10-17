@@ -1,34 +1,36 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* LOOM-8 drumline: a drum synth with eleven keys on the black keys, each a model instance with the
- * model's own four knobs, random, pan, volume and a play mode (synth.h TP_DRUM(key, DP_*)). The ten
- * models (DP_MODEL, DM_*) are the OP-XY's: kick, snare, hi-hat, clap, shaker, tambourine, resonator,
- * congas, tom, fm. Analytic (sines with pitch envelopes, filtered noise bursts, six-square metal, a
- * Karplus-like string, 2-op FM): cheap, no samples. Up to NDVOICE keys at once. The track's TP_A..TP_R
- * are the drumline envelope: funk (a delay before the hit, 0..60 ms), attack (a fade-in, 0..100 ms),
- * random (every model's knobs vary per hit, the kick's pitch excepted), length (0.25x .. 4x the
- * model's length, 64 = 1x): neutral is 0 / 0 / 0 / 64. Float, fastmath.h. */
+/* LOOM-8 drumline: the kit engine, a drum synth with eleven keys on the black keys, each a model
+ * instance with the model's own four knobs, random, pan, volume and a play mode (synth.h
+ * TP_DRUM(key, DP_*)). Ten models (DP_MODEL, DM_*): kick, snare, hat, clap, shaker, tambourine,
+ * string, conga, tom, fm. Analytic (sines with pitch envelopes, filtered noise bursts, six-square
+ * metal, a Karplus-Strong string, 2-op FM): cheap, no samples. Up to NDVOICE keys at once. The track's
+ * TP_A..TP_R are the drumline envelope: lag (a delay before the hit, 0..60 ms), attack (a fade-in,
+ * 0..100 ms), random (every model's knobs vary per hit, the kick's pitch excepted), length (0.25x ..
+ * 4x the model's length, 64 = 1x): neutral is 0 / 0 / 0 / 64. Float, fastmath.h. */
 #pragma once
 #include <stdint.h>
 
 #define DL_NSOUND 11                 /* keys: the black keys, a model instance each */
 #define NDVOICE 8
-/* the OP-XY's ten models and each one's four knobs (the notebook pp. 67-68), with the printed defaults:
- *   kick       pitch length punch tone        78 31 50 50
- *   snare      pitch length snare punch       78 31 50 50
- *   hi-hat     pitch length era tone          73 18 50 69   (era: noise left, metallic ring-mod right; tone: bell left, bandpass right)
- *   clap       tone length spread contour     78 50 50 30
- *   shaker     color length attack onset      24 50 50 79
- *   tambourine tone length shake ring         73 18 50 69
- *   resonator  pitch length tone strike       54 42 61 95
- *   congas     pitch length slap mush         78 36 50 00
- *   tom        pitch length sweep rate        79 36 30 50
- *   fm         pitch length mod feedback      73 78 36 12
- * (values printed 00..99; stored 0..127 = printed * 1.28) */
+/* the ten models and each one's four knobs (what each does: drumline.c start()):
+ *   kick       pitch  length  punch   tone
+ *   snare      pitch  length  wires   punch
+ *   hat        pitch  length  metal   focus     (metal: noise left, the six squares and their ring-mod
+ *                                              right; focus: the high-passed shimmer left, a bandpass right)
+ *   clap       tone   length  spread  tail
+ *   shaker     color  length  swell   return    (swell: the fade-in; return: how soon the shake comes back)
+ *   tambourine tone   length  jingle  hiss      (jingle: the metal partials; hiss: the noise)
+ *   string     pitch  length  bright  pluck     (bright: the loop's damping; pluck: the strike)
+ *   conga      pitch  length  slide   drive
+ *   tom        pitch  length  sweep   rate
+ *   fm         pitch  length  mod     feedback
+ * DM_HIHAT is the hat, DM_TAMB the tambourine, DM_RESO the string. DM_DEFAULT[m] = the model's knobs on
+ * its key of the default kit (the low tom's for the tom; the tambourine, not in the kit, its own). */
 enum { DM_KICK, DM_SNARE, DM_HIHAT, DM_CLAP, DM_SHAKER, DM_TAMB, DM_RESO, DM_CONGA, DM_TOM, DM_FM, NDM };
 extern const char *const DM_NAME[NDM];
 extern const char *const DM_KNOB[NDM][4];
 extern const uint8_t DM_DEFAULT[NDM][4];
-/* play modes (p. 69): one-shot, gated (while the key / step is held), loop, choke groups 1..3 (one-shots that cut
+/* play modes: one-shot, gated (while the key / step is held), loop, choke groups 1..3 (one-shots that cut
  * each other within the group) */
 enum { PM_ONESHOT, PM_GATED, PM_LOOP, PM_CHOKE1, PM_CHOKE2, PM_CHOKE3, NPM };
 extern const char *const PM_NAME[NPM];
@@ -36,7 +38,7 @@ extern const char *const DL_SOUND_NAME[DL_NSOUND];     /* the default kit's key 
 extern const uint8_t DL_DEFAULT_KIT[DL_NSOUND][9];     /* DP_* of each key of a new drum track (synth.h DP_N = 9) */
 
 typedef struct drumline drumline_t;
-#define DRUMLINE_BYTES 4096                            /* 8 voices, the dynamic filter and two resonator strings
+#define DRUMLINE_BYTES 4096                            /* 8 voices, the dynamic filter and two strings
                                                         * (int16, 512 each): 3960 bytes used */
 
 void drumline_init(drumline_t *d, const uint8_t *par);  /* par: the track's par[] (reads TP_DRUM0.., TP_A..TP_R at a hit,

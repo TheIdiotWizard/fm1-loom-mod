@@ -284,7 +284,7 @@ int main(void)
         tp_text_par(TP_DRUM(0, DP_VOLUME), 76, p, num, unit);
         check("drum volume 76 is 0 dB", !strcmp(num, "0") && !strcmp(unit, "dB"));
         check("a drum track's filter is dynamic", p[TP_FTYPE] == FT_DYNAMIC && !strcmp(tp_info(TP_CUT, EG_DRUMLINE)->name, "lowcut"));
-        check("a drum track's envelope is funk / attack / random / length", !strcmp(tp_info(TP_A, EG_DRUMLINE)->name, "funk"));
+        check("a drum track's envelope is lag / attack / random / length", !strcmp(tp_info(TP_A, EG_DRUMLINE)->name, "lag"));
     }
     {
         uint8_t p[NTP];
@@ -341,7 +341,7 @@ int main(void)
                 tp_text(TP_E1 + k, p[TP_E1 + k], e, num, unit);
                 shown = atoi(num);
                 if (e == EG_WAVETABLE && k == 0)
-                    shown = strcmp(num, "basic") == 0 ? 0 : -1;
+                    shown = strcmp(num, "shapes") == 0 ? 0 : -1;
                 if (shown != PRINTED[e][k]) {
                     printf("    %s knob %d shows %s, the notebook prints %d\n", EG_NAME[e], k + 1, num, PRINTED[e][k]);
                     ok = 0;
@@ -359,9 +359,9 @@ int main(void)
                                                    && tp_info(TP_E4, EG_ORGAN)->hi == 8);
         check("nine wavetables", tp_info(TP_E1, EG_WAVETABLE)->hi == 8);
         tp_text(TP_E1, 8, EG_WAVETABLE, num, unit);
-        check("the last table is zap", !strcmp(num, "zap"));
+        check("the last table is chirp", !strcmp(num, "chirp"));
         tp_text(TP_E1, 3, EG_WAVETABLE, num, unit);
-        check("table 3 is drawbars", !strcmp(num, "drawbars"));
+        check("table 3 is vocal", !strcmp(num, "vocal"));
     }
     /* the filter and play page texts */
     tp_text(TP_CUT, 0, 0, num, unit);
