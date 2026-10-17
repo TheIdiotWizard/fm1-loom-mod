@@ -23,8 +23,11 @@ run() {
         FAIL=1
     fi
 }
-[ -f build/gen/felucca_font.h ] || "$PY" tools/gen_font.py build/gen/felucca_font.h >/dev/null
-[ -f build/gen/wavetables.h ] || "$PY" tools/gen_wavetables.py build/gen/wavetables.h >/dev/null
+# generated headers: made again when missing or older than their generator (a stale one fails the host build)
+[ -f build/gen/felucca_font.h ] && [ build/gen/felucca_font.h -nt tools/gen_font.py ] ||
+    "$PY" tools/gen_font.py build/gen/felucca_font.h >/dev/null
+[ -f build/gen/wavetables.h ] && [ build/gen/wavetables.h -nt tools/gen_wavetables.py ] ||
+    "$PY" tools/gen_wavetables.py build/gen/wavetables.h >/dev/null
 "$PY" tools/gen_samples.py build/gen/samples.h build/gen/wav >/dev/null   # the factory samples (cheap: always fresh)
 # a user bank from two of them, as tools/loom_samples.py would upload it (tests/scenarios/samples.xy loads it)
 run sample-bank "$PY" tools/loom_samples.py build build/gen/user_bank.bin "piano two=build/gen/wav/piano.wav:60" \
