@@ -13,11 +13,13 @@ CO	conductor
 COND	conductor
 TH	throws
 THROW	throws
-TP	tape
 F1	effects 1
 F2	effects 2
 FX I	effects 1
 FX II	effects 2
+studio S	studio small
+studio M	studio medium
+studio L	studio large
 VEL	velocity
 NOTE LEN	note length
 QUANT	quantise
@@ -69,10 +71,8 @@ bump dn	bump down
 fade dn	fade down
 fwd/back	forward or back
 to fx II	to effects 2
-sendT	tape send
 SEND1	send to effects 1
 SEND2	send to effects 2
-SENDT	send to tape
 updown	up and down
 S&H	sample and hold
 EXT	external clock

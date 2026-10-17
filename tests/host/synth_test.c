@@ -52,7 +52,7 @@ static void check(const char *what, int ok)
 static uint8_t par[NTRK][NTP];
 static _Alignas(16) uint8_t mem[SYNTH_BYTES];
 static synth_t *S = (synth_t *)mem;
-static float L[N], R[N], S1[N], S2[N], ST[N];
+static float L[N], R[N], S1[N], S2[N];
 static float last_rms;                           /* the last block's RMS (left) */
 
 static int finite_f(float x) { return x == x && x < 1e30f && x > -1e30f; }
@@ -67,9 +67,8 @@ static float block(uint32_t n, int *finite)
     memset(R, 0, sizeof R);
     memset(S1, 0, sizeof S1);
     memset(S2, 0, sizeof S2);
-    memset(ST, 0, sizeof ST);
     synth_prepare(S, n);
-    synth_render(S, 0, NVOICE, L, R, S1, S2, ST, n);
+    synth_render(S, 0, NVOICE, L, R, S1, S2, n);
     last_rms = 0.0f;
     for (i = 0; i < n; i++) {
         if (!finite_f(L[i]) || !finite_f(R[i]) || !finite_f(S1[i]))
@@ -738,8 +737,9 @@ int main(void)
         check("pump: source / amount / hold / release", !strcmp(tp_info_par(TP_LSPEED, p)->name, "source")
                                                              && !strcmp(tp_info_par(TP_LDEST, p)->name, "hold")
                                                              && !strcmp(tp_info_par(TP_LX, p)->name, "release"));
-        tp_text_par(TP_LSPEED, 11, p, num, unit);
-        check("pump source 11 is the metronome", !strcmp(num, "metro"));
+        tp_text_par(TP_LSPEED, DUCK_METRO, p, num, unit);
+        check("pump source 10 is the metronome (no tape before it)", DUCK_METRO == 10 && !strcmp(num, "metro") &&
+                                                                     tp_info_par(TP_LSPEED, p)->hi == DUCK_METRO);
         tp_text_par(TP_LSPEED, 8, p, num, unit);
         check("pump source 8 is the conductor", !strcmp(num, "conductor"));
         p[TP_LTYPE] = LT_WOBBLE;
@@ -813,11 +813,6 @@ int main(void)
         }
         check("filter types: lp24 ladder lp12 hp12 dynamic bp12", ok);
     }
-    {
-        uint8_t p[NTP];
-        sound_default(p, EG_WEFT);
-        check("a new sound feeds the tape (as a new project's tracks)", p[TP_SENDT] == 127);
-    }
     tp_text(TP_BEND, 0, 0, num, unit);
     check("bend 0 is off", !strcmp(num, "off"));
     tp_text(TP_BEND, 8, 0, num, unit);
@@ -828,7 +823,7 @@ int main(void)
     check("portamento shows 0..127", !strcmp(num, "50") && !unit[0]);
 
     check("64 presets, 8 an engine", NPRESETS == 64);
-    {   /* names: lower case words, at most 11 characters, each its own; tape on; stack's first is a bass */
+    {   /* names: lower case words, at most 11 characters, each its own; stack's first is a bass */
         int ok = 1, j;
         for (k = 0; k < NPRESETS && ok; k++) {
             const char *n = PRESETS[k].name;
@@ -841,12 +836,10 @@ int main(void)
             for (j = 0; j < k; j++)
                 if (!strcmp(PRESETS[j].name, n))
                     ok = 0;
-            if (PRESETS[k].par[TP_SENDT] != 127)
-                ok = 0;
             if (!ok)
                 printf("    preset %d \"%s\"\n", k, n);
         }
-        check("preset names: lower case, <= 11 characters, unique; tape send on", ok);
+        check("preset names: lower case, <= 11 characters, unique", ok);
         check("stack's first preset is its bass (a new project's track 2)", strstr(PRESETS[preset_first(EG_STACK)].name, "bass") != 0);
     }
     for (e = 0; e < EG_DRUMLINE; e++) {
@@ -1366,12 +1359,12 @@ int main(void)
         for (b = 0; b < 8; b++)
             rel = block(N, &finite);
         check("a short release lets go within 50 ms", rel > a * 0.8f);
-        par[0][TP_LSPEED] = 11;
+        par[0][TP_LSPEED] = DUCK_METRO;
         par[0][TP_LX] = 76;
-        synth_duck_trigger(S, 11);
+        synth_duck_trigger(S, DUCK_METRO);
         block(N, &finite);
         c = block(N, &finite);
-        check("the metronome (source 11) pumps too", c < a * 0.3f);
+        check("the metronome (source 10) pumps too", c < a * 0.3f);
     }
 
     /* perf: mute, pitch */
@@ -1418,7 +1411,7 @@ int main(void)
 
     /* splitting by voices and by frames changes nothing */
     {
-        static float L2[N], R2[N], S12[N], S22[N], ST2[N];
+        static float L2[N], R2[N], S12[N], S22[N];
         static float Lr[N], Rr[N];
         static uint8_t mem2[SYNTH_BYTES];
         int same = 1, i;
@@ -1443,9 +1436,8 @@ int main(void)
         memset(R, 0, sizeof R);
         memset(S1, 0, sizeof S1);
         memset(S2, 0, sizeof S2);
-        memset(ST, 0, sizeof ST);
-        synth_prepare(S, N);
-        synth_render(S, 0, NVOICE, L, R, S1, S2, ST, N);
+            synth_prepare(S, N);
+        synth_render(S, 0, NVOICE, L, R, S1, S2, N);
         memcpy(Lr, L, sizeof L);
         memcpy(Rr, R, sizeof R);
         /* B: two voice ranges */
@@ -1454,10 +1446,9 @@ int main(void)
         memset(R2, 0, sizeof R2);
         memset(S12, 0, sizeof S12);
         memset(S22, 0, sizeof S22);
-        memset(ST2, 0, sizeof ST2);
         synth_prepare(S, N);
-        synth_render(S, 0, 8, L2, R2, S12, S22, ST2, N);
-        synth_render(S, 8, NVOICE, L2, R2, S12, S22, ST2, N);
+        synth_render(S, 0, 8, L2, R2, S12, S22, N);
+        synth_render(S, 8, NVOICE, L2, R2, S12, S22, N);
         for (i = 0; i < N; i++)
             if (L2[i] != Lr[i] || R2[i] != Rr[i])
                 same = 0;
@@ -1469,8 +1460,8 @@ int main(void)
         memset(L, 0, sizeof L);
         memset(R, 0, sizeof R);
         synth_prepare(S, N);
-        synth_render(S, 8, NVOICE, L2, R2, S12, S22, ST2, N);
-        synth_render(S, 0, 8, L, R, S12, S22, ST2, N);
+        synth_render(S, 8, NVOICE, L2, R2, S12, S22, N);
+        synth_render(S, 0, 8, L, R, S12, S22, N);
         same = 1;
         for (i = 0; i < N; i++)
             if (fabs_f(L2[i] + L[i] - Lr[i]) > 1e-6f || fabs_f(R2[i] + R[i] - Rr[i]) > 1e-6f)
@@ -1482,11 +1473,10 @@ int main(void)
         memset(R2, 0, sizeof R2);
         memset(S12, 0, sizeof S12);
         memset(S22, 0, sizeof S22);
-        memset(ST2, 0, sizeof ST2);
         synth_prepare(S, 100);
-        synth_render(S, 0, NVOICE, L2, R2, S12, S22, ST2, 100);
+        synth_render(S, 0, NVOICE, L2, R2, S12, S22, 100);
         synth_prepare(S, 156);
-        synth_render(S, 0, NVOICE, L2 + 100, R2 + 100, S12 + 100, S22 + 100, ST2 + 100, 156);
+        synth_render(S, 0, NVOICE, L2 + 100, R2 + 100, S12 + 100, S22 + 100, 156);
         same = 1;
         for (i = 0; i < N; i++)
             if (L2[i] != Lr[i] || R2[i] != Rr[i])
@@ -1498,12 +1488,11 @@ int main(void)
         memset(R2, 0, sizeof R2);
         memset(S12, 0, sizeof S12);
         memset(S22, 0, sizeof S22);
-        memset(ST2, 0, sizeof ST2);
         synth_prepare(S, N);
-        synth_render(S, 0, 8, L2, R2, S12, S22, ST2, 100);
-        synth_render(S, 8, NVOICE, L2, R2, S12, S22, ST2, 100);
-        synth_render(S, 0, 8, L2 + 100, R2 + 100, S12 + 100, S22 + 100, ST2 + 100, 156);
-        synth_render(S, 8, NVOICE, L2 + 100, R2 + 100, S12 + 100, S22 + 100, ST2 + 100, 156);
+        synth_render(S, 0, 8, L2, R2, S12, S22, 100);
+        synth_render(S, 8, NVOICE, L2, R2, S12, S22, 100);
+        synth_render(S, 0, 8, L2 + 100, R2 + 100, S12 + 100, S22 + 100, 156);
+        synth_render(S, 8, NVOICE, L2 + 100, R2 + 100, S12 + 100, S22 + 100, 156);
         same = 1;
         for (i = 0; i < N; i++)
             if (L2[i] != Lr[i] || R2[i] != Rr[i])

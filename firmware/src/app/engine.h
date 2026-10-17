@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* LOOM-8 audio engine: the sequencer, the voices (synth + drumline per track), the sends, the two FX
- * tracks, the tape, the master; the two cores and the overload guard. engine_render() runs in the
+ * tracks, the master; the two cores and the overload guard. engine_render() runs in the
  * audio interrupt; everything else is called from the main loop and reaches the interrupt through
  * the command queue (one 32-bit word a command, single producer / consumer), so the engines' state
  * is only ever touched by one context.
@@ -29,12 +29,10 @@ void engine_set_all(int trk);                            /* every parameter of a
 void engine_key(int trk, int note, int on, int vel);     /* a key through the sequencer's player and brain */
 void engine_keys_off(int trk);
 void engine_punch(int fx, int on, int target_trk);
-void engine_tape_key(int seg, int on);
 void engine_brain_key(int note, int on);
 void engine_master(int p, int val);
-void engine_fx(int slot, int type, const uint8_t knob[4], int hp, int lp);
-int engine_fx_has(int slot, int type);                   /* the slot can do this effect (fx.h fx_has) */
-void engine_tape_set(int pitch, int speed, int length, int mix);
+void engine_fx(int slot, int pick, const uint8_t knob[4], int hp, int lp);   /* pick: fx.h (effect, reverb mode) */
+int engine_fx_has(int slot, int pick);                   /* the slot can do this effect (fx.h fx_has) */
 void engine_panic(void);
 void engine_midi_in(uint32_t pkt);                       /* a USB-MIDI packet (the main loop passes them) */
 void engine_transport(int what);                         /* 0 stop, 1 start, 2 continue, 3 start from the top */

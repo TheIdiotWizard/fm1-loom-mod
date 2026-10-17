@@ -7,7 +7,7 @@
 #include <string.h>
 #include "seq.h"
 
-enum { E_ON, E_OFF, E_DRUM, E_LOCK, E_BEND, E_PUNCH, E_SEG, E_TSTEP, E_MIDI, E_STEP, E_SCENE, E_METRO, E_PAN, E_DOFF };
+enum { E_ON, E_OFF, E_DRUM, E_LOCK, E_BEND, E_PUNCH, E_MIDI, E_STEP, E_SCENE, E_METRO, E_PAN, E_DOFF };
 typedef struct {
     int kind;
     uint32_t t;
@@ -46,15 +46,13 @@ static void s_drum(void *x, int trk, int sound, int vel, int pitch, int sh, int 
 static void s_lock(void *x, int trk, int param, int val) { (void)x; log_ev(E_LOCK, trk, param, val, 0, 0); }
 static void s_bend(void *x, int trk, int cents) { (void)x; log_ev(E_BEND, trk, cents, 0, 0, 0); }
 static void s_punch(void *x, uint32_t d, uint32_t m) { (void)x; log_ev(E_PUNCH, -1, (int)d, (int)m, 0, 0); }
-static void s_seg(void *x, int seg, int on) { (void)x; log_ev(E_SEG, AUX_TAPE, seg, on, 0, 0); }
-static void s_tstep(void *x, uint32_t sps) { (void)x; log_ev(E_TSTEP, AUX_TAPE, (int)sps, 0, 0, 0); }
 static void s_midi(void *x, uint8_t st, uint8_t d1, uint8_t d2) { (void)x; log_ev(E_MIDI, -1, st, d1, d2, 0); }
 static void s_step(void *x, int trk, int step) { (void)x; log_ev(E_STEP, trk, step, 0, 0, 0); }
 static void s_scene(void *x, int sc) { (void)x; log_ev(E_SCENE, -1, sc, 0, 0, 0); }
 static void s_metro(void *x, int acc) { (void)x; log_ev(E_METRO, -1, acc, 0, 0, 0); }
 static void s_pan(void *x, int trk, int pan) { (void)x; log_ev(E_PAN, trk, pan, 0, 0, 0); }
 static void s_drum_off(void *x, int trk, int sound) { (void)x; log_ev(E_DOFF, trk, sound, 0, 0, 0); }
-static const seq_sink_t sink = {s_on, s_off, s_drum, s_lock, s_bend, s_punch, s_seg, s_tstep, s_midi, s_step,
+static const seq_sink_t sink = {s_on, s_off, s_drum, s_lock, s_bend, s_punch, s_midi, s_step,
                                 s_scene, s_metro, s_pan, s_drum_off, 0};
 
 static void fail(const char *what)
@@ -1644,7 +1642,6 @@ static void t_count_in(void)
     CHECK(count(E_METRO, -1) >= 5 && nth(E_METRO, -1, 0)->t == 0 && nth(E_METRO, -1, 0)->a == 1 &&
           near(nth(E_METRO, -1, 1)->t, 4 * L16 + 2, 2) && nth(E_METRO, -1, 1)->a == 0);
     CHECK(count(E_ON, 0) == 1 && near(on_n(0)->t, 16 * L16 + 8, 1) && S.count_in == 0 && S.rec == 1);
-    CHECK(nth(E_TSTEP, -1, 0) && nth(E_TSTEP, -1, 0)->a == 5512);
     /* the metronome off while playing without rec */
     reset();
     S.metronome = 1;
@@ -1663,18 +1660,12 @@ static void t_aux_tracks(void)
     P.pat[AUX_PUNCH][0].st[1].note[0] = 1 + PX_MEL + PX_MUTE;   /* the melodic duck on step 2, a step long */
     P.pat[AUX_PUNCH][0].st[1].vel = 100;
     P.pat[AUX_PUNCH][0].st[1].len = 4;
-    P.pat[AUX_TAPE][0].st[0].note[0] = 4;               /* segment 4 for a step */
-    P.pat[AUX_TAPE][0].st[0].vel = 100;
-    P.pat[AUX_TAPE][0].st[0].len = 4;
     start();
     run(3 * L16);
     CHECK(count(E_ON, 0) == 1);       /* step 2 muted by the sequenced FX */
     CHECK(nth(E_PUNCH, -1, 0) && nth(E_PUNCH, -1, 0)->b == 1);
-    CHECK(nth(E_SEG, -1, 0)->a == 3 && nth(E_SEG, -1, 0)->b == 1 && nth(E_SEG, -1, 1)->b == 0 &&
-          near(nth(E_SEG, -1, 1)->t, L16, 1));
-    seq_tape_key(&S, 7, 1);
-    run(10);
-    CHECK(nth(E_SEG, -1, 2)->a == 7 && nth(E_SEG, -1, 2)->b == 1);
+    /* ten sequenced tracks (1-8, the conductor, the throws), then the two FX tracks: no tape */
+    CHECK(NSEQT == 10 && AUX_PUNCH == NSEQT - 1 && AUX_FX1 == NSEQT && AUX_FX2 == NSEQT + 1 && NALLTRK == 12);
     printf("ok %s\n", cur);
 }
 

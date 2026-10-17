@@ -1,15 +1,14 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* The effects (dsp/fx.c) on their own: every send effect takes an impulse and a noise burst without
- * NaN and stays bounded, at its defaults and at mid knobs; the delay's first echo lands on the beat
- * at 120 BPM (time 1/4 = 0.5 s, dotted 1/8 = 0.375 s) and ping-pongs; the delay and the reverb return
- * only the wet (plain send / return); the delay's tone brightens its repeats, the reverb's damp darkens
- * its tail; the reverb decays; the distortion's edge hardens the clip; the lofi's width spreads the
- * sides; the tape loops the segment that was asked for, its dry
- * gain follows mix, pitch +1 octave and speed 200 % double its rate; the master is bit-transparent at
- * EQ blend 0 (apart from the limiter's 64-sample lookahead), its limiter never passes 1.0, its
- * compressor pulls loud input down, its EQ moves the bands; and the cost of each in instructions a
- * sample (macOS: proc_pid_rusage). Each effect's burst at its defaults is written to
- * build/host/fx_<name>.wav for inspection (nothing here plays audio).
+/* The effects (dsp/fx.c) on their own: every send effect (and every reverb mode) takes an impulse and a
+ * noise burst without NaN and stays bounded, at its defaults and at mid knobs; the delay's first echo lands
+ * on the beat at 120 BPM (time 1/4 = 0.5 s, dotted 1/8 = 0.375 s) and ping-pongs; the delay and the reverb
+ * return only the wet (plain send / return); the delay's tone brightens its repeats, the plate's damp darkens
+ * its tail; the reverbs decay (the SPU modes too, each, and grow with size); the lofi's width spreads the
+ * sides; the master is bit-transparent with the EQ's blend and the tape's four knobs at 0 (apart from the
+ * limiter's 64-sample lookahead), near unity at the new project's tape, its tape's drive saturates, wobble
+ * moves the pitch, noise adds hiss, its limiter never passes 1.0, its compressor pulls loud input down, its
+ * EQ moves the bands; and the cost of each in instructions a sample (macOS: proc_pid_rusage). Each effect's
+ * burst at its defaults is written to build/host/fx_<name>.wav for inspection (nothing here plays audio).
  *   tests/host/fx_test.sh */
 #include <stdio.h>
 #include <string.h>
@@ -40,13 +39,13 @@ static void check(const char *what, int ok)
     bad += !ok;
 }
 
-static int16_t dly_l[FX_DLY_LEN], dly_r[FX_DLY_LEN], rv[FX_RV_LEN], tape_buf[TAPE_LEN];
+static int16_t dly_l[FX_DLY_LEN], dly_r[FX_DLY_LEN], rv[FX_RV_LEN];
+static float mtl[MST_TAPE_DLY], mtr[MST_TAPE_DLY];
 static uint8_t fxb[FXSLOT_BYTES] __attribute__((aligned(8)));
-static uint8_t tpb[TAPE_BYTES] __attribute__((aligned(8)));
 static uint8_t msb[MASTER_BYTES] __attribute__((aligned(8)));
 static fxslot_t *fx = (fxslot_t *)fxb;
-static tape_t *tp = (tape_t *)tpb;
 static master_t *ms = (master_t *)msb;
+#define MS_INIT() master_init(ms, mtl, mtr)
 
 static uint32_t rng = 12345;
 static float noise(void)
@@ -145,6 +144,10 @@ static void impulse(int type, const uint8_t knob[4], float *l, float *r, int n)
     fx_init(fx, dly_l, dly_r, rv);
     fx_tempo(fx, 120.0f);
     fx_set(fx, type, knob);
+    for (b = 0; type > FXT_REVERB && b < 40; b++) {       /* an SPU mode clears its area first (silent) */
+        memset(in, 0, sizeof in);
+        fx_process(fx, in, ol, orr, BLK);
+    }
     for (b = 0; b < n / BLK; b++) {
         memset(in, 0, sizeof in);
         if (b == 0)
@@ -171,6 +174,96 @@ static float bright(const float *y, int from, int to)
 }
 static float imp_l[3 * SR], imp_r[3 * SR];
 
+/* the master on a stereo signal of n blocks, mel only (perc silent): fills ol / or (the whole run) */
+static float m_out_l[SR * 4], m_out_r[SR * 4];
+typedef float (*gen_t)(int t, int side);
+static void master_run(gen_t g, int n)
+{
+    static float pl[BLK], pr[BLK], mll[BLK], mlr[BLK];
+    int b, i;
+    memset(m_out_l, 0, sizeof m_out_l);
+    memset(m_out_r, 0, sizeof m_out_r);
+    for (b = 0; b < (n + BLK - 1) / BLK; b++) {
+        for (i = 0; i < BLK; i++) {
+            pl[i] = pr[i] = 0.0f;
+            mll[i] = g(b * BLK + i, 0);
+            mlr[i] = g(b * BLK + i, 1);
+        }
+        master_process(ms, pl, pr, mll, mlr, m_out_l + b * BLK, m_out_r + b * BLK, BLK);
+    }
+}
+static float g_sine01(int t, int s) { (void)s; return 0.1f * fm_sin_turns((float)t * (1000.0f / SR)); }
+static float g_sine50(int t, int s) { (void)s; return 0.25f * fm_sin_turns((float)t * (50.0f / SR)); }
+static float g_sine1k(int t, int s) { (void)s; return 0.25f * fm_sin_turns((float)t * (1000.0f / SR)); }
+static float g_zero(int t, int s) { (void)t; (void)s; return 0.0f; }
+static float rms_of(const float *x, int from, int to)
+{
+    float e = 0.0f;
+    int i;
+    for (i = from; i < to; i++)
+        e += x[i] * x[i];
+    return fm_sqrtf(e / (float)(to - from));
+}
+/* the frequency of a sine in windows of 1024 (zero crossings, upward, interpolated): the spread, Hz */
+static float freq_spread(const float *x, int from, int to)
+{
+    float lo = 1e9f, hi = 0.0f;
+    int w;
+    for (w = from; w + 1024 <= to; w += 1024) {
+        float first = -1.0f, last = -1.0f;
+        int n = 0, i;
+        for (i = w + 1; i < w + 1024; i++)
+            if (x[i - 1] < 0.0f && x[i] >= 0.0f) {
+                float at = (float)(i - 1) + x[i - 1] / (x[i - 1] - x[i]);
+                if (first < 0.0f)
+                    first = at;
+                last = at;
+                n++;
+            }
+        if (n > 2) {
+            float f = (float)(n - 1) * SR / (last - first);
+            lo = fm_minf(lo, f);
+            hi = fm_maxf(hi, f);
+        }
+    }
+    return hi - lo;
+}
+static float crest(const float *x, int from, int to)
+{
+    float pk = 0.0f;
+    int i;
+    for (i = from; i < to; i++)
+        pk = fm_maxf(pk, fm_fabsf(x[i]));
+    return pk / (rms_of(x, from, to) + 1e-12f);
+}
+/* the SPU mode's impulse response: its energy's centre in time (s) over 4 s */
+static float centre_time(int pick, const uint8_t kn[4])
+{
+    static float in[BLK], ol[BLK], orr[BLK];
+    float e = 0.0f, et = 0.0f;
+    int b, i;
+    fx_init(fx, dly_l, dly_r, rv);
+    fx_set(fx, pick, kn);
+    for (b = 0; b < 40; b++) {                           /* its area cleared */
+        memset(in, 0, sizeof in);
+        fx_process(fx, in, ol, orr, BLK);
+    }
+    for (b = 0; b < 4 * SR / BLK; b++) {
+        memset(in, 0, sizeof in);
+        if (b == 0)
+            in[0] = 1.0f;
+        memset(ol, 0, sizeof ol);
+        memset(orr, 0, sizeof orr);
+        fx_process(fx, in, ol, orr, BLK);
+        for (i = 0; i < BLK; i++) {
+            float v = ol[i] * ol[i] + orr[i] * orr[i];
+            e += v;
+            et += v * (float)(b * BLK + i) / SR;
+        }
+    }
+    return et / (e + 1e-20f);
+}
+
 int main(void)
 {
     static float in[BLK], ol[BLK], orr[BLK];
@@ -180,56 +273,73 @@ int main(void)
 
     printf("-- every effect at its defaults on an impulse and a noise burst (peak, RMS of the 3 s, the second\n"
            "   after the burst, the last second; dBFS), written to build/host/fx_<name>.wav\n");
-    for (t = 0; t < NFXT; t++) {
-        snprintf(name, sizeof name, "build/host/fx_%s.wav", FXT_NAME[t]);
-        run_fx(t, FXT_DEFAULT[t], &r, name);
-        snprintf(name, sizeof name, "  %-10s %6.1f  %6.1f  %6.1f  %6.1f", FXT_NAME[t], (double)db(r.peak),
+    for (t = 0; t < NFXPICK; t++) {
+        const uint8_t *def = t > FXT_REVERB ? RV_SPU_DEFAULT : FXT_DEFAULT[fx_pick_type(t)];
+        snprintf(name, sizeof name, "build/host/fx_%s.wav", fx_pick_name(t));
+        for (i = 0; name[i]; i++)
+            if (name[i] == ' ')
+                name[i] = '_';
+        run_fx(t, def, &r, name);
+        snprintf(name, sizeof name, "  %-10s %6.1f  %6.1f  %6.1f  %6.1f", fx_pick_name(t), (double)db(r.peak),
                  (double)db(r.rms), (double)db(r.rms_after), (double)db(r.rms_end));
         check(name, !r.nan && r.peak > 0.001f && r.peak < 4.0f);
     }
     printf("-- and at mid knobs (64)\n");
-    for (t = 0; t < NFXT; t++) {
+    for (t = 0; t < NFXPICK; t++) {
         static const uint8_t mid[4] = {64, 64, 64, 64};
         run_fx(t, mid, &r, 0);
-        snprintf(name, sizeof name, "  %-10s %6.1f  %6.1f  %6.1f  %6.1f", FXT_NAME[t], (double)db(r.peak),
+        snprintf(name, sizeof name, "  %-10s %6.1f  %6.1f  %6.1f  %6.1f", fx_pick_name(t), (double)db(r.peak),
                  (double)db(r.rms), (double)db(r.rms_after), (double)db(r.rms_end));
         check(name, !r.nan && r.peak > 0.001f && r.peak < 4.0f);
     }
     {   /* the defaults and the knobs' names */
-        static const uint8_t want[NFXT][4] = {{50, 86, 20, 127}, {72, 64, 56, 64}, {40, 32, 40, 100},
-                                              {80, 80, 64, 40},  {50, 90, 50, 80}, {100, 40, 44, 72}};
+        static const uint8_t want[NFXT][4] = {{50, 86, 20, 127}, {72, 64, 56, 64}, {80, 80, 64, 40},
+                                              {50, 90, 50, 80},  {100, 40, 44, 72}};
         static const char *const names[NFXT][4] = {
-            {"rate", "depth", "feedback", "width"},  {"time", "fine", "repeats", "tone"},
-            {"drive", "edge", "low cut", "high cut"}, {"rate", "bits", "smooth", "width"},
-            {"freq", "depth", "rate", "feedback"},    {"size", "motion", "tone", "damp"}};
+            {"rate", "depth", "feedback", "width"}, {"time", "fine", "repeats", "tone"},
+            {"rate", "bits", "smooth", "width"},    {"freq", "depth", "rate", "feedback"},
+            {"size", "motion", "tone", "damp"}};
+        static const char *const picks[NFXPICK] = {"chorus", "delay", "lofi", "phaser", "plate", "room", "studio S",
+                                                   "studio M", "studio L", "hall", "half echo", "space echo",
+                                                   "chaos echo", "one echo"};
         int ok = 1, k;
+        check("five send effects (no distortion), the reverb with ten modes", NFXT == 5 && NRV == 10 && NFXPICK == 14 &&
+                                                                              !strcmp(FXT_NAME[FXT_REVERB], "reverb"));
         for (t = 0; t < NFXT; t++)
             for (k = 0; k < 4; k++)
                 ok &= FXT_DEFAULT[t][k] == want[t][k];
-        check("FXT_DEFAULT: chorus 50 86 20 127, delay 72 64 56 64, ... reverb 100 40 44 72", ok);
-        ok = !strcmp(MS_NAME[MS_SAT_BLEND], "mix");
-        for (t = 0; t < NFXT; t++)
-            for (k = 0; k < 4; k++)
-                ok &= !strcmp(FXT_KNOB[t][k], names[t][k]);
-        check("knobs: delay time fine repeats tone; reverb size motion tone damp; ...", ok);
+        check("FXT_DEFAULT: chorus 50 86 20 127, delay 72 64 56 64, ... plate 100 40 44 72", ok);
+        ok = !strcmp(MS_NAME[MS_TP_DRIVE], "drive") && !strcmp(MS_NAME[MS_TP_COLOR], "color") &&
+             !strcmp(MS_NAME[MS_TP_WOBBLE], "wobble") && !strcmp(MS_NAME[MS_TP_NOISE], "noise");
+        check("the master's tape knobs: drive color wobble noise", ok);
         ok = 1;
-        for (t = 0; t < NFXT; t++)                       /* the strip fits a name in 46 pixels: 8 letters */
+        for (t = 0; t < NFXPICK; t++) {
+            ok &= !strcmp(fx_pick_name(t), picks[t]);
             for (k = 0; k < 4; k++)
-                ok &= strlen(FXT_KNOB[t][k]) <= 8;
+                ok &= !strcmp(fx_knob_name(t, k), t > FXT_REVERB ? (const char *[]){"size", "decay", "tone", "damp"}[k]
+                                                                  : names[fx_pick_type(t)][k]);
+        }
+        check("picks: chorus .. phaser, plate .. one echo; the SPU modes' knobs size decay tone damp", ok);
+        ok = 1;
+        for (t = 0; t < NFXPICK; t++)                    /* the strip fits a name in 46 pixels: 8 letters */
+            for (k = 0; k < 4; k++)
+                ok &= strlen(fx_knob_name(t, k)) <= 8;
         check("knob names at most 8 letters", ok);
     }
-    check("fx_has: every effect with its lines", fx_has(fx, FXT_REVERB) && fx_has(fx, FXT_DELAY) && fx_has(fx, FXT_LOFI));
+    check("fx_has: every effect with its lines", fx_has(fx, FXT_REVERB) && fx_has(fx, FXT_REVERB + RV_HALL) &&
+                                                 fx_has(fx, FXT_DELAY) && fx_has(fx, FXT_LOFI) && !fx_has(fx, NFXPICK));
     fx_init(fx, dly_l, dly_r, 0);
-    check("fx_has: no reverb without its line", !fx_has(fx, FXT_REVERB) && fx_has(fx, FXT_CHORUS));
+    check("fx_has: no reverb (no mode) without its line", !fx_has(fx, FXT_REVERB) && !fx_has(fx, FXT_REVERB + RV_ROOM) &&
+                                                          fx_has(fx, FXT_CHORUS));
     {   /* the knobs at their ends, every effect: still finite and bounded */
         int ok = 1, k;
-        for (t = 0; t < NFXT && ok; t++)
+        for (t = 0; t < NFXPICK && ok; t++)
             for (k = 0; k < 2 && ok; k++) {
                 uint8_t kn[4] = {(uint8_t)(k ? 127 : 0), (uint8_t)(k ? 127 : 0), (uint8_t)(k ? 0 : 127), (uint8_t)(k ? 127 : 0)};
                 run_fx(t, kn, &r, 0);
                 ok = !r.nan && r.peak < 8.0f;
                 if (!ok)
-                    printf("  %s knobs %d: peak %.2f nan %d\n", FXT_NAME[t], k, (double)r.peak, r.nan);
+                    printf("  %s knobs %d: peak %.2f nan %d\n", fx_pick_name(t), k, (double)r.peak, r.nan);
             }
         check("knobs at their ends: finite, under +18 dBFS", ok);
     }
@@ -317,10 +427,10 @@ int main(void)
 
     printf("-- the slot's filter page and a change of effect\n");
     {
-        static const uint8_t kn[4] = {0, 0, 0, 127};               /* the distortion at drive 1, cuts open: near a wire */
+        static const uint8_t kn[4] = {127, 127, 0, 0};             /* the lofi at 44.1 kHz, 16 bits, unsmoothed: a wire */
         float lo = 0.0f, hi = 0.0f, lo2 = 0.0f, hi2 = 0.0f;
         fx_init(fx, dly_l, dly_r, rv);
-        fx_set(fx, FXT_DIST, kn);
+        fx_set(fx, FXT_LOFI, kn);
         fx_filter(fx, 0, 127);
         for (b = 0; b < 40; b++) {
             for (i = 0; i < BLK; i++)
@@ -390,30 +500,9 @@ int main(void)
         }
     }
 
-    printf("-- distortion: edge hardens the clip; lofi: width spreads the sides\n");
+    printf("-- lofi: width spreads the sides\n");
     {
-        float e[2] = {0.0f, 0.0f}, pk[2] = {0.0f, 0.0f};
         int c;
-        for (c = 0; c < 2; c++) {                                /* a 0.4 sine, drive 24: tanh, then a hard clip */
-            uint8_t kn[4] = {24, (uint8_t)(c ? 127 : 0), 0, 127};
-            fx_init(fx, dly_l, dly_r, rv);
-            fx_set(fx, FXT_DIST, kn);
-            for (b = 0; b < 60; b++) {
-                for (i = 0; i < BLK; i++)
-                    in[i] = 0.4f * fm_sin_turns((float)(b * BLK + i) * (200.0f / SR));
-                memset(ol, 0, sizeof ol);
-                memset(orr, 0, sizeof orr);
-                fx_process(fx, in, ol, orr, BLK);
-                if (b >= 30)
-                    for (i = 0; i < BLK; i++) {
-                        e[c] += ol[i] * ol[i];
-                        pk[c] = fm_maxf(pk[c], fm_fabsf(ol[i]));
-                    }
-            }
-        }
-        snprintf(name, sizeof name, "  edge 127 over edge 0: %.1f dB more RMS, the same peak (%.2f, %.2f)",
-                 (double)(10.0f * 0.30103f * fm_log2f(e[1] / e[0])), (double)pk[0], (double)pk[1]);
-        check(name, e[1] > e[0] * 1.1f && pk[1] > pk[0] * 1.1f && pk[1] < 1.0f);
         for (c = 0; c < 2; c++) {                                /* width 0: L = R exactly; width 127: they differ */
             uint8_t kn[4] = {64, 93, 78, (uint8_t)(c ? 127 : 0)};
             float diff = 0.0f, e2 = 0.0f;
@@ -438,139 +527,11 @@ int main(void)
         }
     }
 
-    printf("-- tape: 16 steps of markers at 120 BPM, then segments loop\n");
-    {
-        /* step k holds a 300 Hz sine at amplitude (k + 1) / 16: a segment is known by its level.
-         * A step is a sixteenth at 120 BPM (125 ms); the ring holds 16 of them down to 90 BPM */
-        const uint32_t step = 5512;
-        float pk, dry = 1.0f;
-        int seg;
-        tape_init(tp, tape_buf);
-        tape_set(tp, 64, 64, 0, 127);
-        for (b = 0; b < (int)(16 * step / BLK); b++) {
-            int k = (b * BLK) / (int)step;
-            if ((b * BLK) % (int)step == 0)
-                tape_bar(tp, step);
-            for (i = 0; i < BLK; i++)
-                in[i] = ((float)k + 1.0f) / 16.0f * fm_sin_turns((float)(b * BLK + i) * (300.0f / SR));
-            memset(ol, 0, sizeof ol);
-            memset(orr, 0, sizeof orr);
-            dry = tape_process(tp, in, ol, orr, BLK);
-        }
-        tape_bar(tp, step);                                  /* the boundary after step 16 */
-        check("recording: dry gain 1, not active", dry == 1.0f && !tape_active(tp));
-        for (seg = 4; seg <= 15; seg += 11) {
-            tape_segment(tp, seg, 1);
-            pk = 0.0f;
-            for (b = 0; b < 60; b++) {                       /* 87 ms: a segment is 125 ms */
-                memset(in, 0, sizeof in);
-                memset(ol, 0, sizeof ol);
-                memset(orr, 0, sizeof orr);
-                dry = tape_process(tp, in, ol, orr, BLK);
-                if (b >= 10)
-                    for (i = 0; i < BLK; i++)
-                        pk = fm_maxf(pk, fm_fabsf(ol[i]));
-            }
-            snprintf(name, sizeof name, "  segment %d plays at %.3f (%.3f): dry %.2f", seg, (double)pk,
-                     (double)((float)(seg + 1) / 16.0f), (double)dry);
-            check(name, tape_active(tp) && pk > (float)(seg + 1) / 16.0f * 0.85f && pk < (float)(seg + 1) / 16.0f * 1.1f &&
-                        dry < 0.01f);
-            tape_segment(tp, seg, 0);
-            for (b = 0; b < 10; b++) {
-                memset(in, 0, sizeof in);
-                memset(ol, 0, sizeof ol);
-                memset(orr, 0, sizeof orr);
-                dry = tape_process(tp, in, ol, orr, BLK);
-            }
-            check("  released: dry back to 1", dry == 1.0f && !tape_active(tp));
-        }
-        {   /* mix 64: half dry; length 127: all sixteen segments, the loop runs on through them */
-            float pk2 = 0.0f, mn = 1.0f;
-            tape_set(tp, 64, 64, 127, 64);
-            tape_segment(tp, 0, 1);
-            for (b = 0; b < (int)(16 * step / BLK); b++) {
-                memset(in, 0, sizeof in);
-                memset(ol, 0, sizeof ol);
-                memset(orr, 0, sizeof orr);
-                dry = tape_process(tp, in, ol, orr, BLK);
-                if (b > 10) {
-                    float p = 0.0f;
-                    for (i = 0; i < BLK; i++)
-                        p = fm_maxf(p, fm_fabsf(ol[i]));
-                    if (b * BLK < (int)(2 * step)) mn = fm_minf(mn, p);
-                    pk2 = fm_maxf(pk2, p);
-                }
-            }
-            snprintf(name, sizeof name, "  mix 64: dry %.2f; length 16 runs from 1/16 (%.2f) up to 16/16 (%.2f)",
-                     (double)dry, (double)mn, (double)pk2);
-            check(name, dry > 0.45f && dry < 0.55f && mn < 0.1f && pk2 > 0.4f);
-            tape_segment(tp, 0, 0);
-        }
-        {   /* pitch +1 octave (knob 96: the fourth of five zones), or speed 200 % (knob 127): the loop plays
-             * twice as fast (a 300 Hz marker becomes 600 Hz: twice the zero crossings) */
-            int zc[3] = {0, 0, 0}, p;
-            float last;
-            for (p = 0; p < 3; p++) {
-                tape_set(tp, p == 1 ? 96 : 64, p == 2 ? 127 : 64, 0, 127);
-                tape_segment(tp, 15, 1);
-                last = 0.0f;
-                for (b = 0; b < 60; b++) {
-                    memset(in, 0, sizeof in);
-                    memset(ol, 0, sizeof ol);
-                    memset(orr, 0, sizeof orr);
-                    tape_process(tp, in, ol, orr, BLK);
-                    if (b >= 20)
-                        for (i = 0; i < BLK; i++) {
-                            if ((ol[i] > 0.0f) != (last > 0.0f))
-                                zc[p] += 1;
-                            last = ol[i];
-                        }
-                }
-                tape_segment(tp, 15, 0);
-                for (b = 0; b < 10; b++) {
-                    memset(in, 0, sizeof in);
-                    tape_process(tp, in, ol, orr, BLK);
-                }
-            }
-            snprintf(name, sizeof name, "  pitch +1 octave doubles the rate (%d -> %d zero crossings)", zc[0], zc[1]);
-            check(name, zc[1] > zc[0] * 18 / 10 && zc[1] < zc[0] * 22 / 10);
-            snprintf(name, sizeof name, "  speed 200 %% doubles the rate (%d -> %d zero crossings)", zc[0], zc[2]);
-            check(name, zc[2] > zc[0] * 18 / 10 && zc[2] < zc[0] * 22 / 10);
-            {   /* the five pitch zones: 0..25 -2, 26..51 -1, 52..76 x1, 77..102 +1, 103..127 +2 */
-                int z[3] = {0, 0, 0}, q;
-                for (q = 0; q < 3; q++) {
-                    tape_set(tp, q == 0 ? 25 : q == 1 ? 52 : 76, 64, 0, 127);
-                    tape_segment(tp, 15, 1);
-                    last = 0.0f;
-                    for (b = 0; b < 60; b++) {
-                        memset(in, 0, sizeof in);
-                        memset(ol, 0, sizeof ol);
-                        memset(orr, 0, sizeof orr);
-                        tape_process(tp, in, ol, orr, BLK);
-                        if (b >= 20)
-                            for (i = 0; i < BLK; i++) {
-                                if ((ol[i] > 0.0f) != (last > 0.0f))
-                                    z[q] += 1;
-                                last = ol[i];
-                            }
-                    }
-                    tape_segment(tp, 15, 0);
-                    for (b = 0; b < 10; b++) {
-                        memset(in, 0, sizeof in);
-                        tape_process(tp, in, ol, orr, BLK);
-                    }
-                }
-                snprintf(name, sizeof name, "  pitch 25 is -2 octaves (%d), 52 and 76 are x1 (%d, %d)", z[0], z[1], z[2]);
-                check(name, z[0] > zc[0] * 2 / 10 && z[0] < zc[0] * 3 / 10 && z[1] == zc[0] && z[2] == zc[0]);
-            }
-        }
-    }
-
     printf("-- master\n");
     {
         static float pl[BLK], pr[BLK], mll[BLK], mlr[BLK], ol2[BLK], or2[BLK], hist_l[BLK * 4], hist_r[BLK * 4];
         int ok = 1, n = 0;
-        master_init(ms);
+        MS_INIT();
         memset(hist_l, 0, sizeof hist_l);
         memset(hist_r, 0, sizeof hist_r);
         for (b = 0; b < 200; b++) {
@@ -587,7 +548,7 @@ int main(void)
             }
             n += BLK;
         }
-        check("defaults: bit-transparent (perc + mel, 64 samples late)", ok);
+        check("EQ blend and the tape at 0: bit-transparent (perc + mel, 64 samples late)", ok);
         /* an EQ set but blend 0: still transparent; blend 127: the bands move */
         master_set(ms, MS_EQ_LO, 127);
         master_set(ms, MS_EQ_HI, 0);
@@ -637,11 +598,13 @@ int main(void)
                      (double)(10.0f * 0.30103f * fm_log2f(lo1 / lo0)), (double)(10.0f * 0.30103f * fm_log2f(hi1 / hi0)));
             check(name, lo1 > lo0 * 10.0f && lo1 < lo0 * 20.0f && hi1 < hi0 * 0.1f && hi1 > hi0 * 0.05f);
         }
-        master_init(ms);
+        MS_INIT();
         {   /* the limiter: a signal at 4x full scale never passes 1.0 */
             float pk = 0.0f;
-            master_set(ms, MS_SAT_BLEND, 127);
-            master_set(ms, MS_SAT_GAIN, 127);
+            master_set(ms, MS_TP_DRIVE, 127);
+            master_set(ms, MS_TP_COLOR, 127);
+            master_set(ms, MS_TP_WOBBLE, 127);
+            master_set(ms, MS_TP_NOISE, 127);
             master_set(ms, MS_LEVEL, 127);
             for (b = 0; b < 400; b++) {
                 for (i = 0; i < BLK; i++) {
@@ -654,10 +617,10 @@ int main(void)
                     pk = fm_maxf(pk, fm_maxf(fm_fabsf(ol2[i]), fm_fabsf(or2[i])));
                 }
             }
-            snprintf(name, sizeof name, "limiter + saturator on a 4x signal: peak %.3f, no NaN", (double)pk);
+            snprintf(name, sizeof name, "limiter + the tape (all four at 127) on a 4x signal: peak %.3f, no NaN", (double)pk);
             check(name, ok && pk <= 1.0f);
         }
-        master_init(ms);
+        MS_INIT();
         {   /* the compressor at 100: a loud sine is pulled down, the meter shows it */
             float g0 = 0.0f, g1 = 0.0f;
             master_set(ms, MS_COMP, 100);
@@ -700,7 +663,7 @@ int main(void)
         }
         {   /* group levels: perc at 0 mutes the percussion group */
             float e = 0.0f;
-            master_init(ms);
+            MS_INIT();
             master_set(ms, MS_PERC, 0);
             for (b = 0; b < 200; b++) {
                 for (i = 0; i < BLK; i++) {
@@ -716,14 +679,163 @@ int main(void)
         }
     }
 
+    printf("-- the master's tape (TapeScam)\n");
+    {
+        float a0, a1, c0, c1, s0, s1, n0, n1;
+        int ok;
+        MS_INIT();                                            /* the tape out (all four at 0) */
+        master_run(g_sine01, SR);
+        a0 = rms_of(m_out_l, SR / 2, SR);
+        master_set(ms, MS_TP_COLOR, MS_TP_COLOR_DEF);        /* a new project's */
+        master_run(g_sine01, SR);
+        a1 = rms_of(m_out_l, SR / 2, SR);
+        snprintf(name, sizeof name, "  a new project's tape (colour %d) on a -23 dB sine: %+.2f dB", MS_TP_COLOR_DEF,
+                 (double)db(a1 / a0));
+        check(name, a1 > a0 * 0.79f && a1 < a0 * 1.26f);
+        MS_INIT();
+        master_run(g_sine1k, SR);
+        c0 = crest(m_out_l, SR / 2, SR);
+        master_set(ms, MS_TP_DRIVE, 127);
+        master_run(g_sine1k, SR);
+        c1 = crest(m_out_l, SR / 2, SR);
+        snprintf(name, sizeof name, "  drive 127 squares a 1 kHz sine: crest %.2f -> %.2f", (double)c0, (double)c1);
+        check(name, c0 > 1.38f && c1 < 1.2f);
+        MS_INIT();
+        master_run(g_sine50, SR);
+        c0 = rms_of(m_out_l, SR / 2, SR);
+        master_set(ms, MS_TP_DRIVE, 64);
+        master_run(g_sine50, SR);
+        c1 = rms_of(m_out_l, SR / 2, SR);
+        snprintf(name, sizeof name, "  drive 64 keeps the lows (past its 144 Hz high-pass): a 50 Hz sine %+.1f dB", (double)db(c1 / c0));
+        check(name, c1 > c0 * 0.6f && c1 < c0 * 2.5f);   /* (without the lows kept: -15 dB) */
+        MS_INIT();
+        master_set(ms, MS_TP_COLOR, 1);                       /* the tape in, at its least */
+        master_run(g_sine1k, 3 * SR);
+        s0 = freq_spread(m_out_l, SR / 2, 3 * SR);
+        master_set(ms, MS_TP_WOBBLE, 127);
+        master_run(g_sine1k, 4 * SR);
+        s1 = freq_spread(m_out_l, SR / 2, 4 * SR);
+        snprintf(name, sizeof name, "  wobble 127 moves the pitch of a 1 kHz sine: spread %.2f -> %.1f Hz", (double)s0, (double)s1);
+        check(name, s0 < 0.5f && s1 > 8.0f);
+        MS_INIT();
+        master_set(ms, MS_TP_NOISE, 0);
+        master_run(g_zero, SR / 2);
+        n0 = rms_of(m_out_l, 0, SR / 2);
+        master_set(ms, MS_TP_NOISE, 64);
+        master_run(g_zero, SR);
+        n1 = rms_of(m_out_l, SR / 2, SR);
+        master_set(ms, MS_TP_NOISE, 127);
+        master_run(g_zero, SR);
+        a1 = rms_of(m_out_l, SR / 2, SR);
+        snprintf(name, sizeof name, "  noise adds hiss to silence: 0 -> %.1f dB (64) -> %.1f dB (127)", (double)db(n1), (double)db(a1));
+        check(name, n0 == 0.0f && n1 > 1e-4f && a1 > n1 * 4.0f && a1 < 0.5f);
+        {   /* every knob at its end, a loud noise: finite, bounded (before the limiter: the out stage's tanh) */
+            static float pl[BLK], pr[BLK], mll[BLK], mlr[BLK], o1[BLK], o2[BLK];
+            int k;
+            ok = 1;
+            MS_INIT();
+            for (k = MS_TP_DRIVE; k <= MS_TP_NOISE; k++)
+                master_set(ms, k, 127);
+            for (b = 0; b < 3 * SR / BLK; b++) {
+                for (i = 0; i < BLK; i++) {
+                    pl[i] = pr[i] = 0.0f;
+                    mll[i] = 1.5f * noise();
+                    mlr[i] = 1.5f * noise();
+                }
+                master_process(ms, pl, pr, mll, mlr, o1, o2, BLK);
+                for (i = 0; i < BLK; i++)
+                    ok &= o1[i] == o1[i] && o2[i] == o2[i] && fm_fabsf(o1[i]) <= 1.0f && fm_fabsf(mll[i]) <= 1.0f;
+            }
+            check("  every tape knob at 127 on loud noise: no NaN, bounded", ok);
+        }
+    }
+
+    printf("-- the reverb's SPU modes\n");
+    {
+        int ok = 1;
+        for (t = FXT_REVERB + RV_ROOM; t < NFXPICK; t++) {   /* each decays (the chaos echo: at decay 0) */
+            uint8_t kn[4] = {RV_SPU_DEFAULT[0], RV_SPU_DEFAULT[1], RV_SPU_DEFAULT[2], RV_SPU_DEFAULT[3]};
+            int chaos = t == FXT_REVERB + RV_CHAOS_ECHO;
+            float pk = 0.0f;
+            if (chaos)
+                kn[1] = 0;
+            run_fx(t, kn, &r, 0);
+            for (b = 0; b < 20 * SR / BLK; b++) {             /* 20 s of silence: it empties */
+                memset(in, 0, sizeof in);
+                memset(ol, 0, sizeof ol);
+                memset(orr, 0, sizeof orr);
+                fx_process(fx, in, ol, orr, BLK);
+            }
+            for (i = 0; i < BLK; i++)
+                pk = fm_maxf(pk, fm_fabsf(ol[i]) + fm_fabsf(orr[i]));
+            snprintf(name, sizeof name, "  %-10s after the burst %6.1f dB, a second on %6.1f dB, 20 s on %s", fx_pick_name(t),
+                     (double)db(r.rms_after), (double)db(r.rms_end), pk < 1e-5f ? "silent" : "NOT silent");
+            check(name, !r.nan && r.peak < 4.0f && r.rms_after > 0.001f && r.rms_end < r.rms_after * (chaos ? 0.5f : 0.9f) &&
+                        pk < 1e-5f);
+        }
+        {   /* the chaos echo at its own decay: almost endless, still bounded */
+            static const uint8_t kn[4] = {127, 127, 64, 0};
+            float pk = 0.0f;
+            fx_init(fx, dly_l, dly_r, rv);
+            fx_set(fx, FXT_REVERB + RV_CHAOS_ECHO, kn);
+            for (b = 0; b < 30 * SR / BLK; b++) {
+                for (i = 0; i < BLK; i++)
+                    in[i] = b * BLK + i < SR ? 0.5f * noise() : 0.0f;
+                memset(ol, 0, sizeof ol);
+                memset(orr, 0, sizeof orr);
+                fx_process(fx, in, ol, orr, BLK);
+                for (i = 0; i < BLK; i++) {
+                    ok &= ol[i] == ol[i] && orr[i] == orr[i];
+                    pk = fm_maxf(pk, fm_maxf(fm_fabsf(ol[i]), fm_fabsf(orr[i])));
+                }
+            }
+            snprintf(name, sizeof name, "  chaos echo at decay 127, 30 s: peak %.2f, no NaN", (double)pk);
+            check(name, ok && pk < 4.0f);
+        }
+        {   /* size: the hall's tail later at x4 (the console's) than at x1 (psxverb's) */
+            static const uint8_t k0[4] = {0, 64, 64, 0}, k1[4] = {127, 64, 64, 0};
+            float c0 = centre_time(FXT_REVERB + RV_HALL, k0), c1 = centre_time(FXT_REVERB + RV_HALL, k1);
+            snprintf(name, sizeof name, "  hall size 0 -> 127: the energy's centre %.3f s -> %.3f s", (double)c0, (double)c1);
+            check(name, c1 > c0 * 2.0f);
+        }
+        {   /* damp darkens the tail */
+            static const uint8_t k0[4] = {127, 64, 64, 0}, k1[4] = {127, 64, 64, 127};
+            float br[2];
+            impulse(FXT_REVERB + RV_STUDIO_L, k0, imp_l, imp_r, SR);
+            br[0] = bright(imp_l, 4410, SR);
+            impulse(FXT_REVERB + RV_STUDIO_L, k1, imp_l, imp_r, SR);
+            br[1] = bright(imp_l, 4410, SR);
+            snprintf(name, sizeof name, "  studio L damp 0 -> 127: the tail darker (%.4f -> %.4f)", (double)br[0], (double)br[1]);
+            check(name, br[1] < br[0] * 0.7f);
+        }
+        {   /* another mode mid-tail: the area emptied, the new one starts quiet */
+            static const uint8_t kn[4] = {127, 64, 64, 0};
+            float pk = 0.0f;
+            run_fx(FXT_REVERB + RV_HALL, kn, &r, 0);
+            fx_set(fx, FXT_REVERB + RV_ROOM, kn);
+            for (b = 0; b < 100; b++) {
+                memset(in, 0, sizeof in);
+                memset(ol, 0, sizeof ol);
+                memset(orr, 0, sizeof orr);
+                fx_process(fx, in, ol, orr, BLK);
+                for (i = 0; i < BLK; i++)
+                    pk = fm_maxf(pk, fm_fabsf(ol[i]));
+            }
+            snprintf(name, sizeof name, "  hall -> room mid-tail: the room starts quiet (peak %.6f)", (double)pk);
+            check(name, pk < 1e-4f);
+        }
+    }
+
     printf("-- cost, instructions a sample\n");
     {
         static float in2[256], a[256], c[256], p1[256], p2[256], m1[256], m2[256];
         uint64_t i0, di;
-        for (t = 0; t < NFXT; t++) {
+        for (t = 0; t < NFXPICK; t++) {
             static const uint8_t mid[4] = {64, 64, 64, 64};
             fx_init(fx, dly_l, dly_r, rv);
-            fx_set(fx, t, mid);
+            fx_set(fx, t, t > FXT_REVERB ? RV_SPU_DEFAULT : mid);
+            for (b = 0; b < 40; b++)                          /* (an SPU mode clears its area first) */
+                fx_process(fx, in2, a, c, 256);
             for (b = 0; b < 20; b++) {
                 for (i = 0; i < 256; i++)
                     in2[i] = 0.3f * noise();
@@ -733,28 +845,9 @@ int main(void)
             for (b = 0; b < 20; b++)
                 fx_process(fx, in2, a, c, 256);
             di = instr_now() - i0;
-            printf("  %-11s %5.0f\n", FXT_NAME[t], (double)di / (20.0 * 256.0));
+            printf("  %-11s %5.0f\n", fx_pick_name(t), (double)di / (20.0 * 256.0));
         }
-        tape_init(tp, tape_buf);
-        tape_set(tp, 70, 60, 64, 100);
-        for (b = 0; b < 40; b++) {
-            for (i = 0; i < 256; i++)
-                in2[i] = 0.3f * noise();
-            tape_process(tp, in2, a, c, 256);
-        }
-        i0 = instr_now();
-        for (b = 0; b < 20; b++)
-            tape_process(tp, in2, a, c, 256);
-        di = instr_now() - i0;
-        printf("  tape record %5.0f\n", (double)di / (20.0 * 256.0));
-        tape_segment(tp, 3, 1);
-        tape_process(tp, in2, a, c, 256);
-        i0 = instr_now();
-        for (b = 0; b < 20; b++)
-            tape_process(tp, in2, a, c, 256);
-        di = instr_now() - i0;
-        printf("  tape loop   %5.0f\n", (double)di / (20.0 * 256.0));
-        master_init(ms);
+        MS_INIT();
         for (i = 0; i < 256; i++) {
             p1[i] = p2[i] = 0.3f * noise();
             m1[i] = m2[i] = 0.3f * noise();
@@ -766,8 +859,25 @@ int main(void)
             master_process(ms, p1, p2, m1, m2, a, c, 256);
         di = instr_now() - i0;
         printf("  master off  %5.0f  (levels and the limiter)\n", (double)di / (20.0 * 256.0));
+        master_set(ms, MS_TP_COLOR, MS_TP_COLOR_DEF);
+        for (b = 0; b < 10; b++)
+            master_process(ms, p1, p2, m1, m2, a, c, 256);
+        i0 = instr_now();
+        for (b = 0; b < 20; b++)
+            master_process(ms, p1, p2, m1, m2, a, c, 256);
+        di = instr_now() - i0;
+        printf("  master new  %5.0f  (the tape at a new project's: colour %d)\n", (double)di / (20.0 * 256.0),
+               MS_TP_COLOR_DEF);
+        master_set(ms, MS_TP_DRIVE, 64); master_set(ms, MS_TP_COLOR, 64);
+        master_set(ms, MS_TP_WOBBLE, 64); master_set(ms, MS_TP_NOISE, 64);
+        for (b = 0; b < 10; b++)
+            master_process(ms, p1, p2, m1, m2, a, c, 256);
+        i0 = instr_now();
+        for (b = 0; b < 20; b++)
+            master_process(ms, p1, p2, m1, m2, a, c, 256);
+        di = instr_now() - i0;
+        printf("  master tape %5.0f  (the tape's four at 64, the limiter)\n", (double)di / (20.0 * 256.0));
         master_set(ms, MS_EQ_LO, 80); master_set(ms, MS_EQ_BLEND, 127);
-        master_set(ms, MS_SAT_BLEND, 64); master_set(ms, MS_SAT_GAIN, 64);
         master_set(ms, MS_COMP, 80);
         for (b = 0; b < 10; b++)
             master_process(ms, p1, p2, m1, m2, a, c, 256);
@@ -775,7 +885,7 @@ int main(void)
         for (b = 0; b < 20; b++)
             master_process(ms, p1, p2, m1, m2, a, c, 256);
         di = instr_now() - i0;
-        printf("  master all  %5.0f  (EQ, saturator, compressor, limiter)\n", (double)di / (20.0 * 256.0));
+        printf("  master all  %5.0f  (EQ, the tape at 64, compressor, limiter)\n", (double)di / (20.0 * 256.0));
     }
     printf("%s\n", bad ? "FX TESTS FAILED" : "fx tests passed");
     return bad != 0;

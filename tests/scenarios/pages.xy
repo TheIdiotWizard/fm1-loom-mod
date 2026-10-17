@@ -55,9 +55,9 @@ tap FX
 expect page Character
 wait 40
 shot character.png
-param 3 31 0
+param 3 30 0
 turn PRESET 2
-expect par3.31 2
+expect par3.30 2
 wait 40
 shot character_fold.png
 tap SEL
@@ -149,9 +149,6 @@ wait 40
 shot punch.png
 spin ALGO 1
 wait 40
-shot tape.png
-spin ALGO 1
-wait 40
 shot fx1.png
 turn SELECT 1
 wait 40
@@ -159,5 +156,19 @@ shot fx1_2.png
 spin ALGO 1
 wait 40
 shot fx2.png
-spin ALGO -12
+# the reverb's SPU modes: the longest names on the page, its title and its list
+turn PRESET 7
+wait 40
+expect par12.0 11
+shot fx2_space_echo.png
+turn PRESET 1
+wait 40
+shot fx2_chaos_echo.png
+tap SEL
+wait 40
+shot fx2_list.png
+tap HOME
+turn PRESET -8
+expect par12.0 4
+spin ALGO -11
 expect trk 1

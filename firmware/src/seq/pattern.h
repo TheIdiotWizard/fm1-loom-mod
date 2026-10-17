@@ -11,8 +11,8 @@
 /* The code keeps its first names; the screen and the manual say: AUX_BRAIN the conductor (COND), AUX_PUNCH the
  * throws (THROW), components (SC_*) tricks, the drumline engine the kit, the maestro player strum. */
 #define NTRK 8                        /* instrument tracks 1-8 */
-enum { AUX_BRAIN = NTRK, AUX_PUNCH, AUX_TAPE, AUX_FX1, AUX_FX2, NALLTRK };
-#define NSEQT (AUX_TAPE + 1)          /* sequenced tracks: 1-8, brain, punch, tape */
+enum { AUX_BRAIN = NTRK, AUX_PUNCH, AUX_FX1, AUX_FX2, NALLTRK };
+#define NSEQT (AUX_PUNCH + 1)         /* sequenced tracks: 1-8, brain, punch */
 #define NPATT 8                       /* patterns per track */
 #define NSTEP 64                      /* 4 bars of 16 */
 #define NBAR 4

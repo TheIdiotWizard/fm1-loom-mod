@@ -2,8 +2,9 @@
 
 LOOM-8 turns the M-VAVE FM-1 into a pocket groovebox: eight threads of sound on a 64-step loom. Eight tracks
 with synth engines and a drum synth, a 64-step sequencer with fourteen step tricks and parameter locks,
-players, twelve throws (momentary effects) per octave, a conductor that moves the song through a progression, a
-tape loop, two send effects, a mixer and master section, sixteen scenes and a song. Weave two patterns into a
+players, twelve throws (momentary effects) per octave, a conductor that moves the song through a progression,
+two send effects (the reverb with the PlayStation's own reverbs among its modes), a mixer and a master section
+with a tape, sixteen scenes and a song. Weave two patterns into a
 third, bar by bar, step by step, or one's rhythm with the other's notes.
 
 The loop LOOM-8 is made for: write a short pattern, add a few tricks, weave it with another, let the conductor
@@ -73,14 +74,14 @@ to 16 from the left, black keys 1 to 11.
 8. **Save.** Press **SAVE**.
 
 From here: hold a step to see its velocity, length, chance and nudge; hold a step and press **EDIT** to lock a
-knob on it; press **ARP** on T2 and turn **KNOB 1** to arp; turn **ALGORITHM** to TAPE and hold white keys
-while it plays. Hold any button for a second and a card explains it.
+knob on it; press **ARP** on T2 and turn **KNOB 1** to arp; press **GLO**, turn **SELECT** to Master tape and turn
+**KNOB 3** while it plays. Hold any button for a second and a card explains it.
 
 ## Cheat sheet
 
 ### The words
 
-- **Track** (T1 to T8): one sound and its patterns. After T8 come the aux tracks: COND (the conductor), THROW (the throws), TAPE, FX I
+- **Track** (T1 to T8): one sound and its patterns. After T8 come the aux tracks: COND (the conductor), THROW (the throws), FX I
   and FX II.
 - **Pattern** (P1 to P8): a track's steps, up to 64 of them in four bars. Each track has eight.
 - **Step**: one cell of a pattern. It holds up to four notes, two tricks, a chance and parameter locks.
@@ -155,10 +156,10 @@ press…" means keep **HOME** down while you press the next thing.
 | **SEQ** | Opens Steps. Its page 2 is Bar. Hold it on Steps and the keys play the track and set what a step writes. |
 | **EDIT** | Opens Engine. Its page 2 is Play; on a drum track, the key's model, random, pan and volume. |
 | **ENV** | Opens Envelope (a drum track: lag, attack, random, length), then Filter, then the filter's envelope. |
-| **FX** | Opens Character, the track's own effect. Then Sends, the track's sends to FX I, FX II and the tape. Then FX I and FX II, the two effects. |
+| **FX** | Opens Character, the track's own effect. Then Sends, the track's sends to FX I and FX II. Then FX I and FX II, the two effects. |
 | **LFO** | Opens LFO. Its page 2 has the type's fourth and fifth knobs. |
 | **ARP** | Opens Players. With the arp, page 2 is its second set of knobs and page 3 is hold. |
-| **GLO** | Opens Mix. Turn **SELECT** for Master EQ, Master drive, Master out, Setup and Status. |
+| **GLO** | Opens Mix. Turn **SELECT** for Master EQ, Master tape, Master out, Setup and Status. |
 | **SAVE** | Saves. Hold it and press a white key to save to a slot, or to keep a sound. With a step held, clears its locks. |
 | **OCT−** / **OCT+** | Move the keys an octave. On Steps, show the bar before or after; with a step held, nudge it. In step record, move the cursor. |
 | **SELECT** | Turns to a button's next page. In a list, it moves up and down. |
@@ -203,7 +204,7 @@ and says why.
 
 ### The tracks
 
-Turn **ALGORITHM** to pick a track: T1 to T8, then COND (the conductor), THROW (the throws), TAPE, FX I and FX II. The keys play the
+Turn **ALGORITHM** to pick a track: T1 to T8, then COND (the conductor), THROW (the throws), FX I and FX II. The keys play the
 track you picked on the Engine, Play, Envelope, Filter, LFO and Players pages. On a drum track, the black
 keys are the eleven drum keys, and the white keys play them too. On FX I and FX II, the keys play the
 instrument track you picked last, so you hear the effect.
@@ -221,7 +222,7 @@ on, the other buttons glow too.
 Press **SEQ**. The main band shows one bar of the pattern as 16 cells, and the 16 white keys are those
 cells. The top line says what a press writes: on a drum track, the sound shown; on a synth track, the
 remembered notes, which are the last keys you held together on a play page; on the THROW track, the last
-effect you played; on the TAPE track, the last segment. The four squares at the right are the bars.
+effect you played. The four squares at the right are the bars.
 **OCT−** and **OCT+** show the bar before or after.
 
 <img src="img/screen-step-held.png" width="240" alt="Step 13 held on T1: its velocity, length, chance and nudge on the knobs; the footer offers its length, its sounds, the nudge and the lock pages" title="A step held">
@@ -399,7 +400,7 @@ semitones, an octave) and the track's volume.
 
 **ENV** has the amp envelope, then the filter: cutoff in Hz, resonance, envelope amount and key tracking,
 with **PRESETS** turning the type (svf, ladder, z lowpass, z hipass, dynamic); then the filter's envelope.
-**FX** has the track's character (below), then its sends to FX I, FX II and the tape, and its level, then the two
+**FX** has the track's character (below), then its sends to FX I and FX II, its pan and its level, then the two
 effects. **LFO** has the
 type and its first three knobs; page 2 its fourth and fifth. A new type starts from its own defaults:
 
@@ -456,7 +457,7 @@ Press **HOME**. Each row is a track with its pattern and a playhead; muted track
 number is at the right, with the next one when a scene is cued. The 16 white keys are the 16 scenes:
 press one to switch at once. Hold **HOME** and press one to cue it for the next bar. An empty scene
 becomes a copy of the scene playing. Hold a white key for a second to clear that scene. The black keys
-mute: 1 to 8 the tracks, 9 to 11 conductor, throws and tape. Hold **HOME** and turn **PRESETS** to change scenes
+mute: 1 to 8 the tracks, 9 and 10 the conductor and the throws. Hold **HOME** and turn **PRESETS** to change scenes
 from any page.
 
 <img src="img/screen-song.png" width="240" alt="The Song page: S1, S1 and S2 in a row, looping" title="The song">
@@ -474,7 +475,7 @@ scene playing, deletes a slot or clears the song.
 
 Turn **ALGORITHM** past T8. Each aux track has its own page under **EDIT** and its own steps under **SEQ**.
 
-<img src="img/screen-tape.png" width="240" alt="TAPE&#x27;s page: the sixteen segments in a ring; pitch, speed, length and mix" title="The tape"> <img src="img/screen-fx1.png" width="240" alt="FX&#x27;s FX I page: the delay with time, fine, repeats and tone" title="An effect">
+<img src="img/screen-fx1.png" width="240" alt="FX&#x27;s FX I page: the delay with time, fine, repeats and tone" title="An effect"> <img src="img/screen-fx2-hall.png" width="240" alt="FX&#x27;s FX II page: the reverb in its hall mode, with size, decay, tone and damp" title="The reverb, hall">
 
 - **COND** (the conductor): mode (manual, or auto: the key is detected from the tracks that follow), key, scale and link,
   an instrument track that also plays the conductor's keys. Play a chord on its keys: the tracks that follow
@@ -503,10 +504,7 @@ Turn **ALGORITHM** past T8. Each aux track has its own page under **EDIT** and i
   On any other page, hold **HOME** and press a key: the lower octave works on the track you are on, the
   upper octave on its whole group.
 
-- **TAPE**: a loop of the last 16 steps of the tracks that send to it. A white key loops that segment while
-  held, and the last one you played is the one a step writes. Pitch in octaves, speed from 50 % to 200 %,
-  length in steps and mix on the knobs.
-- **FX I** and **FX II**: a send effect each: chorus, delay, distortion, lofi, phaser or reverb, with its
+- **FX I** and **FX II**: a send effect each: chorus, delay, lofi, phaser or reverb, with its
   four knobs. Press **FX** and turn **SELECT** to reach them from any track: **PRESETS** picks the effect, and
   **SEL** has its high-pass, low-pass and, on FX I, the send into FX II. The keys play the track you were on.
   Turned to with **ALGORITHM**, they have the same knobs on **EDIT**.
@@ -515,24 +513,39 @@ Turn **ALGORITHM** past T8. Each aux track has its own page under **EDIT** and i
 | --- | --- |
 | chorus | rate, depth, feedback, width |
 | delay | time, fine, repeats, tone (how bright the repeats are) |
-| distortion | drive, edge (soft to hard), low cut, high cut |
 | lofi | rate, bits, smooth, width |
 | phaser | freq, depth, rate, feedback |
-| reverb | size, motion, tone, damp (how fast the tail darkens) |
+| reverb, plate | size, motion, tone, damp (how fast the tail darkens) |
+| reverb, the other modes | size, decay, tone, damp |
 
   The effects return only what they make: the track's own sound stays on the track.
+
+  The reverb has ten modes, and **PRESETS** walks through them after the phaser: **plate**, LOOM-8's own, and
+  nine from the PlayStation's sound chip, the reverbs its games used: **room**, **studio S**, **studio M**,
+  **studio L** (small, medium, large), **hall**, **half echo**, **space echo**, **chaos echo** (it almost never
+  stops) and **one echo** (a single repeat). They keep the console's grain: they run at half the sample rate.
+  On these, **size** stretches their delays, from small and metallic at 0 to the console's own at the top (the
+  new mode's starting point); **decay** sets how long the tail lasts, the console's own in the middle;
+  **tone** darkens the tail below the middle and thins it above; **damp** softens the reflections. Changing
+  the mode empties the reverb for a moment. Only FX II has the reverb: FX I has the delay's memory instead.
 
 ## Mix and master
 
 Press **GLO**. The Mix page shows a meter for each track; the black keys pick one, and hold one to solo it.
 Hold **HOME** and press a black key to mute. The knobs are the sends to FX I and FX II, the pan and the
-level. Turn **SELECT** for Master EQ (low, mid, high and a blend from flat to the EQ), Master drive (gain,
-clip, tone, blend), and Master out (the drums' level, the melodic tracks' level, the compressor and the
-output level). Setup has the lights, MIDI clock and notes out, and one or two cores; its **SEL** list loads
+level. Turn **SELECT** for Master EQ (low, mid, high and a blend from flat to the EQ), Master tape, and
+Master out (the drums' level, the melodic tracks' level, the compressor and the output level). Setup has the lights, MIDI clock and notes out, and one or two cores; its **SEL** list loads
 a project, starts a new one, and sets the USB audio level, the count-in and the theme (tape deck or blueprint). Status shows the audio load, the
 voices and the second core.
 
-<img src="img/screen-mix.png" width="240" alt="Mix: a meter for each track while playing; knobs fx I, fx II, pan and level" title="The mixer"> <img src="img/screen-sends.png" width="240" alt="FX&#x27;s Sends page: the track&#x27;s sends to FX I (delay), FX II (reverb) and the tape, and its level" title="The sends"> <img src="img/screen-master.png" width="240" alt="Master EQ: low, mid, high and the blend from flat to the EQ" title="Master EQ"> <img src="img/screen-status.png" width="240" alt="Status: audio load, peak, voices, the second core, guard trips and dropouts" title="Status">
+Master tape puts the whole mix through a tape (TapeScam, after the plugin): **drive** pushes it into the
+tape's preamp, harder and denser (the low end goes around it, so the kick stays); **color** is the tape's
+saturation, rounder and a little darker as it goes up; **wobble** is wow and flutter, the pitch wavering and
+the sides spreading; **noise** is the hiss. With all four at 0 the tape is out of the path. A new project
+starts with a little color (24) and nothing else. The tape keeps the level about where it was: what it adds,
+it takes back at its output.
+
+<img src="img/screen-mix.png" width="240" alt="Mix: a meter for each track while playing; knobs fx I, fx II, pan and level" title="The mixer"> <img src="img/screen-sends.png" width="240" alt="FX&#x27;s Sends page: the track&#x27;s sends to FX I (delay) and FX II (reverb plate), its pan and level" title="The sends"> <img src="img/screen-master.png" width="240" alt="Master EQ: low, mid, high and the blend from flat to the EQ" title="Master EQ"> <img src="img/screen-master-tape.png" width="240" alt="Master tape: drive, color, wobble and noise, a sine drawn through the tape" title="Master tape"> <img src="img/screen-status.png" width="240" alt="Status: audio load, peak, voices, the second core, guard trips and dropouts" title="Status">
 
 ## Saving
 
@@ -559,21 +572,21 @@ On a sound page, hold **SAVE** and press white key 1 to 16 to keep the track's s
 | ENV, SELECT | Filter | cutoff | reso | env | keytrack | play; PRESETS: the type |
 | ENV, SELECT twice | Filter env | attack | decay | sustain | release | play |
 | FX | Character | type | amount | tone | mix | play; PRESETS: the type |
-| FX, SELECT | Sends | fx I | fx II | tape | level | play |
-| FX, SELECT twice | FX I, FX II | the effect's four | | | | play; PRESETS: the effect |
+| FX, SELECT | Sends | fx I | fx II | pan | level | play |
+| FX, SELECT twice | FX I, FX II | the effect's four | | | | play; PRESETS: the effect (and the reverb's mode) |
 | LFO | LFO | type | the type's three | | | play |
 | LFO, SELECT | LFO 2 | the type's fourth and fifth | | | | play |
 | ARP | Players | player | its first | its second | its third | play, through the player |
 | ARP, SELECT | Players 2, Hold | the arp's length, style, glide, stereo; hold | | | | play |
 | GLO | Mix | FX I | FX II | pan | level | black: the track, held: solo |
 | GLO, SELECT | Master EQ | low | mid | high | blend | |
-| GLO, SELECT | Master drive | gain | clip | tone | blend | |
+| GLO, SELECT | Master tape | drive | color | wobble | noise | |
 | GLO, SELECT | Master out | perc | mel | comp | level | |
 | GLO, SELECT | Setup | lights | clock | notes | cores | |
 | GLO, SELECT | Status | | | | | |
 
 The aux tracks' Engine page: COND has mode, key, scale and link, and page 2 the routing; THROW has latch;
-TAPE has pitch, speed, length and mix; FX I and FX II have the effect's four knobs, and on page 2 hp, lp
+FX I and FX II have the effect's four knobs, and on page 2 hp, lp
 and the send to FX II.
 
 ## Screen reader

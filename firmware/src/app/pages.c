@@ -66,7 +66,7 @@ enum { P_ARRANGE, P_SONG, P_STEPS, P_BAR, P_ENGINE, P_PLAY, P_ENV, P_FILTER, P_E
 static const char *const PAGE_NAME[NPAGES] = {"Arrange", "Song", "Steps", "Bar", "Engine", "Play", "Envelope",
                                               "Filter", "Filter env", "Character", "Sends", "FX I", "FX II", "LFO",
                                               "LFO 2", "Players", "Players 2", "Hold", "Mix", "Master EQ",
-                                              "Master drive", "Master out", "Setup", "Status"};
+                                              "Master tape", "Master out", "Setup", "Status"};
 static const struct { uint8_t btn, first, n; } PAGE_BTN[] = {
     {B_HOME, P_ARRANGE, 2}, {B_SEQ, P_STEPS, 2}, {B_EDIT, P_ENGINE, 2}, {B_ENV, P_ENV, 3}, {B_FX, P_CHARACTER, 4},
     {B_LFO, P_LFO, 2}, {B_ARP, P_PLAYERS, 3}, {B_GLO, P_MIX, 6}};
@@ -84,7 +84,7 @@ static const char *const BTN_LABEL[NB] = {"FX", "SEL", "ENV", "LFO", "EDIT", "GL
 
 /* the tracks: 1-8, then the aux tracks (the tag's short names, the pages' long ones) */
 static const char *const TRACK_NAME[NALLTRK] = {"T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "COND", "THROW",
-                                                "TAPE", "FX I", "FX II"};
+                                                "FX I", "FX II"};
 static const char *const NOTE_NAME[12] = {"C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"};
 /* the step components (SC_*: the OP-XY's 14, on the white keys with HOME and a step held), their letter on
  * the grid and their name */
@@ -113,14 +113,12 @@ static const char *const FOLLOW_NAME[3] = {"no", "diatonic", "transpose"};
 static const char *const CORE2_NAME[4] = {"one core", "two cores", "lost", "barred"};
 static const char *const USBA_NAME[2] = {"follows knob", "full"};
 static const char *const BRAIN_KNOB[4] = {"mode", "key", "scale", "link"};
-static const char *const TAPE_KNOB[4] = {"pitch", "speed", "length", "mix"};
-static const char *const TAPE_PITCH[5] = {"-2", "-1", "x1", "+1", "+2"};
 
 /* the keys: 0 = F3; the white and the black ones in order */
 static const uint8_t WHITE_K[16] = {0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19, 21, 23, 24, 26};
 static const uint8_t BLACK_K[11] = {1, 3, 5, 8, 10, 13, 15, 17, 20, 22, 25};
 #define KEY_BASE 53                                  /* F3 at octave 0 */
-enum { KM_NONE, KM_PLAY, KM_STEP, KM_CSTEP, KM_COMP, KM_SCENE, KM_MUTE, KM_PUNCH, KM_TAPE, KM_BRAIN, KM_SOUND,
+enum { KM_NONE, KM_PLAY, KM_STEP, KM_CSTEP, KM_COMP, KM_SCENE, KM_MUTE, KM_PUNCH, KM_BRAIN, KM_SOUND,
        KM_TRACK, KM_SAVE, KM_LENGTH, KM_SOLO, KM_SCALE, KM_ROUTE, KM_STEPSOUND, KM_IDLE };   /* KM_IDLE: does nothing */   /* what a held key does */
 
 /* the input's and the screen's state */
@@ -147,7 +145,7 @@ static struct {
     uint8_t dsound;                                  /* a drum track: the key shown 0..10 */
     int8_t oct;                                      /* the keys' octave -4..4 */
     uint8_t rem[SN], nrem;                           /* the remembered notes (the last keys held together) */
-    uint8_t rem_fx, rem_seg;                         /* PUNCH: the remembered effect + 1; TAPE: the segment + 1 */
+    uint8_t rem_fx;                                  /* PUNCH: the remembered effect + 1 */
     uint8_t chord[8], nchord;                        /* the keys held together now (notes) */
     uint8_t chord_max[8], nchord_max;                /* the most held together since the last all-up (maestro) */
     uint16_t held;                                   /* Steps: the white keys down as steps (bit = cell) */
@@ -454,7 +452,7 @@ static int group_n(int g)
 {
     int trk = sel_trk(), b = PAGE_BTN[g].btn;
     if (b == B_EDIT)
-        return trk == AUX_PUNCH || trk == AUX_TAPE ? 1 : 2;
+        return trk == AUX_PUNCH ? 1 : 2;
     if (b == B_ARP)
         return pl_type(trk) == PL_ARP ? 3 : 2;
     return PAGE_BTN[g].n;
@@ -465,7 +463,7 @@ static int tp_page_param(int p, int k, int trk)
     static const int8_t M[][4] = {
         {TP_E1, TP_E2, TP_E3, TP_E4}, {TP_VMODE, TP_PORTA, TP_BEND, TP_VOLUME}, {TP_A, TP_D, TP_S, TP_R},
         {TP_CUT, TP_RES, TP_FENV, TP_KTRK}, {TP_FA, TP_FD, TP_FS, TP_FR}, {TP_CTYPE, TP_CAMT, TP_CTONE, TP_CMIX},
-        {TP_SEND1, TP_SEND2, TP_SENDT, TP_LEVEL},
+        {TP_SEND1, TP_SEND2, TP_PAN, TP_LEVEL},
         {TP_E1, TP_E2, TP_E3, TP_E4}, {TP_E1, TP_E2, TP_E3, TP_E4}, {TP_LTYPE, TP_LSPEED, TP_LAMT, TP_LDEST},
         {TP_LX, TP_LX2, -1, -1}, {TP_PLAYER, TP_P1, TP_P2, TP_P3}, {TP_AP1, TP_AP2, TP_AP3, TP_AP4},
         {TP_P4, -1, -1, -1}, {TP_SEND1, TP_SEND2, TP_PAN, TP_LEVEL}};
@@ -790,22 +788,15 @@ static void lock_knobs(knob_t *k)
             ktp_val(&k[i], trk, p, pats.lane[ln].val[step]);
     }
 }
-static void tape_knob(knob_t *k, int i, int v)
+/* an FX track's TP_ENGINE byte: the pick (fx.h), and how the screen names it: "chorus", or "reverb hall" */
+static int fx_pick_of(int trk) { return proj.trk[trk].par[TP_ENGINE] % NFXPICK; }
+static const char *fx_label(int pick)
 {
-    char t[12], *e;
-    if (i == 0)
-        kv(k, TAPE_KNOB[0], TAPE_PITCH[v * 5 / 128], v, 127);
-    else if (i == 1) {
-        e = num_s(50u + (uint32_t)v * 150u / 127u, t);
-        s_cat(e, "%");
-        kv(k, TAPE_KNOB[1], t, v, 127);
-    } else if (i == 2)
-        kn(k, TAPE_KNOB[2], 1 + v * 15 / 127, 16);
-    else {
-        e = num_s((uint32_t)v * 100u / 127u, t);
-        s_cat(e, "%");
-        kv(k, TAPE_KNOB[3], t, v, 127);
-    }
+    static char t[24];
+    if (fx_pick_type(pick) != FXT_REVERB)
+        return fx_pick_name(pick);
+    s_cat(s_cat(s_cat(t, FXT_NAME[FXT_REVERB]), " "), fx_pick_name(pick));
+    return t;
 }
 static void aux_engine_knobs(knob_t *k, int trk)
 {
@@ -817,13 +808,10 @@ static void aux_engine_knobs(knob_t *k, int trk)
         kname(&k[3], BRAIN_KNOB[3], LINK_NAME, par[TP_E4], 9);
     } else if (trk == AUX_PUNCH) {
         kname(&k[0], "latch", ONOFF, par[TP_E1], 2);
-    } else if (trk == AUX_TAPE) {
-        for (int i = 0; i < 4; i++)
-            tape_knob(&k[i], i, par[TP_E1 + i]);
     } else {
-        int type = par[TP_ENGINE] % NFXT;
+        int pick = par[TP_ENGINE] % NFXPICK;
         for (int i = 0; i < 4; i++)
-            kn(&k[i], short_name(FXT_KNOB[type][i]), par[TP_E1 + i] * 100 / 128, 99);
+            kn(&k[i], short_name(fx_knob_name(pick, i)), par[TP_E1 + i] * 100 / 128, 99);
     }
 }
 static void page_knobs(knob_t *k)
@@ -909,9 +897,9 @@ static void page_knobs(knob_t *k)
                 ktp(&k[i], trk, tp_page_param(p, i, trk));
         break;
     case P_FX1: case P_FX2: {                        /* an effect: its four knobs (the type: PRESETS, SEL) */
-        int ft = P_FX1 == p ? AUX_FX1 : AUX_FX2, type = proj.trk[ft].par[TP_ENGINE] % NFXT;
+        int ft = P_FX1 == p ? AUX_FX1 : AUX_FX2, pick = fx_pick_of(ft);
         for (int i = 0; i < 4; i++)
-            kn(&k[i], short_name(FXT_KNOB[type][i]), proj.trk[ft].par[TP_E1 + i] * 100 / 128, 99);
+            kn(&k[i], short_name(fx_knob_name(pick, i)), proj.trk[ft].par[TP_E1 + i] * 100 / 128, 99);
         break;
     }
     case P_CHARACTER: {                              /* the instrument's character stage */
@@ -920,15 +908,14 @@ static void page_knobs(knob_t *k)
             ktp(&k[i], it, tp_page_param(p, i, it));
         break;
     }
-    case P_SENDS: {                                  /* the instrument's sends and level */
+    case P_SENDS: {                                  /* the instrument's sends, pan and level */
         int it = inst_trk();
         ktp(&k[0], it, TP_SEND1);
         ktp(&k[1], it, TP_SEND2);
-        ktp(&k[2], it, TP_SENDT);
+        ktp(&k[2], it, TP_PAN);
         ktp(&k[3], it, TP_LEVEL);
         k[0].name = "fx I";
         k[1].name = "fx II";
-        k[2].name = "tape";
         break;
     }
     case P_PLAY:
@@ -1082,10 +1069,13 @@ static void page_tag(char *t)
         if (!is_drum(inst_trk()))
             s_cat(s_cat(e, ">"), CTYPE_NAME(proj.trk[inst_trk()].par));
         break;
-    case P_FX1: case P_FX2:
-        s_cat(s_cat(s_cat(t, TRACK_NAME[ui.page == P_FX1 ? AUX_FX1 : AUX_FX2]), ">"),
-              FXT_NAME[proj.trk[ui.page == P_FX1 ? AUX_FX1 : AUX_FX2].par[TP_ENGINE] % NFXT]);
+    case P_FX1: case P_FX2: {                        /* FX II>delay, FX II>reverb>hall */
+        int pick = fx_pick_of(ui.page == P_FX1 ? AUX_FX1 : AUX_FX2);
+        e = s_cat(s_cat(s_cat(t, TRACK_NAME[ui.page == P_FX1 ? AUX_FX1 : AUX_FX2]), ">"), FXT_NAME[fx_pick_type(pick)]);
+        if (fx_pick_type(pick) == FXT_REVERB)
+            s_cat(s_cat(e, ">"), fx_pick_name(pick));
         break;
+    }
     case P_MASTER: case P_MASTER2: case P_MASTER3: case P_SETUP: case P_STATUS:
         s_cat(t, "all tracks");
         break;
@@ -1223,8 +1213,6 @@ static void page_footer(char *t)
             s_cat(t, ui.page == P_PLAY ? "BLACK route track" : "KEYS chord");
         else if (trk == AUX_PUNCH)
             s_cat(t, "KEYS fx|REC record");
-        else if (trk == AUX_TAPE)
-            s_cat(t, "WHITE segment|REC record");
         else if (is_aux(trk))
             s_cat(s_cat(t, "KEYS play "), TRACK_NAME[ui.last_inst % NTRK]);
         else if (ui.maestro_rec)
@@ -1592,8 +1580,6 @@ static void list_build(void)
                 s_cat(e, DL_SOUND_NAME[(st->note[i] - 1) % DL_NSOUND]);
             else if (trk == AUX_PUNCH)
                 s_cat(e, PX_VALID(st->note[i] - 1) ? PUNCH_NAME[(st->note[i] - 1) & 15] : "fx");
-            else if (trk == AUX_TAPE)
-                num_s((uint32_t)st->note[i], s_cat(e, "segment "));
             else
                 note_name(st->note[i], e);
             list_add(rm[i], 0, LK_ACTION, A_REMOVE_NOTE);
@@ -1641,7 +1627,7 @@ static void list_build(void)
         static char hp[8], lp[8], fd[8];
         num_s(proj.trk[ft].par[TP_FENV], hp);
         num_s(proj.trk[ft].par[TP_CUT], lp);
-        list_add(ACTION_NAME[A_EFFECT], FXT_NAME[ui.pick_fx % NFXT], LK_PICK, A_EFFECT);
+        list_add(ACTION_NAME[A_EFFECT], fx_label(ui.pick_fx % NFXPICK), LK_PICK, A_EFFECT);
         list_add(ACTION_NAME[A_FX_HP], hp, LK_PICK, A_FX_HP);
         list_add(ACTION_NAME[A_FX_LP], lp, LK_PICK, A_FX_LP);
         if (ft == AUX_FX1) {
@@ -1669,7 +1655,7 @@ static void list_build(void)
                 list_add(nm[t], FOLLOW_NAME[proj.trk[t].par[TP_BRAIN] % 3], LK_PICK, A_FOLLOW);
             }
         } else if (is_fx(trk)) {
-            list_add(ACTION_NAME[A_EFFECT], FXT_NAME[ui.pick_fx % NFXT], LK_PICK, A_EFFECT);
+            list_add(ACTION_NAME[A_EFFECT], fx_label(ui.pick_fx % NFXPICK), LK_PICK, A_EFFECT);
         } else if (!is_aux(trk)) {
             list_add(ACTION_NAME[A_ENGINE], EG_NAME[ui.pick_engine % NENGINE], LK_PICK, A_ENGINE);
             if (NPRESETS > 0)
@@ -1886,8 +1872,8 @@ static void draw_song(void)
 #define ST_CW 29
 #define ST_Y 22
 #define ST_CH 46
-/* a step's first line of text: the notes (two a line), a drum's sounds (the shown one first), a punch effect, a
- * tape segment, a brain chord */
+/* a step's first line of text: the notes (two a line), a drum's sounds (the shown one first), a punch effect,
+ * a brain chord */
 static int step_on(const step_t *st, int trk)       /* the cell is "on" for the sound shown (drums) or any note */
 {
     if (is_drum(trk)) {
@@ -1939,7 +1925,7 @@ static void draw_steps(void)
     char t[40];
     h = hash_u(h, (uint32_t)ph | (uint32_t)playing() << 8 | (uint32_t)ui.rec_armed << 9 | (uint32_t)ui.cursor << 16 |
                       (uint32_t)ui.lockpg << 24 | (uint32_t)(seq.rec_wait != 0) << 30);
-    h = hash_u(h, ui.cstep | (uint32_t)ui.rem_fx << 16 | (uint32_t)ui.rem_seg << 24 | (uint32_t)(ui.frame / 8 & 1u) << 31);
+    h = hash_u(h, ui.cstep | (uint32_t)ui.rem_fx << 16 | (uint32_t)(ui.frame / 8 & 1u) << 31);
     h = hash_pat(h, tp);
     h = hash_s(hash_u(h, proj.trk[trk].par[TP_ENGINE]), proj.trk[trk].name);   /* the sound's name, shown */
     for (int i = 0; i < 4; i++)
@@ -1984,11 +1970,6 @@ static void draw_steps(void)
             s_cat(s_cat(e, PUNCH_NAME[(ui.rem_fx - 1) & 15]), ui.rem_fx - 1 >= PX_MEL ? " (melodic)" : " (drums)");
         else
             s_cat(e, "play a key on EDIT first");
-    } else if (trk == AUX_TAPE) {
-        if (ui.rem_seg)
-            num_s((uint32_t)ui.rem_seg, s_cat(t, "segment: "));
-        else
-            s_cat(t, "segment: play a key on EDIT first");
     } else {
         char *e = s_cat(t, "chord: ");
         for (int i = 0; i < ui.nrem && i < SN; i++) {
@@ -2054,9 +2035,6 @@ static void draw_steps(void)
                 int fx = st->note[0] - 1;
                 text_fit(x + 2, y + 11, &FONT_XS, PX_VALID(fx) ? PUNCH_NAME[fx & 15] : "?", ST_CW - 5, fg);
                 text_fit(x + 2, y + 23, &FONT_XS, PX_VALID(fx) && fx >= PX_MEL ? "mel" : "drum", ST_CW - 5, bg == K_NOW ? K_BG : K_DIM);
-            } else if (trk == AUX_TAPE) {
-                num_s((uint32_t)st->note[0], s_cat(t, "seg "));
-                text_fit(x + 2, y + 15, &FONT_XS, t, ST_CW - 5, fg);
             } else {
                 char l1[12], *e = l1, cn[12];
                 int n = 0, line = 0, nn = 0;
@@ -2481,51 +2459,17 @@ static void draw_punch(void)
     cv_text(120, 104, &FONT_XS, proj.trk[AUX_PUNCH].par[TP_E1] ? "latch on" : "while held", K_DIM);
     cv_blit(0, MAIN_Y);
 }
-static void draw_tape(void)
-{
-    uint32_t h = hash_u(hash_u(2166136261u, 0x7Au), ui.keys ^ (uint32_t)playing() << 30 ^ (ui.frame / 4) << 8);
-    int32_t cx = 70, cy = 58, r = 44;
-    uint32_t held = 0;
-    char t[24];
-    for (int k = 0; k < 16; k++)
-        if (ui.keys >> WHITE_K[k] & 1u && ui.kmode[WHITE_K[k]] == KM_TAPE)
-            held |= 1u << k;
-    h = hash_u(h, held);
-    if (!begin_main(h))
-        return;
-    for (int k = 0; k < 16; k++) {
-        uint32_t a = (uint32_t)k * 2u;
-        int32_t x = cx + cos100(a) * r / 100, y = cy + sin100(a) * r / 100;
-        int on = held >> k & 1u;
-        cv_round(x - 5, y - 5, 11, 11, 4, on ? K_NOW : K_PANEL2);
-    }
-    if (playing()) {
-        uint32_t a = (ui.frame / 4) & 31u;
-        cv_round(cx + cos100(a) * (r - 14) / 100 - 2, cy + sin100(a) * (r - 14) / 100 - 2, 5, 5, 2, K_TEXT);
-    }
-    cv_text(130, 10, &FONT_B, "tape", K_TEXT);
-    cv_text(130, 30, &FONT_XS, "the last 16 steps,", K_DIM);
-    cv_text(130, 44, &FONT_XS, "a white key loops one", K_DIM);
-    if (held) {
-        char *e = s_cat(t, "segment ");
-        for (int k = 0; k < 16; k++)
-            if (held >> k & 1u) {
-                e = num_s((uint32_t)k + 1u, e);
-                e = s_cat(e, " ");
-            }
-        cv_text(130, 66, &FONT_S, t, K_NOW);
-    }
-    cv_blit(0, MAIN_Y);
-}
 static void draw_fxtrack(int trk)                    /* AUX_FX1 / AUX_FX2: the effect and a picture of it */
 {
-    int type = proj.trk[trk].par[TP_ENGINE] % NFXT;
-    uint32_t h = hash_u(hash_u(2166136261u, 0xF0u), (uint32_t)trk | (uint32_t)type << 4 | (ui.frame / 3) << 8 |
+    int pick = fx_pick_of(trk), type = fx_pick_type(pick);
+    uint32_t h = hash_u(hash_u(2166136261u, 0xF0u), (uint32_t)trk | (uint32_t)pick << 4 | (ui.frame / 3) << 8 |
                                           (uint32_t)ui.last_inst << 24);
     char t[32];
     if (!begin_main(h))
         return;
     cv_text(12, 4, &FONT_L, FXT_NAME[type], K_TEXT);
+    if (type == FXT_REVERB)                          /* the reverb's mode under the description */
+        cv_text(12, 58, &FONT_S, fx_pick_name(pick), K_NOW);
     s_cat(s_cat(t, trk == AUX_FX1 ? "send effect I, keys play " : "send effect II, keys play "), TRACK_NAME[inst_trk()]);
     cv_text(12, 40, &FONT_XS, t, K_DIM);
     {
@@ -2545,13 +2489,6 @@ static void draw_fxtrack(int trk)                    /* AUX_FX1 / AUX_FX2: the e
             for (int k = 0; k < 5; k++)
                 cv_round(x0 + k * 20, y0 + 30 - (30 >> k), 10, 30 >> k, 2, k ? K_DIM : K_NOW);
             break;
-        case FXT_DIST: {
-            pen_t pn = {0, 0, 0};
-            for (int32_t x = 0; x <= w; x++)             /* a sine driven into a soft clip */
-                pen_to(&pn, (float)(x0 + x), (float)(y0 + 20) - 16.0f * fm_tanhf(3.0f * fm_sin_turns((float)x / 96.0f)),
-                       K_NOW);
-            break;
-        }
         case FXT_LOFI:
             for (int32_t x = 0; x < w; x += 8)
                 cv_rect(x0 + x, y0 + 20 - sin100((uint32_t)(x / 8)) * 16 / 100, 8, 3, K_NOW);
@@ -2773,23 +2710,22 @@ static void draw_character(void)
     }
     cv_blit(0, MAIN_Y);
 }
-static void draw_sends(void)                         /* the instrument's three sends, named with the effects on them */
+static void draw_sends(void)                         /* the instrument's two sends, named with the effects on them */
 {
     int trk = inst_trk();
     const uint8_t *p = proj.trk[trk].par;
     uint32_t h = hash_u(hash_u(2166136261u, 0x5Eu), (uint32_t)trk | (uint32_t)p[TP_SEND1] << 4 | (uint32_t)p[TP_SEND2] << 12 |
-                                          (uint32_t)p[TP_SENDT] << 20 | (uint32_t)p[TP_LEVEL] << 28);
+                                          (uint32_t)p[TP_LEVEL] << 28);
     char t[32];
     h = hash_u(h, proj.trk[AUX_FX1].par[TP_ENGINE] | (uint32_t)proj.trk[AUX_FX2].par[TP_ENGINE] << 8);
     if (!begin_main(h))
         return;
     s_cat(s_cat(t, TRACK_NAME[trk]), " sends to");
     cv_text(12, 4, &FONT_B, t, K_TEXT);
-    for (int i = 0; i < 3; i++) {
-        int32_t y = 34 + i * 26, v = p[TP_SEND1 + i] * 132 / 127;
-        cv_text(12, y - 2, &FONT_S, i == 0 ? "FX I" : i == 1 ? "FX II" : "tape", K_TEXT);
-        if (i < 2)
-            cv_text(12, y + 11, &FONT_XS, FXT_NAME[proj.trk[AUX_FX1 + i].par[TP_ENGINE] % NFXT], K_DIM);
+    for (int i = 0; i < 2; i++) {
+        int32_t y = 40 + i * 32, v = p[TP_SEND1 + i] * 132 / 127;
+        cv_text(12, y - 2, &FONT_S, i == 0 ? "FX I" : "FX II", K_TEXT);
+        cv_text(12, y + 11, &FONT_XS, fx_label(fx_pick_of(AUX_FX1 + i)), K_DIM);
         cv_round(92, y + 3, 132, 8, 4, K_LINE);
         if (v > 0)
             cv_round(92, y + 3, v < 8 ? 8 : v, 8, 4, K_NOW);
@@ -2897,7 +2833,7 @@ static void draw_mix(void)
 {
     int sel = sel_trk();
     uint32_t h = hash_u(hash_u(2166136261u, 0x3Cu), (uint32_t)sel | (uint32_t)seq.mute << 4 | (uint32_t)ui.solo << 20);
-    static const char *const SHORT_NM[NALLTRK] = {"1", "2", "3", "4", "5", "6", "7", "8", "CO", "TH", "TP", "F1", "F2"};
+    static const char *const SHORT_NM[NALLTRK] = {"1", "2", "3", "4", "5", "6", "7", "8", "CO", "TH", "F1", "F2"};
     for (int t = 0; t < NALLTRK; t++)
         h = hash_u(h, eng_peak[t] >> 9);
     if (!begin_main(h))
@@ -2948,20 +2884,19 @@ static void draw_master(void)
                    K_NOW);
         }
         cv_text(x0, y0 + hh + 3, &FONT_XS, "low  mid  high, by the blend", K_DIM);
-    } else if (pg == 1) {
-        int32_t py = -1;
-        for (int32_t x = 0; x < w; x++) {
-            int32_t in = (x - w / 2) * 100 / (w / 2), g = 100 + (int32_t)m[MS_SAT_GAIN] * 3, clip = 30 + (127 - m[MS_SAT_CLIP]) * 70 / 127;
-            int32_t out = in * g / 100;
-            out = out > clip ? clip : out < -clip ? -clip : out;
-            {
-                int32_t y = cy - out * (hh / 2 - 4) / 100;
-                if (py >= 0)
-                    cv_line(x0 + x - 1, py, x0 + x, y, K_NOW);
-                py = y;
-            }
+    } else if (pg == 1) {                            /* the tape: a sine through it, squashed by drive and colour,
+                                                      * wavering with wobble, hiss on it with noise */
+        pen_t pn = {0, 0, 0};
+        float k = 0.3f + 4.0f * (float)(m[MS_TP_DRIVE] + m[MS_TP_COLOR]) * (1.0f / 254.0f), nk = 1.0f / fm_tanhf(k);
+        float wob = (float)m[MS_TP_WOBBLE] * (0.05f / 127.0f), nz = (float)m[MS_TP_NOISE] * (6.0f / 127.0f);
+        uint32_t rn = 777u;
+        for (int32_t x = 0; x <= w; x++) {
+            float u = (float)x / (float)w, ph = u * 2.0f + wob * fm_sin_turns(u * 1.5f), y;
+            rn = rn * 1664525u + 1013904223u;
+            y = fm_tanhf(k * fm_sin_turns(ph)) * nk * (float)(hh / 2 - 10) + nz * ((float)(rn >> 24) - 127.5f) / 127.5f;
+            pen_to(&pn, (float)(x0 + x), (float)cy - y, K_NOW);
         }
-        cv_text(x0, y0 + hh + 3, &FONT_XS, "drive: gain, clip, tone, blend", K_DIM);
+        cv_text(x0, y0 + hh + 3, &FONT_XS, "tape: drive, color, wobble, noise", K_DIM);
     } else {
         static const char *const NM[4] = {"drums", "melodic", "comp", "level"};
         for (int i = 0; i < 4; i++) {
@@ -3096,8 +3031,6 @@ static void draw_page(void)
             draw_brain();
         else if (trk == AUX_PUNCH)
             draw_punch();
-        else if (trk == AUX_TAPE)
-            draw_tape();
         else if (is_aux(trk))
             draw_fxtrack(trk);
         else if (ui.page == P_ENGINE || (is_drum(trk) && ui.page == P_PLAY))

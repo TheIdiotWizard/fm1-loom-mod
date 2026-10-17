@@ -382,10 +382,6 @@ static void fire_off(seq_t *s, int t, seq_off_t *e, const seq_sink_t *o)
     case OFF_PUNCH:
         s->punch_seq &= ~(1u << e->tag);
         break;
-    case OFF_TAPE:
-        if (o->tape_seg)
-            o->tape_seg(o->ctx, (int)e->tag, 0);
-        break;
     case OFF_DRUM:
         if (o->drum_off)
             o->drum_off(o->ctx, t, (int)e->note - 1);
@@ -649,7 +645,7 @@ static void fire_notes(seq_t *s, int t, const step_t *st, int p, uint32_t L, int
     tr->last_glide = (uint8_t)(glide > 255 ? 255 : glide);
 }
 
-/* the aux tracks' steps: brain chords, punch-in bits, tape segments */
+/* the aux tracks' steps: brain chords, punch-in bits */
 static void fire_aux(seq_t *s, int t, const step_t *st, int p, uint32_t L, const seq_sink_t *o)
 {
     const tpat_t *tp = tpat(s, t);
@@ -672,10 +668,6 @@ static void fire_aux(seq_t *s, int t, const step_t *st, int p, uint32_t L, const
         if (t == AUX_PUNCH && PX_VALID(v)) {
             s->punch_seq |= 1u << v;
             add_off(s, t, (uint32_t)v, OFF_PUNCH, 0, len_q8, o);
-        } else if (t == AUX_TAPE && v < 16) {
-            if (o->tape_seg)
-                o->tape_seg(o->ctx, v, 1);
-            add_off(s, t, (uint32_t)v, OFF_TAPE, 0, len_q8, o);
         }
     }
 }
@@ -1897,7 +1889,7 @@ static void punch_in(seq_t *s, int fx, int on, int tgt)
 }
 
 /* the main loop's keys, played here */
-enum { KQ_KEY, KQ_ALLOFF, KQ_BRAIN, KQ_TAPE, KQ_PUNCH };
+enum { KQ_KEY, KQ_ALLOFF, KQ_BRAIN, KQ_PUNCH };
 static void key_queue(seq_t *s, int kind, int trk, int note, int on, int vel)
 {
     uint8_t w = s->kq_w, n = (uint8_t)((w + 1) & 31);
@@ -1919,7 +1911,6 @@ static void keys_play(seq_t *s, const seq_sink_t *o)
         case KQ_KEY: key_in(s, trk, note, on, vel ? vel : 1, 0, o); break;
         case KQ_ALLOFF: if (trk < NTRK) keys_all_off(s, trk, o); break;
         case KQ_BRAIN: brain_key_in(s, note, on, o); break;
-        case KQ_TAPE: if (o->tape_seg) o->tape_seg(o->ctx, note, on); break;
         case KQ_PUNCH: punch_in(s, note, on, trk == 15 ? -1 : trk); break;
         default: break;
         }
@@ -2000,10 +1991,6 @@ static void do_start(seq_t *s, int from_top, const seq_sink_t *o)
         tracks_go(s);
         if (!s->ext && s->send_clock)
             midi(o, from_top ? 0xFA : 0xFB, 0, 0);
-    }
-    if (o->tape_step) {
-        s->tape_last = six_q8(s) >> 8;
-        o->tape_step(o->ctx, s->tape_last);
     }
 }
 
@@ -2277,13 +2264,6 @@ void seq_advance(seq_t *s, uint32_t k, const seq_sink_t *o)
     punch_update(s, o);
     keys_play(s, o);
     punch_update(s, o);               /* the keys just played may have started a loop or a fill */
-    if (o->tape_step && s->playing) {
-        uint32_t six = six_q8(s) >> 8;
-        if (six != s->tape_last) {
-            s->tape_last = six;
-            o->tape_step(o->ctx, six);
-        }
-    }
     if (s->playing)                   /* a scale or length changed: back in phase */
         for (t = 0; t < NSEQT; t++)
             resync(s, t);
@@ -2414,7 +2394,6 @@ void seq_cue_pattern(seq_t *s, int trk, int pat)
 void seq_key(seq_t *s, int trk, int note, int on, int vel) { key_queue(s, KQ_KEY, trk, note, on, vel); }
 void seq_key_all_off(seq_t *s, int trk) { key_queue(s, KQ_ALLOFF, trk, 0, 0, 0); }
 void seq_brain_key(seq_t *s, int note, int on) { key_queue(s, KQ_BRAIN, AUX_BRAIN, note, on, 0); }
-void seq_tape_key(seq_t *s, int seg, int on) { key_queue(s, KQ_TAPE, AUX_TAPE, seg & 15, on, 0); }
 
 void seq_punch_key(seq_t *s, int fx, int on, int target_trk)
 {

@@ -2,10 +2,10 @@
 /* LOOM-8 audio engine; see engine.h. The shape is X0X's: a command queue from the main loop, the
  * sequencer stepped sample-accurately between renders, one stretch of frames rendered as the first
  * core's part plus the second core's job, summed in one fixed order so a device with one core and a
- * device with two produce the same samples, then the sends, the tape, the two FX tracks, the master.
+ * device with two produce the same samples, then the sends, the two FX tracks, the master.
  *
  * Who owns which bytes: the synth reads the project's par[] arrays directly (synth_init takes the
- * pointer; the main loop writes bytes). The drumlines, the tape and the FX tracks read the engine's
+ * pointer; the main loop writes bytes). The drumlines and the FX tracks read the engine's
  * own copy (epar), so a parameter lock can override a knob without touching the project's value,
  * and the knob's value returns when the lock ends. The sequencer is only ever stepped here. */
 #include "engine.h"
@@ -42,7 +42,6 @@ static uint8_t dl_mem[NDL][DRUMLINE_BYTES] POOL __attribute__((aligned(8)));
 static uint8_t dl_slot[NTRK];                              /* the unit a drum track owns, 0xFF none */
 static uint8_t dl_owner[NDL];                              /* the track owning each unit, 0xFF free */
 static uint8_t fx_mem[2][FXSLOT_BYTES] POOL __attribute__((aligned(8)));
-static uint8_t tape_mem[TAPE_BYTES] POOL __attribute__((aligned(8)));
 static uint8_t mst_mem[MASTER_BYTES] __attribute__((aligned(8)));
 #define SY ((synth_t *)(void *)synth_mem)
 #define DL(t) ((drumline_t *)(void *)dl_mem[dl_slot[t]])
@@ -67,18 +66,17 @@ static void dl_drop(int t)
     }
 }
 #define FXS(k) ((fxslot_t *)(void *)fx_mem[k])
-#define TAPE ((tape_t *)(void *)tape_mem)
 #define MST ((master_t *)(void *)mst_mem)
-/* the lines (the memory plan, docs/superpowers/specs: one delay, one reverb, the tape). FX I has the
- * delay lines, FX II the reverb line: the notebook's default project (FX I delay, FX II reverb) and the
- * classic delay-into-reverb (FX I's return feeds FX II). A second delay pair (88 KB) or reverb (24 KB)
- * does not fit beside the canvas, the patterns and the tape; fx_has() tells the UI which effects a slot
- * can do. */
+/* the lines (the memory plan, docs/superpowers/specs: one delay, one reverb, the master tape's). FX I has
+ * the delay lines, FX II the reverb line: the notebook's default project (FX I delay, FX II reverb) and the
+ * classic delay-into-reverb (FX I's return feeds FX II). A second delay pair (88 KB) or reverb line (64 KB:
+ * the SPU modes at the console's size) does not fit beside the canvas and the patterns; fx_has() tells the
+ * UI which effects a slot can do. */
 static int16_t dly1_l[FX_DLY_LEN] POOL, dly1_r[FX_DLY_LEN] POOL;
 static int16_t rv2_line[FX_RV_LEN] POOL;
-static int16_t tape_ring[TAPE_LEN] POOL;
+static float mst_tape[2][MST_TAPE_DLY] POOL;
 
-/* the engine's parameter copy (drumlines, tape, FX read it; locks override it) and the project's
+/* the engine's parameter copy (drumlines, FX read it; locks override it) and the project's
  * contiguous array (app.h proj_par: the synth and the sequencer read that one) */
 static uint8_t epar[NALLTRK][NTP];
 static uint8_t (*ppar)[NTP];
@@ -152,8 +150,8 @@ static void guard_apply(void)
 
 /* ------------------------------------------------------- command queue --- */
 /* uint32 commands, single producer (main loop) / single consumer (audio ISR): type:4 | a:8 | b:8 | c:12 */
-enum { C_PARAM, C_ALL, C_KEY, C_KEYS_OFF, C_PUNCH, C_TAPE_KEY, C_BRAIN_KEY, C_MASTER, C_FX, C_TAPE, C_PANIC,
-       C_METRO, C_TEMPO, C_GROOVE, C_SCENE, C_NOP };     /* sixteen: the type is four bits */
+enum { C_PARAM, C_ALL, C_KEY, C_KEYS_OFF, C_PUNCH, C_BRAIN_KEY, C_MASTER, C_FX, C_PANIC,
+       C_METRO, C_TEMPO, C_GROOVE, C_SCENE, C_NOP };     /* at most sixteen: the type is four bits */
 #define CQ 512u
 static uint32_t cq[CQ];
 static volatile uint32_t cq_w, cq_r;
@@ -168,11 +166,10 @@ static void cq_put(uint32_t type, uint32_t a, uint32_t b, uint32_t c)
     cq_w = w + 1;
 }
 
-/* the FX and tape settings travel beside the queue (too many bytes for one word): the main loop
- * writes them, posts C_FX / C_TAPE, and the interrupt reads them whole at the next block. A knob
- * caught between two writes lasts one block. */
+/* the FX settings travel beside the queue (too many bytes for one word): the main loop writes them,
+ * posts C_FX, and the interrupt reads them whole at the next block. A knob caught between two writes
+ * lasts one block. */
 static struct { uint8_t type, knob[4], hp, lp; } fx_req[2];
-static struct { uint8_t pitch, speed, length, mix; } tape_req = {64, 64, 64, 64};
 
 /* the knob's value into the contiguous array the synth and the sequencer read (one byte: safe beside
  * the interrupt), then the command, for what needs doing with it (a kind change, a unit told) */
@@ -205,7 +202,6 @@ void engine_punch(int fx, int on, int target_trk)
 {
     cq_put(C_PUNCH, (uint32_t)fx, (uint32_t)(on != 0), (uint32_t)(target_trk < 0 ? 0xFF : target_trk));
 }
-void engine_tape_key(int seg, int on) { cq_put(C_TAPE_KEY, (uint32_t)seg, (uint32_t)(on != 0), 0); }
 void engine_brain_key(int note, int on) { cq_put(C_BRAIN_KEY, (uint32_t)note, (uint32_t)(on != 0), 0); }
 void engine_master(int p, int val)
 {
@@ -223,14 +219,6 @@ void engine_fx(int slot, int type, const uint8_t knob[4], int hp, int lp)
     fx_req[slot].hp = (uint8_t)hp;
     fx_req[slot].lp = (uint8_t)lp;
     cq_put(C_FX, (uint32_t)slot, 0, 0);
-}
-void engine_tape_set(int pitch, int speed, int length, int mix)
-{
-    tape_req.pitch = (uint8_t)pitch;
-    tape_req.speed = (uint8_t)speed;
-    tape_req.length = (uint8_t)length;
-    tape_req.mix = (uint8_t)mix;
-    cq_put(C_TAPE, 0, 0, 0);
 }
 void engine_panic(void) { cq_put(C_PANIC, 0, 0, 0); }
 void engine_metronome(int mode) { cq_put(C_METRO, (uint32_t)mode, 0, 0); }
@@ -307,7 +295,7 @@ static void pan_gains(int pan, float *gl, float *gr)
 }
 enum { GL_L, GL_R, GL_SEND, GL_N };
 static glide_t trk_glide[NTRK][GL_N];             /* the drum tracks' level and pan (the synth has its own) */
-static glide_t ret_glide[2][2], tape_glide[2];    /* the FX returns and the tape loop */
+static glide_t ret_glide[2][2];                   /* the FX returns */
 
 static float trk_peak[NALLTRK];
 __attribute__((noinline)) static void meter(int p, const float *x, uint32_t n)
@@ -348,14 +336,11 @@ static int is_filter_param(int param)
 {
     return param == TP_FTYPE || param == TP_CUT || param == TP_RES || param == TP_FENV || param == TP_KTRK;
 }
-/* a lock or a knob reaching a unit that reads epar (the drumline reads it live; the tape and the FX
- * are told) */
+/* a lock or a knob reaching a unit that reads epar (the drumline reads it live; the FX are told) */
 static void aux_changed(int trk, int param)
 {
     const uint8_t *p = epar[trk];
-    if (trk == AUX_TAPE && param >= TP_E1 && param <= TP_E4)
-        tape_set(TAPE, p[TP_E1], p[TP_E2], p[TP_E3], p[TP_E4]);
-    else if ((trk == AUX_FX1 || trk == AUX_FX2) && param >= TP_E1 && param <= TP_E4)
+    if ((trk == AUX_FX1 || trk == AUX_FX2) && param >= TP_E1 && param <= TP_E4)
         fx_set(FXS(trk - AUX_FX1), fx_type[trk - AUX_FX1], p + TP_E1);
 }
 static void apply_param(int trk, int param, int val)       /* ISR: C_PARAM */
@@ -487,8 +472,6 @@ static void s_punch(void *x, uint32_t drum_mask, uint32_t mel_mask)
     eng_punch_drum = drum_mask;
     eng_punch_mel = mel_mask;
 }
-static void s_tape_seg(void *x, int seg, int on) { (void)x; tape_segment(TAPE, seg, on); }
-static void s_tape_step(void *x, uint32_t spp) { (void)x; tape_bar(TAPE, spp); }
 static void s_midi(void *x, uint8_t st, uint8_t d1, uint8_t d2)
 {
     uint32_t cin = st >= 0xF0 ? 0x0Fu : (uint32_t)(st >> 4);
@@ -512,13 +495,13 @@ static void s_metro(void *x, int accent)
     metro_left = 1800u;                                  /* 40 ms */
     metro_ph = 0.0f;
     metro_inc = (accent ? 1760.0f : 1320.0f) / 44100.0f;
-    synth_duck_trigger(SY, NTRK);                        /* (8 = the metronome, synth.h) */
+    synth_duck_trigger(SY, DUCK_METRO);
 }
 /* named members: the sequencer may grow its sink at the end without this changing */
 static const seq_sink_t SINK = {
     .note_on = s_note_on, .note_off = s_note_off, .drum = s_drum, .lock = s_lock, .bend = s_bend, .punch = s_punch,
-    .tape_seg = s_tape_seg, .tape_step = s_tape_step, .midi = s_midi, .step = s_step, .scene = s_scene,
-    .metro = s_metro, .pan = s_pan, .drum_off = s_drum_off, .ctx = 0};
+    .midi = s_midi, .step = s_step, .scene = s_scene, .metro = s_metro, .pan = s_pan, .drum_off = s_drum_off,
+    .ctx = 0};
 
 /* the performance state of every instrument track from the punch masks and the bends: once a stretch */
 #define PUNCH_VIB_DRUM 30.0f                               /* cents, the wobble under the drums' filter */
@@ -605,7 +588,6 @@ static void drain(void)
         case C_KEY: seq_key(&seq, (int)a, (int)b, (int)((v >> 7) & 1u), (int)(v & 0x7Fu)); break;
         case C_KEYS_OFF: seq_key_all_off(&seq, (int)a); break;
         case C_PUNCH: seq_punch_key(&seq, (int)a, (int)b, v == 0xFFu ? -1 : (int)v); break;
-        case C_TAPE_KEY: seq_tape_key(&seq, (int)a, (int)b); break;
         case C_BRAIN_KEY: seq_brain_key(&seq, (int)a, (int)b); break;
         case C_MASTER: master_set(MST, (int)a, (int)v); break;
         case C_FX:
@@ -613,6 +595,7 @@ static void drain(void)
                 int k, type = fx_req[a].type;
                 if (!fx_has(FXS(a), type))
                     type = FXT_CHORUS;                      /* what the slot runs instead (fx_set's fallback) */
+                /* (type: the pick, fx.h: the effect and the reverb's mode) */
                 fx_type[a] = (uint8_t)type;
                 for (k = 0; k < 4; k++)
                     epar[AUX_FX1 + a][TP_E1 + k] = fx_req[a].knob[k];
@@ -620,13 +603,6 @@ static void drain(void)
                 fx_set(FXS(a), type, fx_req[a].knob);
                 fx_filter(FXS(a), fx_req[a].hp, fx_req[a].lp);
             }
-            break;
-        case C_TAPE:
-            epar[AUX_TAPE][TP_E1] = tape_req.pitch;
-            epar[AUX_TAPE][TP_E2] = tape_req.speed;
-            epar[AUX_TAPE][TP_E3] = tape_req.length;
-            epar[AUX_TAPE][TP_E4] = tape_req.mix;
-            tape_set(TAPE, tape_req.pitch, tape_req.speed, tape_req.length, tape_req.mix);
             break;
         case C_PANIC: {
             int t;
@@ -656,12 +632,12 @@ static void drain(void)
         midi_in(pkt);
 }
 
-/* the mix of one stretch between two events: the percussion group, the melodic group, the three
+/* the mix of one stretch between two events: the percussion group, the melodic group, the two
  * sends; the second core's own; the drumlines' and the FX returns' scratch. In .bss, not the pool
  * (the pool is for the lines). 256 frames each: the most one render asks for. */
-static float perc_l[256], perc_r[256], mel_l[256], mel_r[256], s1[256], s2[256], st[256];
-static float c2_l[256], c2_r[256], c2_s1[256], c2_s2[256], c2_st[256];
-static float tl[256], tr[256], ts1[256], ts2[256], tst[256];
+static float perc_l[256], perc_r[256], mel_l[256], mel_r[256], s1[256], s2[256];
+static float c2_l[256], c2_r[256], c2_s1[256], c2_s2[256];
+static float tl[256], tr[256], ts1[256], ts2[256];
 static float mix_l[256], mix_r[256];
 
 __attribute__((noinline)) static void zerof(float *b, uint32_t n)
@@ -682,8 +658,7 @@ static void core2_job(uint32_t arg)
     zerof(c2_r, n);
     zerof(c2_s1, n);
     zerof(c2_s2, n);
-    zerof(c2_st, n);
-    synth_render(SY, 0, NVOICE / 2, c2_l, c2_r, c2_s1, c2_s2, c2_st, n);
+    synth_render(SY, 0, NVOICE / 2, c2_l, c2_r, c2_s1, c2_s2, n);
     if (timed)
         PROF_ADD(PR_SYNTH1, pt);
 }
@@ -711,8 +686,7 @@ static void metro_tick(uint32_t n)
 }
 
 /* one stretch: the upper half of the voices and the drumlines here while the second core renders the
- * lower half; then the halves are summed in the order one core always used, the tape and the FX
- * tracks, the master */
+ * lower half; then the halves are summed in the order one core always used, the FX tracks, the master */
 static void render_sub(uint32_t n)
 {
     uint32_t arg = n & 0xFFu, pt;
@@ -723,13 +697,12 @@ static void render_sub(uint32_t n)
     zerof(mel_r, n);
     zerof(s1, n);
     zerof(s2, n);
-    zerof(st, n);
     perf_tick(n);
     synth_prepare(SY, n);                                 /* the shared per-chunk values, before either core renders */
     on2 = c2_run ? c2_run(core2_job, arg | 0x100u) : 0;
     {
         PROF_T(ps);
-        synth_render(SY, NVOICE / 2, NVOICE, mel_l, mel_r, s1, s2, st, n);
+        synth_render(SY, NVOICE / 2, NVOICE, mel_l, mel_r, s1, s2, n);
         PROF_ADD(PR_SYNTH0, ps);
     }
     {
@@ -742,8 +715,7 @@ static void render_sub(uint32_t n)
             zerof(tr, n);
             zerof(ts1, n);
             zerof(ts2, n);
-            zerof(tst, n);
-            drumline_render(DL(t), tl, tr, ts1, ts2, tst, n);
+            drumline_render(DL(t), tl, tr, ts1, ts2, n);
             g = perf_mute[t] ? 0.0f : (float)epar[t][TP_LEVEL] * (float)epar[t][TP_LEVEL] * (1.0f / 10000.0f);
             pan_gains(epar[t][TP_PAN] + perf_pan[t], &gl, &gr);
             glide_set(&trk_glide[t][GL_L], g * gl);
@@ -753,7 +725,6 @@ static void render_sub(uint32_t n)
             add_glide(perc_r, tr, &trk_glide[t][GL_R], n);
             add_glide(s1, ts1, &trk_glide[t][GL_SEND], n);
             add_glide(s2, ts2, &trk_glide[t][GL_SEND], n);
-            add_glide(st, tst, &trk_glide[t][GL_SEND], n);
             meter(t, tl, n);
         }
         metro_tick(n);
@@ -768,7 +739,6 @@ static void render_sub(uint32_t n)
     add_in(mel_r, c2_r, n);
     add_in(s1, c2_s1, n);
     add_in(s2, c2_s2, n);
-    add_in(st, c2_st, n);
     for (t = 0; t < NTRK; t++)                            /* the synth's meters, into the common ones */
         if (!eng_drum[t]) {
             float v = (float)synth_peak[t] * (1.0f / 32767.0f);
@@ -777,28 +747,6 @@ static void render_sub(uint32_t n)
         }
     {
         PROF_T(pf);
-        {   /* the tape: records the st send, plays a looped segment; while looping, the routed tracks' dry
-             * (the melodic group: the usual sources) is turned down by its mix */
-            float dry;
-            zerof(tl, n);
-            zerof(tr, n);
-            dry = tape_process(TAPE, st, tl, tr, n);
-            if (dry < 1.0f) {
-                uint32_t i;
-                for (i = 0; i < n; i++) {
-                    mel_l[i] *= dry;
-                    mel_r[i] *= dry;
-                }
-            }
-            if (tape_active(TAPE)) {
-                float g = (float)epar[AUX_TAPE][TP_LEVEL] * (float)epar[AUX_TAPE][TP_LEVEL] * (1.0f / 10000.0f);
-                glide_set(&tape_glide[0], g);
-                glide_set(&tape_glide[1], g);
-                add_glide(mel_l, tl, &tape_glide[0], n);
-                add_glide(mel_r, tr, &tape_glide[1], n);
-                meter(AUX_TAPE, tl, n);
-            }
-        }
         for (k = 0; k < 2; k++) {                         /* FX I, then FX II (which hears FX I's return) */
             float g = (float)epar[AUX_FX1 + k][TP_LEVEL] * (float)epar[AUX_FX1 + k][TP_LEVEL] * (1.0f / 10000.0f);
             zerof(tl, n);
@@ -908,19 +856,15 @@ void engine_init(patterns_t *P, uint8_t (*par)[NTP])
         }
         bend_c[t] = 0;
     }
-    for (k = 0; k < 2; k++) {
+    for (k = 0; k < 2; k++)
         ret_glide[k][0].cur = ret_glide[k][1].cur = -1.0f;
-        tape_glide[k].cur = -1.0f;
-    }
     fx_init(FXS(0), dly1_l, dly1_r, 0);                   /* FX I: the delay lines, no reverb */
     fx_init(FXS(1), 0, 0, rv2_line);                      /* FX II: the reverb line, no delay */
     fx_type[0] = epar[AUX_FX1][TP_ENGINE];
     fx_type[1] = epar[AUX_FX2][TP_ENGINE];
     fx_set(FXS(0), fx_type[0], epar[AUX_FX1] + TP_E1);
     fx_set(FXS(1), fx_type[1], epar[AUX_FX2] + TP_E1);
-    tape_init(TAPE, tape_ring);
-    tape_set(TAPE, epar[AUX_TAPE][TP_E1], epar[AUX_TAPE][TP_E2], epar[AUX_TAPE][TP_E3], epar[AUX_TAPE][TP_E4]);
-    master_init(MST);
+    master_init(MST, mst_tape[0], mst_tape[1]);
     seq_init(&seq, P, par);
     seq.groove_type = (uint8_t)(proj.groove < NGROOVE ? proj.groove : GR_SWING);
     seq.brain_link = (uint8_t)(par[AUX_BRAIN][TP_E4] > NTRK ? NTRK : par[AUX_BRAIN][TP_E4]);
@@ -930,4 +874,4 @@ void engine_init(patterns_t *P, uint8_t (*par)[NTP])
 }
 
 /* the UI asks before offering an effect: FX I has no reverb line, FX II no delay (the memory plan) */
-int engine_fx_has(int slot, int type) { return fx_has(FXS(slot & 1), type); }
+int engine_fx_has(int slot, int pick) { return fx_has(FXS(slot & 1), pick); }

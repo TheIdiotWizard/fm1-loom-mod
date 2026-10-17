@@ -31,7 +31,7 @@ enum {
     TP_FA, TP_FD, TP_FS, TP_FR,                     /* filter ADSR */
     TP_CUT, TP_RES, TP_FENV, TP_KTRK, TP_FTYPE,     /* Filter page (cutoff 50 Hz .. 20 kHz) and the type (FT_*); on a
                                                      * drumline track low cut / compression / drive / hi cut */
-    TP_SEND1, TP_SEND2, TP_SENDT,                   /* sends: fx I, fx II, tape */
+    TP_SEND1, TP_SEND2,                             /* sends: fx I, fx II */
     TP_LTYPE, TP_LSPEED, TP_LAMT, TP_LDEST, TP_LX,  /* LFO: type (off, wave, wobble, drift, pump), then its four
                                                      * knobs as the comment below the enum says */
     TP_LX2,                                         /* a fifth LFO value: shape (wave, wobble) or envelope (drift) */
@@ -83,7 +83,7 @@ enum { CT_OFF, CT_DRIVE, CT_FOLD, CT_CRUSH, CT_RING, CT_TILT, CT_RECTIFY, NCT };
  *            envelope (TP_LX2: fade in / fade out, below)
  *   wobble:  rate, vibrato amount -100..100 % (64 = 0, 100 % = +-1 semitone), volume amount -100..100 % (TP_LDEST,
  *            64 = 0), envelope (TP_LX), shape (TP_LX2: sine, saw, exponential, square, blip)
- *   pump:    source (TP_LSPEED: 0..7 tracks 1-8, 8..10 brain / punch / tape, 11 metronome), amount 0..100 %,
+ *   pump:    source (TP_LSPEED: 0..7 tracks 1-8, 8..9 brain / punch, 10 metronome: DUCK_METRO), amount 0..100 %,
  *            hold (TP_LDEST, ms), release (TP_LX, ms)
  * Regular (not free): the LFO's phase restarts on every note of the track (drift draws a fresh value too).
  * The envelope knob: 64 = none; below, the LFO fades in from the note over up to 3 s (0 = 3 s, 63 = at once);
@@ -159,17 +159,18 @@ perf_t *synth_perf(synth_t *s, int trk);            /* the track's performance s
 #define LOCK_NONE 0xFFu               /* seq/pattern.h's: no lock */
 #endif
 void synth_lock(synth_t *s, int trk, int param, int val);   /* a parameter lock in effect (LOCK_NONE: the knob's) */
-void synth_duck_trigger(synth_t *s, int src);      /* a hit on a duck source (0..7 tracks, 8..10 brain / punch / tape,
-                                                    * 11 metronome): duck LFOs listening to it drop */
+#define DUCK_METRO 10                 /* the pump's source numbers: 0..7 tracks, 8 brain, 9 punch, 10 the metronome */
+void synth_duck_trigger(synth_t *s, int src);      /* a hit on a duck source (0..7 tracks, 8..9 brain / punch,
+                                                    * DUCK_METRO the metronome): duck LFOs listening to it drop */
 /* a block: synth_prepare(n) once (the tracks' LFO, tremolo and duck values for every chunk boundary inside
  * the next n frames, n <= 512, and the meters), then synth_render(n) for each voice range, on any core: a
  * render touches only its voices' state, so 0..8 on one core and 8..16 on the other may run at once.
  * Notes, locks, bends and perf writes happen between blocks (the command queue), never during a render.
  * Every voice range must be rendered each block, with the n given to prepare. */
 void synth_prepare(synth_t *s, uint32_t n);
-/* render n frames (any n; chunks inside): dry L/R and the three sends (mono), added into the buffers.
+/* render n frames (any n; chunks inside): dry L/R and the two sends (mono), added into the buffers.
  * v0..v1 is the range of voices to render (the two cores split the pool) */
-void synth_render(synth_t *s, int v0, int v1, float *l, float *r, float *s1, float *s2, float *st, uint32_t n);
+void synth_render(synth_t *s, int v0, int v1, float *l, float *r, float *s1, float *s2, uint32_t n);
 int synth_sounding(const synth_t *s, int v0, int v1);          /* a voice in the range is sounding */
 int synth_voices_used(const synth_t *s);
 void synth_limit(synth_t *s, int max_voices);                  /* the overload guard: fewer voices */

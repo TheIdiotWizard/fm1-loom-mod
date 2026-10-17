@@ -13,7 +13,8 @@
 #define XY_VERSION "DEV"
 #endif
 #define PROJ_MAGIC 0x384D4F4Cu          /* "LOM8" (was "XXY1": XY-1's projects start fresh) */
-#define PROJ_FORMAT 2u                  /* 2: the character stage moved TP_PLAYER on (and every index after it) */
+#define PROJ_FORMAT 3u                  /* 3: no tape (its track, its send: every index after them moved), no
+                                         * distortion, the reverb's modes, the master's tape; 2: the character stage */
 #define NPROJ 4                         /* project slots in flash */
 #define NUSER_PRESETS 16
 #define NAME_LEN 12

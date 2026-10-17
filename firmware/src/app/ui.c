@@ -135,15 +135,12 @@ static void apply_fx(int trk)
 {
     const uint8_t *p = proj.trk[trk].par;    /* the engine's layout: TP_ENGINE the effect, E1..E4 its knobs,
                                               * FENV the high-pass, CUT the low-pass (SEND2: the feed, by engine_set) */
-    engine_fx(trk - AUX_FX1, p[TP_ENGINE] % NFXT, p + TP_E1, p[TP_FENV], p[TP_CUT]);
+    engine_fx(trk - AUX_FX1, p[TP_ENGINE] % NFXPICK, p + TP_E1, p[TP_FENV], p[TP_CUT]);
 }
 static void apply_aux(int trk)
 {
-    const uint8_t *p = proj.trk[trk].par;
     if (trk == AUX_BRAIN)
         apply_brain();
-    else if (trk == AUX_TAPE)
-        engine_tape_set(p[TP_E1], p[TP_E2], p[TP_E3], p[TP_E4]);
     else if (is_fx(trk))
         apply_fx(trk);
 }
@@ -206,12 +203,11 @@ static void set_mute(int trk, int on)
     pats.scene[cur_scene()].mute = m;
     mark_dirty();
 }
-/* a preset is the sound: the track's tape send (routing, as its level and pan) stays the track's own */
+/* a preset is the sound (its sends too); the track's level and pan stay its own */
 static void load_preset(int trk, const preset_t *pr)
 {
-    uint8_t *par = proj.trk[trk].par, tape = par[TP_SENDT];
+    uint8_t *par = proj.trk[trk].par;
     memcpy(par, pr->par, NTP_SOUND);
-    par[TP_SENDT] = tape;
     for (int i = 0; i < NAME_LEN; i++)
         proj.trk[trk].name[i] = pr->name[i] ? pr->name[i] : 0;
     engine_set_all(trk);
@@ -287,11 +283,9 @@ static int preset_apply(int trk, int i)
     }
     {
         int u = i - NPRESETS;
-        uint8_t tape = proj.trk[trk].par[TP_SENDT];
         if (!user_presets[u].name[0] && !user_presets[u].par[TP_E1])
             return 0;
         memcpy(proj.trk[trk].par, user_presets[u].par, NTP_SOUND);
-        proj.trk[trk].par[TP_SENDT] = tape;
         proj.trk[trk].par[TP_ENGINE] = user_presets[u].engine;
         memcpy(proj.trk[trk].name, user_presets[u].name, NAME_LEN);
         engine_set_all(trk);
@@ -496,12 +490,6 @@ static void step_toggle(int i)
                 return;
             }
             one = ui.rem_fx;
-        } else if (trk == AUX_TAPE) {
-            if (!ui.rem_seg) {
-                say_no("NO SEGMENT YET", "play a key on EDIT");
-                return;
-            }
-            one = ui.rem_seg;
         }
         if (one)
             step_set_notes(st, &one, 1, 100);
@@ -852,7 +840,7 @@ static void solo_end(void)
  * play it and set what a step press writes; step record writes the cursor step */
 static void keyboard_down(int k)
 {
-    int trk = sel_trk(), w = ordinal(WHITE_K, 16, k), b = ordinal(BLACK_K, 11, k), srec = ui.rec_armed && !playing();
+    int trk = sel_trk(), b = ordinal(BLACK_K, 11, k), srec = ui.rec_armed && !playing();
     if (trk == AUX_BRAIN) {
         ui.kmode[k] = KM_BRAIN;
         ui.knote[k] = (uint8_t)key_note(k);
@@ -870,17 +858,6 @@ static void keyboard_down(int k)
         punch_key(k, 1);
         if (srec && punch_of_key(k) >= 0)
             step_rec_key(punch_of_key(k) + 1);
-        return;
-    }
-    if (trk == AUX_TAPE) {
-        if (w >= 0) {
-            ui.kmode[k] = KM_TAPE;
-            ui.knote[k] = (uint8_t)w;
-            ui.rem_seg = (uint8_t)(w + 1);
-            engine_tape_key(w, 1);
-            if (srec)
-                step_rec_key(w + 1);
-        }
         return;
     }
     if (is_aux(trk))
@@ -1050,7 +1027,9 @@ static void key_down(int k)
     }
     if (p == P_MIX) {
         if (b >= 0) {
-            static const uint8_t T[11] = {0, 1, 2, 3, 4, 5, 6, 7, AUX_TAPE, AUX_FX1, AUX_FX2};
+            static const uint8_t T[11] = {0, 1, 2, 3, 4, 5, 6, 7, AUX_FX1, AUX_FX2, 0xFF};
+            if (T[b] == 0xFF)
+                return;
             ui.kmode[k] = KM_SOLO;
             track_select(T[b]);
             if (T[b] < NSEQT && !ui.solo)
@@ -1121,11 +1100,6 @@ static void key_up(int k)
     case KM_BRAIN:
         engine_brain_key(ui.knote[k], 0);
         chord_del(ui.knote[k]);
-        if (ui.rec_armed && !playing())
-            step_rec_key_up();
-        break;
-    case KM_TAPE:
-        engine_tape_key(ui.knote[k], 0);
         if (ui.rec_armed && !playing())
             step_rec_key_up();
         break;
@@ -1396,17 +1370,17 @@ static void setup_knob(int k, int32_t e)
     }
     mark_dirty();
 }
-static void fx_pick(int trk, int d)              /* the effect: only those the slot can do */
+static void fx_pick(int trk, int d)              /* the effect (the reverb's modes among them): only those the slot can do */
 {
-    int t = proj.trk[trk].par[TP_ENGINE] % NFXT;
-    for (int tries = 0; tries < NFXT; tries++) {
-        t = clampi(t + d, 0, NFXT - 1);
+    int t = proj.trk[trk].par[TP_ENGINE] % NFXPICK;
+    for (int tries = 0; tries < NFXPICK; tries++) {
+        t = clampi(t + d, 0, NFXPICK - 1);
         if (engine_fx_has(trk - AUX_FX1, t))
             break;
     }
     if (engine_fx_has(trk - AUX_FX1, t)) {
         set_tp(trk, TP_ENGINE, t);
-        say("EFFECT", FXT_NAME[t]);
+        say("EFFECT", fx_label(t));
     }
 }
 static void aux_knob(int trk, int k, int32_t e)
@@ -1571,9 +1545,9 @@ static void list_open(void)
     lst.sel = lst.top = 0;
     ui.pick_engine = proj.trk[sel_trk()].par[TP_ENGINE] % NENGINE;
     if (is_fx(sel_trk()))
-        ui.pick_fx = proj.trk[sel_trk()].par[TP_ENGINE] % NFXT;
+        ui.pick_fx = proj.trk[sel_trk()].par[TP_ENGINE] % NFXPICK;
     if (fx_page(ui.page))
-        ui.pick_fx = proj.trk[ui.page == P_FX1 ? AUX_FX1 : AUX_FX2].par[TP_ENGINE] % NFXT;
+        ui.pick_fx = proj.trk[ui.page == P_FX1 ? AUX_FX1 : AUX_FX2].par[TP_ENGINE] % NFXPICK;
     list_build();
     if (!lst.n) {
         lst.open = 0;
@@ -1626,8 +1600,8 @@ static void list_change(int32_t e)
         case A_WEAVE: ui.pick_weave = (uint8_t)clampi(ui.pick_weave + d, 0, NWV - 1); break;
         case A_EFFECT: {
             int t = ui.pick_fx, trk = fx_page(ui.page) ? (ui.page == P_FX1 ? AUX_FX1 : AUX_FX2) : sel_trk();
-            for (int tries = 0; tries < NFXT; tries++) {
-                t = clampi(t + d, 0, NFXT - 1);
+            for (int tries = 0; tries < NFXPICK; tries++) {
+                t = clampi(t + d, 0, NFXPICK - 1);
                 if (engine_fx_has(trk - AUX_FX1, t))
                     break;
             }
@@ -1963,8 +1937,8 @@ static void action_run(int a)
     }
     case A_EFFECT: {
         int ft = fx_page(ui.page) ? (ui.page == P_FX1 ? AUX_FX1 : AUX_FX2) : sel_trk();
-        set_tp(ft, TP_ENGINE, ui.pick_fx % NFXT);
-        say("EFFECT", FXT_NAME[ui.pick_fx % NFXT]);
+        set_tp(ft, TP_ENGINE, ui.pick_fx % NFXPICK);
+        say("EFFECT", fx_label(ui.pick_fx % NFXPICK));
         break;
     }
     case A_PRESET:

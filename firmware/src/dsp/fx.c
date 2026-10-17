@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* LOOM-8 effects (fx.h): the send slots, the tape loop and the master section.
+/* LOOM-8 effects (fx.h): the send slots and the master section.
  *
  * Send slots: each takes a mono send and adds a stereo return. The reverb is 9W9's (X0X's fxbus.c):
  * four int16 combs with damping in the loop and two allpasses a side, the right side reading the
@@ -9,8 +9,7 @@
  * in the middle. The delay is a ping-pong over the two int16 lines, timed in divisions of the tempo
  * (1/32 to 1/2, dotted ones between) and slewed so a change of time warps instead of clicking (9W9
  * again), its repeats low-passed by "tone"; the chorus is the JP-8000's stepped, slewed triangle on
- * a short int16 line (NuSaw's); the distortion a tanh-to-hard-clip ("edge" blends them) between a
- * low cut and a high cut; the lofi a sample-and-hold with a quantiser, "smooth" its anti-alias
+ * a short int16 line (NuSaw's); the lofi a sample-and-hold with a quantiser, "smooth" its anti-alias
  * filters, its "width" a stereo spread: the right side reads the lofi output back from the chorus's
  * idle line a few milliseconds late, the lateness wandering slowly; the phaser four first-order
  * allpasses a side, the right side's sweep a quarter turn behind. Every effect returns its wet sound
@@ -24,17 +23,16 @@
  * cannot be using at the same time). The slot's filter page (high-pass, low-pass) runs on the mono
  * send before the effect: one filter instead of two, and the same result for the linear effects.
  *
- * Tape: the routed tracks' send is low-passed, taken every fourth sample and written to the int16
- * ring (AMB-1's quarter-rate tape). A held segment loops a sixteenth of the last 16 steps, counted
- * back from the last step boundary tape_bar() reported, read at the rate the pitch (whole octaves)
- * and speed (50..200 %) knobs give, with linear interpolation; the write head stands still meanwhile.
+ * The reverb has modes: the plate above, and the PlayStation's SPU reverbs (psxrev.h, from
+ * schwung-psxverb: MIT), which run on the same line, all of it.
  *
  * Master: the two groups' levels, a 3-band EQ (RBJ shelves and a peak, their gains scaled by blend
- * so blend 0 is a true bypass), the saturator (a tanh / hard clip mix with a tilt, "mix" into the
- * bus), X0X's bus compressor behind its one-knob macro, the master level and X0X's lookahead limiter.
+ * so blend 0 is a true bypass), the tape (TapeScam, tapescam.h, from schwung-tapescam: MIT; all four
+ * knobs at 0 a true bypass), X0X's bus compressor behind its one-knob macro, the master level and
+ * X0X's lookahead limiter.
  *
- * Everything here runs in the audio interrupt; fx_set / tape_set / master_set write plain words from
- * the main loop. Float, fastmath.h; stack locals stay small (a 32-sample block). */
+ * Everything here runs in the audio interrupt; fx_set / master_set write plain words from the main
+ * loop. Float, fastmath.h; stack locals stay small (a 32-sample block). */
 #include "fx.h"
 #include "fastmath.h"
 
@@ -46,21 +44,39 @@
 #define RV_WET 0.8f                           /* the reverb's return level */
 #define LOFI_SPREAD 480.0f                    /* width 127: the right side ~11 ms behind the left */
 
-const char *const FXT_NAME[NFXT] = {"chorus", "delay", "distortion", "lofi", "phaser", "reverb"};
-const char *const FXT_KNOB[NFXT][4] = {
-    {"rate", "depth", "feedback", "width"},  {"time", "fine", "repeats", "tone"},
-    {"drive", "edge", "low cut", "high cut"}, {"rate", "bits", "smooth", "width"},
-    {"freq", "depth", "rate", "feedback"},    {"size", "motion", "tone", "damp"},
+static void zero16(int16_t *b, int32_t n);
+#include "psxrev.h"
+
+const char *const FXT_NAME[NFXT] = {"chorus", "delay", "lofi", "phaser", "reverb"};
+const char *const RV_NAME[NRV] = {"plate", "room", "studio S", "studio M", "studio L", "hall", "half echo",
+                                  "space echo", "chaos echo", "one echo"};
+static const char *const FXT_KNOB[NFXT][4] = {
+    {"rate", "depth", "feedback", "width"}, {"time", "fine", "repeats", "tone"},
+    {"rate", "bits", "smooth", "width"},    {"freq", "depth", "rate", "feedback"},
+    {"size", "motion", "tone", "damp"},
 };
+static const char *const SPU_KNOB[4] = {"size", "decay", "tone", "damp"};
 /* the defaults, 0..127 (what each gives: fx_derive's mappings) */
 const uint8_t FXT_DEFAULT[NFXT][4] = {
     {50, 86, 20, 127},                        /* chorus      0.33 Hz, +-5.5 ms, feedback 0.11, fully wide */
     {72, 64, 56, 64},                         /* delay       1/8, on the beat, feedback 0.42 (~4 repeats), 4 kHz */
-    {40, 32, 40, 100},                        /* distortion  3.7x, a quarter hard, 85 Hz .. 9.6 kHz */
     {80, 80, 64, 40},                         /* lofi        8.4 kHz, 10.8 bits, half smoothed, 3.4 ms spread */
     {50, 90, 50, 80},                         /* phaser      466 Hz, +-2.1 octaves, 0.27 Hz, feedback 0.57 */
-    {100, 40, 44, 72},                        /* reverb      combs x1.43, 2.4 samples of wander, 7.4 kHz, damp 0.45 */
+    {100, 40, 44, 72},                        /* plate       combs x1.43, 2.4 samples of wander, 7.4 kHz, damp 0.45 */
 };
+const uint8_t RV_SPU_DEFAULT[4] = {127, 64, 64, 0};   /* the console's sizes, its decay, flat, its own filter */
+
+const char *fx_pick_name(int pick)
+{
+    int t = fx_pick_type(pick);
+    return t == FXT_REVERB ? RV_NAME[fx_pick_mode(pick)] : FXT_NAME[t];
+}
+const char *fx_knob_name(int pick, int k)
+{
+    int t = fx_pick_type(pick);
+    k &= 3;
+    return t == FXT_REVERB && fx_pick_mode(pick) != RV_PLATE ? SPU_KNOB[k] : FXT_KNOB[t][k];
+}
 
 /* the reverb's lines inside the int16 buffer: 9W9's comb lengths, each with room to grow 1.9x,
  * and its four allpasses (left 556 / 441, right 579 / 457) */
@@ -76,6 +92,7 @@ struct fxslot {
     int16_t cho[CHO_N];
     int16_t *dl, *dr, *rv;
     uint8_t type, type_t, hpv, lpv;
+    uint8_t mode, mode_t;                     /* the reverb's mode: running, and as set */
     uint8_t knob[4];
     float bpm;
     float pt[6], pc[6];                       /* the effect's numbers: targets, and gliding */
@@ -86,8 +103,6 @@ struct fxslot {
     /* delay */
     int32_t dw, dquiet;
     float dcur, dlpl, dlpr;
-    /* distortion */
-    float xhp, xlp;
     /* lofi */
     float lph, lhold, lin1, lout1, lwph;
     /* phaser */
@@ -95,6 +110,8 @@ struct fxslot {
     /* reverb */
     int32_t cpos[4], apos[4], rquiet;
     float cdmp[4], cd[4], rph, rhp, rtl[2], rtr[2];   /* rtl / rtr: the tone's low-pass and high-pass a side */
+    /* the SPU reverb */
+    spu_t spu;
 };
 _Static_assert(sizeof(struct fxslot) <= FXSLOT_BYTES, "fxslot_t does not fit FXSLOT_BYTES");
 
@@ -121,7 +138,6 @@ static void fx_states(fxslot_t *f)              /* a fresh effect: its states at
     f->cw = 0; f->cph = 0.0f; f->cs1 = f->cs2 = f->chl = f->chr = f->cfbz = 0.0f;
     f->dw = 0; f->dquiet = FX_DLY_LEN; f->dlpl = f->dlpr = 0.0f;
     f->dcur = f->pt[0];                       /* a new delay starts on time (the slew is for changes) */
-    f->xhp = f->xlp = 0.0f;
     f->lph = f->lhold = f->lin1 = f->lout1 = f->lwph = 0.0f;
     for (i = 0; i < 4; i++) {
         f->pxl[i] = f->pyl[i] = f->pxr[i] = f->pyr[i] = 0.0f;
@@ -134,6 +150,7 @@ static void fx_states(fxslot_t *f)              /* a fresh effect: its states at
     f->rtl[0] = f->rtl[1] = f->rtr[0] = f->rtr[1] = 0.0f;
     for (i = 0; i < 6; i++)
         f->pc[i] = f->pt[i];
+    spu_reset(&f->spu, f->mode);
 }
 
 static void delay_time(fxslot_t *f)
@@ -164,13 +181,6 @@ static void fx_derive(fxslot_t *f)
         f->pt[2] = 0.95f * c;                                         /* repeats: the feedback */
         f->pt[3] = onepole_k(800.0f * fm_exp2f(d * 4.6f));            /* tone: the repeats' low-pass 800 Hz .. 19 kHz */
         break;
-    case FXT_DIST:
-        f->pt[0] = fm_exp2f(a * 6.0f);                                /* drive 1 .. 64 */
-        f->pt[1] = b;                                                 /* edge: tanh .. hard clip */
-        f->pt[2] = onepole_k(20.0f * fm_exp2f(c * 6.64f));            /* low cut 20 Hz .. 2 kHz */
-        f->pt[3] = onepole_k(20000.0f * fm_exp2f(-(1.0f - d) * 5.0f)); /* high cut 625 Hz .. 20 kHz */
-        f->pt[4] = fm_powf(f->pt[0], -0.3f);                          /* the louder drive, trimmed */
-        break;
     case FXT_LOFI: {
         float fs = 500.0f * fm_exp2f(a * 6.46f);                      /* 500 Hz .. 44.1 kHz */
         float bits = 2.0f + 14.0f * b;
@@ -189,6 +199,15 @@ static void fx_derive(fxslot_t *f)
         f->pt[3] = 0.9f * d;                                          /* feedback */
         break;
     case FXT_REVERB:
+        if (f->mode_t != RV_PLATE) {                                  /* an SPU mode: */
+            f->pt[0] = 1.0f + 3.0f * a;                               /* size: the registers x1 .. x4 */
+            f->pt[1] = b;                                             /* decay: the wall feedback (spu_derive) */
+            f->pt[2] = c < 0.5f ? onepole_k(20000.0f * fm_exp2f(-(0.5f - c) * 9.29f)) : 1.0f;   /* tone: the plate's */
+            f->pt[5] = c > 0.5f ? onepole_k(20.0f * fm_exp2f((c - 0.5f) * 13.29f)) : 0.0f;
+            f->pt[3] = d;                                             /* damp: vIIR closes */
+            f->pt[4] = 0.0f;
+            break;
+        }
         f->pt[0] = 0.5f * fm_exp2f(a * 1.926f);                       /* size: the combs x 0.5 .. 1.9 */
         f->pt[1] = 24.0f * b * b;                                     /* motion, samples of wander */
         /* tone: below the centre a low-pass closes to 800 Hz, above it a high-pass opens to 2 kHz */
@@ -221,24 +240,30 @@ void fx_init(fxslot_t *f, int16_t *dly_l, int16_t *dly_r, int16_t *rv)
     for (i = 0; i < 4; i++)
         f->knob[i] = FXT_DEFAULT[FXT_CHORUS][i];
     f->type = f->type_t = FXT_CHORUS;
+    f->mode = f->mode_t = RV_PLATE;
     fx_derive(f);
     fx_states(f);
 }
 
-int fx_has(const fxslot_t *f, int type)
+int fx_has(const fxslot_t *f, int pick)
 {
+    int type = fx_pick_type(pick);
+    if (pick < 0 || pick >= NFXPICK)
+        return 0;
     if (type == FXT_REVERB)
         return f->rv != 0;
     if (type == FXT_DELAY)
         return f->dl != 0 && f->dr != 0;
-    return type >= 0 && type < NFXT;
+    return 1;
 }
 
-void fx_set(fxslot_t *f, int type, const uint8_t knob[4])
+void fx_set(fxslot_t *f, int pick, const uint8_t knob[4])
 {
-    int i;
-    if (type < 0 || type >= NFXT || !fx_has(f, type))
-        type = FXT_CHORUS;
+    int i, type, mode;
+    if (!fx_has(f, pick))
+        pick = FXT_CHORUS;
+    type = fx_pick_type(pick);
+    mode = fx_pick_mode(pick);
     for (i = 0; i < 4; i++)
         f->knob[i] = knob[i] > 127 ? 127 : knob[i];
     if (type != f->type_t) {                  /* the lines the new effect reads are idle now: clear them */
@@ -249,6 +274,9 @@ void fx_set(fxslot_t *f, int type, const uint8_t knob[4])
             zero16(f->rv, FX_RV_LEN);
         }
     }
+    /* another reverb mode while the reverb runs: its line is in use, so the interrupt clears it
+     * (fx_states: spu_reset, a slice a block) when it takes the new mode at its next block */
+    f->mode_t = (uint8_t)mode;
     f->type_t = (uint8_t)type;
     fx_derive(f);
 }
@@ -365,26 +393,6 @@ static void do_delay(fxslot_t *f, const float *x, float *ol, float *orr, int m, 
     f->dlpl = fm_flush(lpl);
     f->dlpr = fm_flush(lpr);
     f->dquiet = quiet;
-}
-
-static void do_dist(fxslot_t *f, const float *x, float *ol, float *orr, int m)
-{
-    const float pre = f->pc[0], clip = f->pc[1], hpk = f->pt[2], lpk = f->pt[3], trim = f->pc[4];
-    float hp = f->xhp, lp = f->xlp;
-    int i;
-    for (i = 0; i < m; i++) {
-        float y, soft, hard;
-        hp += hpk * (x[i] - hp);
-        y = (x[i] - hp) * pre;
-        soft = fm_tanhf(y);                   /* edge 0: the tanh's bend; edge 127: a hard clip */
-        hard = fm_clampf(y, -1.0f, 1.0f);
-        y = soft + clip * (hard - soft);
-        lp += lpk * (y - lp);
-        ol[i] += lp * trim;
-        orr[i] += lp * trim;
-    }
-    f->xhp = fm_flush(hp);
-    f->xlp = fm_flush(lp);
 }
 
 static void do_lofi(fxslot_t *f, const float *x, float *ol, float *orr, int m)
@@ -548,11 +556,60 @@ static void do_reverb(fxslot_t *f, const float *x, float *ol, float *orr, int m,
     f->rquiet = quiet;
 }
 
+/* an SPU mode: the send decimated to 22.05 kHz, a tick of the console's reverb every second sample, its two
+ * sides interpolated back; the plate's tone on the return. Its addresses follow the gliding size a block */
+static void do_spu(fxslot_t *f, const float *x, float *ol, float *orr, int m, int any)
+{
+    spu_t *s = &f->spu;
+    int16_t *w = f->rv;
+    const float tlk = f->pc[2], thk = f->pc[5], g = -SPU_GAIN[f->mode - 1];
+    float tl = s->tl, th = s->th, tr = s->tr, thr = s->thr;
+    int i;
+    if (s->clear > 0) {                       /* a new mode: the work area emptied first, silent meanwhile */
+        int32_t k = s->clear > SPU_CLEAR ? SPU_CLEAR : s->clear;
+        zero16(w + (FX_RV_LEN - s->clear), k);
+        s->clear -= k;
+        return;
+    }
+    if (!any && s->quiet >= FX_RV_LEN * 2)    /* silent in, an empty area: nothing to read */
+        return;
+    spu_derive(s, f->mode, f->pc[0], f->pc[1], f->pc[3]);
+    for (i = 0; i < m; i++) {
+        float yl, yr;
+        s->in[s->ip] = x[i];
+        s->ip = (uint8_t)((s->ip + 1u) & 63u);
+        if (s->phase) {                       /* the second of a pair: a tick */
+            float lo, ro;
+            int wr = spu_tick(s, w, -spu_decimate(s), &lo, &ro);   /* vLIN = 8000h: -1 */
+            s->quiet = (wr == 0 && !any) ? s->quiet + 2 : 0;
+            s->up[0][s->up_w] = lo;
+            s->up[1][s->up_w] = ro;
+            s->up_w = (uint8_t)((s->up_w + 1u) & 31u);
+            spu_interp(s->up[0], s->up_w, &s->out[0][0], &s->out[0][1]);
+            spu_interp(s->up[1], s->up_w, &s->out[1][0], &s->out[1][1]);
+        }
+        yl = s->out[0][s->phase] * g;           /* the output volume: -1 again, and the level */
+        yr = s->out[1][s->phase] * g;
+        s->phase ^= 1u;
+        tl += tlk * (yl - tl);
+        tr += tlk * (yr - tr);
+        th += thk * (tl - th);
+        thr += thk * (tr - thr);
+        ol[i] += tl - th;
+        orr[i] += tr - thr;
+    }
+    s->tl = fm_flush(tl);
+    s->th = fm_flush(th);
+    s->tr = fm_flush(tr);
+    s->thr = fm_flush(thr);
+}
+
 void fx_process(fxslot_t *f, const float *in, float *out_l, float *out_r, uint32_t n)
 {
     uint32_t o;
-    if (f->type_t != f->type) {               /* a new effect: start it at rest */
+    if (f->type_t != f->type || f->mode_t != f->mode) {   /* a new effect or mode: start it at rest */
         f->type = f->type_t;
+        f->mode = f->mode_t;
         fx_states(f);
     }
     for (o = 0; o < n; o += SUB) {
@@ -581,160 +638,26 @@ void fx_process(fxslot_t *f, const float *in, float *out_l, float *out_r, uint32
         switch (f->type) {
         case FXT_CHORUS: do_chorus(f, x, out_l + o, out_r + o, m); break;
         case FXT_DELAY: do_delay(f, x, out_l + o, out_r + o, m, any); break;
-        case FXT_DIST: do_dist(f, x, out_l + o, out_r + o, m); break;
         case FXT_LOFI: do_lofi(f, x, out_l + o, out_r + o, m); break;
         case FXT_PHASER: do_phaser(f, x, out_l + o, out_r + o, m); break;
-        case FXT_REVERB: do_reverb(f, x, out_l + o, out_r + o, m, any); break;
+        case FXT_REVERB:
+            if (f->mode == RV_PLATE)
+                do_reverb(f, x, out_l + o, out_r + o, m, any);
+            else
+                do_spu(f, x, out_l + o, out_r + o, m, any);
+            break;
         default: break;
         }
-    }
-}
-
-/* ================================================================== tape === */
-struct tape {
-    int16_t *buf;
-    uint32_t w;                               /* the write head, quarter-rate samples */
-    uint32_t mark;                            /* the head at the last step boundary */
-    int32_t ph;                               /* 0..3: the next input sample taken is at 0 */
-    float lp1, lp2;                           /* the input's two one-poles (~4.8 kHz) */
-    uint32_t step;                            /* samples a step at 44.1 kHz */
-    int32_t seg, on;                          /* the segment held, looping */
-    float rate, wet, fade, dry;
-    float start, len, pos;                    /* the loop: ring position, length, offset into it */
-    uint8_t pitch, speed, length, mix;
-};
-_Static_assert(sizeof(struct tape) <= TAPE_BYTES, "tape_t does not fit TAPE_BYTES");
-#define TAPE_SCALE 12000.0f                   /* int16 = 1.0 at 12000: 2.7x of headroom */
-#define TAPE_LPK 0.495f                       /* one-pole 4.8 kHz: under the quarter rate's Nyquist */
-
-void tape_init(tape_t *t, int16_t *buf)
-{
-    uint32_t i;
-    uint8_t *z = (uint8_t *)t;
-    for (i = 0; i < sizeof *t; i++)
-        z[i] = 0;
-    t->buf = buf;
-    zero16(buf, TAPE_LEN);
-    t->step = 11025;                          /* a sixteenth at 120 BPM until the sequencer says */
-    t->rate = 1.0f;
-    t->dry = 1.0f;
-    t->pitch = t->speed = 64;
-    t->length = 0;
-    t->mix = 127;
-    t->wet = 1.0f;
-}
-
-void tape_set(tape_t *t, int pitch, int speed, int length, int mix)
-{
-    float oct;
-    t->pitch = (uint8_t)(pitch < 0 ? 0 : pitch > 127 ? 127 : pitch);
-    t->speed = (uint8_t)(speed < 0 ? 0 : speed > 127 ? 127 : speed);
-    t->length = (uint8_t)(length < 0 ? 0 : length > 127 ? 127 : length);
-    t->mix = (uint8_t)(mix < 0 ? 0 : mix > 127 ? 127 : mix);
-    oct = (float)(((int)t->pitch * 5) >> 7) - 2.0f;                   /* five zones: -2 .. +2 octaves, 64 = x1 */
-    t->rate = fm_exp2f(oct + ((float)t->speed - 64.0f) * (1.0f / 64.0f));   /* speed 50 .. 200 %, 64 = 100 % */
-    t->wet = (float)t->mix * (1.0f / 127.0f);
-}
-
-void tape_bar(tape_t *t, uint32_t samples_per_step)
-{
-    if (samples_per_step >= 64)
-        t->step = samples_per_step;
-    t->mark = t->w;                           /* a step boundary: the segments count back from here */
-}
-
-void tape_segment(tape_t *t, int seg, int on)
-{
-    float step_q = (float)t->step * 0.25f, back, len, avail;
-    int segs;
-    if (seg < 0 || seg > 15)
-        return;
-    if (!on) {
-        if (t->on && seg == t->seg)
-            t->on = 0;                        /* fades out, then rests */
-        return;
-    }
-    /* segment s = the s-th sixteenth of the 16 steps before the last boundary */
-    back = (float)(16 - seg) * step_q + (float)TAPE_WRAP((int32_t)(t->w - t->mark));
-    avail = (float)(TAPE_LEN - 8);
-    if (back > avail)
-        back = avail;
-    segs = 1 + (t->length * 15) / 127;        /* length: 1 .. 16 steps */
-    len = (float)segs * step_q;
-    if (len > back - 4.0f)
-        len = back - 4.0f;
-    if (len < 16.0f)
-        len = 16.0f;
-    t->start = (float)t->w - back;
-    if (t->start < 0.0f)
-        t->start += (float)TAPE_LEN;
-    t->len = len;
-    t->pos = 0.0f;
-    t->seg = seg;
-    t->on = 1;
-}
-
-int tape_active(const tape_t *t) { return t->on || t->fade > 0.0f; }
-
-float tape_process(tape_t *t, const float *in, float *out_l, float *out_r, uint32_t n)
-{
-    uint32_t i;
-    float lp1 = t->lp1, lp2 = t->lp2, fade = t->fade;
-    const float dfade = 1.0f / 88.0f;         /* 2 ms in, 2 ms out */
-    int32_t ph = t->ph;
-    uint32_t w = t->w;
-    if (!t->on && fade <= 0.0f) {             /* recording */
-        for (i = 0; i < n; i++) {
-            lp1 += TAPE_LPK * (in[i] - lp1);
-            lp2 += TAPE_LPK * (lp1 - lp2);
-            if (++ph >= TAPE_RATE) {
-                float v = lp2 * TAPE_SCALE;
-                ph = 0;
-                t->buf[w] = (int16_t)(v > 32767.0f ? 32767.0f : v < -32767.0f ? -32767.0f : v);
-                w = TAPE_WRAP((int32_t)w + 1);
-            }
-        }
-        t->lp1 = fm_flush(lp1);
-        t->lp2 = fm_flush(lp2);
-        t->ph = ph;
-        t->w = w;
-        t->dry = 1.0f;
-        return 1.0f;
-    }
-    {   /* looping: the head stands, the loop plays at its rate, faded in and out */
-        const float wet = t->wet, inc = t->rate * 0.25f, start = t->start, len = t->len;
-        float pos = t->pos;
-        const int on = t->on;
-        for (i = 0; i < n; i++) {
-            float rp = start + pos, a, b, y;
-            int32_t i0, i1;
-            fade += on ? dfade : -dfade;
-            fade = fm_clampf(fade, 0.0f, 1.0f);
-            if (rp >= (float)TAPE_LEN)
-                rp -= (float)TAPE_LEN;
-            i0 = (int32_t)rp;
-            i1 = TAPE_WRAP(i0 + 1);
-            a = (float)t->buf[TAPE_WRAP(i0)];
-            b = (float)t->buf[i1];
-            y = (a + (b - a) * (rp - (float)i0)) * (fade * wet / TAPE_SCALE);
-            out_l[i] += y;
-            out_r[i] += y;
-            pos += inc;
-            if (pos >= len)
-                pos -= len;
-        }
-        t->pos = pos;
-        t->fade = fade;
-        t->dry = 1.0f - wet * fade;
-        return t->dry;
     }
 }
 
 /* ================================================================ master === */
 /* the master's knob names, short enough for the knob strip: percussion, melodic, compressor
  * and master level are perc, mel, comp, level */
-const char *const MS_NAME[NMS] = {"low", "mid", "high", "blend", "gain", "clip", "tone", "mix",
+const char *const MS_NAME[NMS] = {"low", "mid", "high", "blend", "drive", "color", "wobble", "noise",
                                   "perc", "mel", "comp", "level"};
+
+#include "tapescam.h"
 
 typedef struct { float b0, b1, b2, a1, a2; } biq_t;
 typedef struct { float x1, x2, y1, y2; } biqs_t;
@@ -746,9 +669,9 @@ struct master {
     /* EQ */
     biq_t eq[3];
     biqs_t eqs[2][3];
-    uint8_t eq_on, sat_on, comp_on;
-    /* saturator */
-    float pre, clip, tlo, thi, sblend, strim, slp[2];
+    uint8_t eq_on, tape_on, comp_on;
+    /* the tape */
+    tscam_t ts;
     /* compressor (X0X's master.c) */
     float thr_db, slope, knee, a_att, a_rel, makeup, gr, ms, a_det, want, g_lin, g_step, gr_view;
     uint8_t cr;
@@ -805,16 +728,10 @@ static void eq_coefs(master_t *m)
                (m->pot[MS_EQ_LO] != 64 || m->pot[MS_EQ_MID] != 64 || m->pot[MS_EQ_HI] != 64);
 }
 
-static void sat_coefs(master_t *m)
+static void tape_coefs(master_t *m)
 {
-    float t = ((float)m->pot[MS_SAT_TONE] - 64.0f) * (1.0f / 64.0f);
-    m->pre = fm_exp2f((float)m->pot[MS_SAT_GAIN] * (4.0f / 127.0f));    /* 1 .. 16 */
-    m->clip = (float)m->pot[MS_SAT_CLIP] * (1.0f / 127.0f);
-    m->tlo = fm_exp2f(-t);                     /* the tilt: +-6 dB, lows against highs around 800 Hz */
-    m->thi = fm_exp2f(t);
-    m->sblend = (float)m->pot[MS_SAT_BLEND] * (1.0f / 127.0f);          /* mix: the saturator into the bus */
-    m->strim = fm_powf(m->pre, -0.4f);
-    m->sat_on = m->pot[MS_SAT_BLEND] != 0;
+    ts_set(&m->ts, (float)m->pot[MS_TP_DRIVE] * (1.0f / 127.0f), (float)m->pot[MS_TP_COLOR] * (1.0f / 127.0f),
+           (float)m->pot[MS_TP_WOBBLE] * (1.0f / 127.0f), (float)m->pot[MS_TP_NOISE] * (1.0f / 127.0f));
 }
 
 /* X0X's one-knob COMP: the threshold falls (-4 .. -32 dB), the ratio climbs (1.5:1 .. 6:1), the
@@ -841,9 +758,9 @@ static void comp_coefs(master_t *m)
     }
 }
 
-void master_init(master_t *m)
+void master_init(master_t *m, float *tape_l, float *tape_r)
 {
-    static const uint8_t DEF[NMS] = {64, 64, 64, 0, 0, 0, 64, 0, 100, 100, 0, 100};
+    static const uint8_t DEF[NMS] = {64, 64, 64, 0, 0, 0, 0, 0, 100, 100, 0, 100};
     uint32_t i;
     uint8_t *z = (uint8_t *)m;
     for (i = 0; i < sizeof *m; i++)
@@ -852,8 +769,9 @@ void master_init(master_t *m)
         m->pot[i] = DEF[i];
     m->gain = 1.0f;
     m->gp = m->gp_c = m->gm = m->gm_c = m->glev = m->lev_c = 1.0f;
+    ts_init(&m->ts, tape_l, tape_r);
     eq_coefs(m);
-    sat_coefs(m);
+    tape_coefs(m);
     comp_coefs(m);
 }
 
@@ -864,8 +782,8 @@ void master_set(master_t *m, int p, int v)
     m->pot[p] = (uint8_t)(v < 0 ? 0 : v > 127 ? 127 : v);
     if (p <= MS_EQ_BLEND)
         eq_coefs(m);
-    else if (p <= MS_SAT_BLEND)
-        sat_coefs(m);
+    else if (p <= MS_TP_NOISE)
+        tape_coefs(m);
     else if (p == MS_PERC)
         m->gp = level_lin(v);
     else if (p == MS_MEL)
@@ -916,12 +834,12 @@ void master_process(master_t *m, float *perc_l, float *perc_r, float *mel_l, flo
 {
     uint32_t i;
     float gp = m->gp_c, gm = m->gm_c, lev = m->lev_c, grmax = 0.0f;
-    const int eq_on = m->eq_on, sat_on = m->sat_on, comp_on = m->comp_on;
+    const int eq_on = m->eq_on, comp_on = m->comp_on;
+    /* the groups, the EQ and the tape into the bus (the tape a block of 32 at a time, in place in mel) */
     for (i = 0; i < n; i++) {
         float s, sr;
         gp = glide1(gp, m->gp);
         gm = glide1(gm, m->gm);
-        lev = glide1(lev, m->glev);
         s = perc_l[i] * gp + mel_l[i] * gm;
         sr = perc_r[i] * gp + mel_r[i] * gm;
         if (eq_on) {
@@ -931,26 +849,23 @@ void master_process(master_t *m, float *perc_l, float *perc_r, float *mel_l, flo
                 sr = biq(&m->eq[b], &m->eqs[1][b], sr);
             }
         }
-        if (sat_on) {
-            const float pre = m->pre, clip = m->clip, tlo = m->tlo, thi = m->thi, bl = m->sblend, trim = m->strim;
-            float y, soft, hard, lo;
-            y = s * pre;
-            soft = fm_tanhf(y);
-            hard = fm_clampf(y, -1.0f, 1.0f);
-            y = soft + clip * (hard - soft);
-            m->slp[0] += 0.108f * (y - m->slp[0]);              /* ~800 Hz: the tilt's split */
-            lo = m->slp[0];
-            y = lo * tlo + (y - lo) * thi;
-            s += bl * (y * trim - s);
-            y = sr * pre;
-            soft = fm_tanhf(y);
-            hard = fm_clampf(y, -1.0f, 1.0f);
-            y = soft + clip * (hard - soft);
-            m->slp[1] += 0.108f * (y - m->slp[1]);
-            lo = m->slp[1];
-            y = lo * tlo + (y - lo) * thi;
-            sr += bl * (y * trim - sr);
+        mel_l[i] = s;
+        mel_r[i] = sr;
+    }
+    if (m->ts.on) {
+        uint32_t o;
+        if (!m->tape_on) {                    /* the tape comes in: from rest */
+            ts_rest(&m->ts);
+            m->tape_on = 1;
         }
+        for (o = 0; o < n; o += TS_SUB)
+            ts_block(&m->ts, mel_l + o, mel_r + o, (int)(n - o < TS_SUB ? n - o : TS_SUB));
+    } else {
+        m->tape_on = 0;
+    }
+    for (i = 0; i < n; i++) {
+        float s = mel_l[i], sr = mel_r[i];
+        lev = glide1(lev, m->glev);
         if (comp_on) {
             float want;
             /* the level: mean square over ~8 ms of both sides, x2 so a sine reads its peak; the static
@@ -1006,7 +921,5 @@ void master_process(master_t *m, float *perc_l, float *perc_r, float *mel_l, flo
     m->gp_c = gp;
     m->gm_c = gm;
     m->lev_c = lev;
-    m->slp[0] = fm_flush(m->slp[0]);
-    m->slp[1] = fm_flush(m->slp[1]);
     m->gr_view = grmax > m->gr_view ? grmax : m->gr_view * 0.93f;
 }
