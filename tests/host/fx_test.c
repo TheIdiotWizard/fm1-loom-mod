@@ -1,14 +1,15 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* The effects (dsp/fx.c) on their own: every send effect takes an impulse and a noise burst without
- * NaN and stays bounded, at mid knobs and at the notebook's defaults; the delay's first echo lands
- * on the beat at 120 BPM (size 1/4 = 0.5 s, dotted 1/8 = 0.375 s) and ping-pongs; the delay's and
- * the reverb's dry knob passes the send or not; the reverb decays; the distortion's clip hardens the
- * edge; the lofi's drift spreads the sides; the tape loops the segment that was asked for, its dry
+ * NaN and stays bounded, at its defaults and at mid knobs; the delay's first echo lands on the beat
+ * at 120 BPM (time 1/4 = 0.5 s, dotted 1/8 = 0.375 s) and ping-pongs; the delay and the reverb return
+ * only the wet (plain send / return); the delay's tone brightens its repeats, the reverb's damp darkens
+ * its tail; the reverb decays; the distortion's edge hardens the clip; the lofi's width spreads the
+ * sides; the tape loops the segment that was asked for, its dry
  * gain follows mix, pitch +1 octave and speed 200 % double its rate; the master is bit-transparent at
  * EQ blend 0 (apart from the limiter's 64-sample lookahead), its limiter never passes 1.0, its
  * compressor pulls loud input down, its EQ moves the bands; and the cost of each in instructions a
- * sample (macOS: proc_pid_rusage). Each effect's burst is written to build/host/fx_<name>.wav for
- * inspection (nothing here plays audio).
+ * sample (macOS: proc_pid_rusage). Each effect's burst at its defaults is written to
+ * build/host/fx_<name>.wav for inspection (nothing here plays audio).
  *   tests/host/fx_test.sh */
 #include <stdio.h>
 #include <string.h>
@@ -87,7 +88,7 @@ static void wav_close(FILE *f)
 
 /* run an effect on an impulse then 0.2 s of noise at 0.5, 3 s in all: peak, NaN, the RMS of the
  * second after the noise and of the last second, where the left's and right's peaks fall */
-typedef struct { float peak, rms_after, rms_end; int nan; int peak_l_at, peak_r_at; } run_t;
+typedef struct { float peak, rms, rms_after, rms_end; int nan; int peak_l_at, peak_r_at; } run_t;
 static void run_fx(int type, const uint8_t knob[4], run_t *r, const char *wav)
 {
     static float in[BLK], ol[BLK], orr[BLK];
@@ -115,6 +116,7 @@ static void run_fx(int type, const uint8_t knob[4], run_t *r, const char *wav)
             float al = fm_fabsf(ol[i]), ar = fm_fabsf(orr[i]);
             if (ol[i] != ol[i] || orr[i] != orr[i])
                 r->nan = 1;
+            r->rms += 0.5f * (ol[i] * ol[i] + orr[i] * orr[i]);
             if (al > r->peak) r->peak = al;
             if (ar > r->peak) r->peak = ar;
             if (t >= 1000 && t < 2205) {              /* before the noise: only the impulse's echoes */
@@ -128,11 +130,46 @@ static void run_fx(int type, const uint8_t knob[4], run_t *r, const char *wav)
         }
     }
     wav_close(w);
+    r->rms = fm_sqrtf(r->rms / (float)(nb * BLK));
     r->rms_after = fm_sqrtf(r->rms_after / (float)SR);
     r->rms_end = fm_sqrtf(r->rms_end / (float)SR);
 }
 
 static float db(float x) { return 20.0f * 0.30103f * fm_log2f(x + 1e-12f); }
+
+/* an impulse into the slot, then n samples of L and R */
+static void impulse(int type, const uint8_t knob[4], float *l, float *r, int n)
+{
+    static float in[BLK], ol[BLK], orr[BLK];
+    int b, i;
+    fx_init(fx, dly_l, dly_r, rv);
+    fx_tempo(fx, 120.0f);
+    fx_set(fx, type, knob);
+    for (b = 0; b < n / BLK; b++) {
+        memset(in, 0, sizeof in);
+        if (b == 0)
+            in[0] = 1.0f;
+        memset(ol, 0, sizeof ol);
+        memset(orr, 0, sizeof orr);
+        fx_process(fx, in, ol, orr, BLK);
+        for (i = 0; i < BLK; i++) {
+            l[b * BLK + i] = ol[i];
+            r[b * BLK + i] = orr[i];
+        }
+    }
+}
+/* brightness: the first difference's energy over the energy, in a window */
+static float bright(const float *y, int from, int to)
+{
+    float e = 0.0f, d = 0.0f;
+    int i;
+    for (i = from; i < to; i++) {
+        e += y[i] * y[i];
+        d += (y[i] - y[i - 1]) * (y[i] - y[i - 1]);
+    }
+    return d / (e + 1e-20f);
+}
+static float imp_l[3 * SR], imp_r[3 * SR];
 
 int main(void)
 {
@@ -141,31 +178,45 @@ int main(void)
     char name[96];
     run_t r;
 
-    printf("-- every effect on an impulse and a noise burst (peak dBFS, the second after, the last second)\n");
+    printf("-- every effect at its defaults on an impulse and a noise burst (peak, RMS of the 3 s, the second\n"
+           "   after the burst, the last second; dBFS), written to build/host/fx_<name>.wav\n");
     for (t = 0; t < NFXT; t++) {
-        static const uint8_t mid[4] = {64, 64, 64, 64};
         snprintf(name, sizeof name, "build/host/fx_%s.wav", FXT_NAME[t]);
-        run_fx(t, mid, &r, name);
-        snprintf(name, sizeof name, "  %-10s %6.1f dBFS  %6.1f  %6.1f", FXT_NAME[t], (double)db(r.peak),
-                 (double)db(r.rms_after), (double)db(r.rms_end));
+        run_fx(t, FXT_DEFAULT[t], &r, name);
+        snprintf(name, sizeof name, "  %-10s %6.1f  %6.1f  %6.1f  %6.1f", FXT_NAME[t], (double)db(r.peak),
+                 (double)db(r.rms), (double)db(r.rms_after), (double)db(r.rms_end));
         check(name, !r.nan && r.peak > 0.001f && r.peak < 4.0f);
     }
-    {   /* the notebook's defaults, as printed (00..99, stored * 1.28), and every effect runs on them */
-        static const uint8_t printed[NFXT][4] = {{59, 50, 50, 50}, {65, 50, 50, 99}, {6, 99, 50, 99},
-                                                 {50, 73, 61, 99}, {30, 61, 30, 50}, {69, 0, 29, 99}};
+    printf("-- and at mid knobs (64)\n");
+    for (t = 0; t < NFXT; t++) {
+        static const uint8_t mid[4] = {64, 64, 64, 64};
+        run_fx(t, mid, &r, 0);
+        snprintf(name, sizeof name, "  %-10s %6.1f  %6.1f  %6.1f  %6.1f", FXT_NAME[t], (double)db(r.peak),
+                 (double)db(r.rms), (double)db(r.rms_after), (double)db(r.rms_end));
+        check(name, !r.nan && r.peak > 0.001f && r.peak < 4.0f);
+    }
+    {   /* the defaults and the knobs' names */
+        static const uint8_t want[NFXT][4] = {{50, 86, 20, 127}, {72, 64, 56, 64}, {40, 32, 40, 100},
+                                              {80, 80, 64, 40},  {50, 90, 50, 80}, {100, 40, 44, 72}};
+        static const char *const names[NFXT][4] = {
+            {"rate", "depth", "feedback", "width"},  {"time", "fine", "repeats", "tone"},
+            {"drive", "edge", "low cut", "high cut"}, {"rate", "bits", "smooth", "width"},
+            {"freq", "depth", "rate", "feedback"},    {"size", "motion", "tone", "damp"}};
         int ok = 1, k;
-        for (t = 0; t < NFXT; t++) {
+        for (t = 0; t < NFXT; t++)
             for (k = 0; k < 4; k++)
-                ok &= FXT_DEFAULT[t][k] == (uint8_t)((float)printed[t][k] * 1.28f + 0.5f);
-            run_fx(t, FXT_DEFAULT[t], &r, 0);
-            ok &= !r.nan && r.peak > 0.001f && r.peak < 4.0f;
-        }
-        check("FXT_DEFAULT: the printed values; every effect runs on its defaults", ok);
-        check("delay: size fine feedback dry; distortion: drive clip lo cut hi cut; reverb: size mod tone dry",
-              !strcmp(FXT_KNOB[FXT_DELAY][1], "fine") && !strcmp(FXT_KNOB[FXT_DELAY][2], "feedback") &&
-              !strcmp(FXT_KNOB[FXT_DIST][1], "clip") && !strcmp(FXT_KNOB[FXT_REVERB][2], "tone") &&
-              !strcmp(FXT_KNOB[FXT_REVERB][3], "dry") && !strcmp(FXT_KNOB[FXT_LOFI][3], "drift") &&
-              !strcmp(MS_NAME[MS_SAT_BLEND], "mix"));
+                ok &= FXT_DEFAULT[t][k] == want[t][k];
+        check("FXT_DEFAULT: chorus 50 86 20 127, delay 72 64 56 64, ... reverb 100 40 44 72", ok);
+        ok = !strcmp(MS_NAME[MS_SAT_BLEND], "mix");
+        for (t = 0; t < NFXT; t++)
+            for (k = 0; k < 4; k++)
+                ok &= !strcmp(FXT_KNOB[t][k], names[t][k]);
+        check("knobs: delay time fine repeats tone; reverb size motion tone damp; ...", ok);
+        ok = 1;
+        for (t = 0; t < NFXT; t++)                       /* the strip fits a name in 46 pixels: 8 letters */
+            for (k = 0; k < 4; k++)
+                ok &= strlen(FXT_KNOB[t][k]) <= 8;
+        check("knob names at most 8 letters", ok);
     }
     check("fx_has: every effect with its lines", fx_has(fx, FXT_REVERB) && fx_has(fx, FXT_DELAY) && fx_has(fx, FXT_LOFI));
     fx_init(fx, dly_l, dly_r, 0);
@@ -183,11 +234,11 @@ int main(void)
         check("knobs at their ends: finite, under +18 dBFS", ok);
     }
 
-    printf("-- delay at 120 BPM: size 1/4 = 0.5 s, dotted 1/8 = 0.375 s\n");
+    printf("-- delay at 120 BPM: time 1/4 = 0.5 s, dotted 1/8 = 0.375 s\n");
     {
-        /* size 100: (100 * 8) >> 7 = 6, 1/4; size 85: 5, 1/8D; fine 64 (none); feedback 0.47; no dry.
+        /* time 100: (100 * 8) >> 7 = 6, 1/4; time 85: 5, 1/8D; fine 64 (none); repeats 0.47; tone open.
          * The impulse's echoes are looked for in a run longer than run_fx's window */
-        static const uint8_t kn[2][4] = {{100, 64, 64, 0}, {85, 64, 64, 0}};
+        static const uint8_t kn[2][4] = {{100, 64, 64, 127}, {85, 64, 64, 127}};
         static const int at[2] = {22050, 16538};
         int s;
         for (s = 0; s < 2; s++) {
@@ -214,38 +265,38 @@ int main(void)
             check(name, at_l >= at[s] - 2 && at_l <= at[s] + 3 && at_r >= 2 * at[s] - 2 && at_r <= 2 * at[s] + 4 &&
                         pl > 0.3f && pr > 0.1f);
         }
-        {   /* the dry knob passes the send */
-            static const uint8_t kd[4] = {100, 64, 0, 127};
-            fx_init(fx, dly_l, dly_r, rv);
-            fx_set(fx, FXT_DELAY, kd);
-            memset(in, 0, sizeof in);
-            in[10] = 1.0f;
-            memset(ol, 0, sizeof ol);
-            memset(orr, 0, sizeof orr);
-            for (b = 0; b < 8; b++)                              /* the glide settles */
-                fx_process(fx, in, ol, orr, BLK);
-            memset(ol, 0, sizeof ol);
-            fx_process(fx, in, ol, orr, BLK);
-            check("delay dry 127 passes the send (-3 dB)", ol[10] > 0.6f && ol[10] < 0.8f);
+        {   /* the delay returns only its echoes: the send itself is not passed through */
+            static const uint8_t kd[4] = {100, 64, 127, 127};
+            impulse(FXT_DELAY, kd, imp_l, imp_r, 2048);
+            check("delay: no dry in the return", imp_l[0] == 0.0f && imp_r[0] == 0.0f);
+        }
+        {   /* tone: the right's first echo (once through the repeats' low-pass) is brighter at 110 than at 20 */
+            static const uint8_t kt[2][4] = {{72, 64, 100, 20}, {72, 64, 100, 110}};
+            float br[2];
+            int s2;
+            for (s2 = 0; s2 < 2; s2++) {                     /* 1/8 at 120 BPM: 11025 samples; right at 22050 */
+                impulse(FXT_DELAY, kt[s2], imp_l, imp_r, 24064);
+                br[s2] = bright(imp_r, 22050 - 16, 22050 + 2000);
+            }
+            snprintf(name, sizeof name, "  tone 20 -> 110: the repeats brighter (%.4f -> %.4f)", (double)br[0], (double)br[1]);
+            check(name, br[1] > br[0] * 4.0f);
         }
     }
 
-    printf("-- reverb decays, and is silent when left alone; its dry knob\n");
+    printf("-- reverb decays, and is silent when left alone; no dry; its damp\n");
     {
-        static const uint8_t kn[4] = {64, 40, 40, 127};
+        static const uint8_t kn[4] = {64, 40, 40, 72};
         int d;
-        for (d = 0; d < 2; d++) {                                /* dry 0 removes the dry, dry 127 passes it */
+        float br[2];
+        for (d = 0; d < 2; d++) {                                /* damp 0 and 127: the send never passes */
             uint8_t kd[4] = {64, 40, 64, (uint8_t)(d ? 127 : 0)};
-            fx_init(fx, dly_l, dly_r, rv);
-            fx_set(fx, FXT_REVERB, kd);
-            memset(in, 0, sizeof in);
-            in[10] = 1.0f;
-            memset(ol, 0, sizeof ol);
-            memset(orr, 0, sizeof orr);
-            fx_process(fx, in, ol, orr, BLK);                    /* the combs answer ~1100 samples later */
-            snprintf(name, sizeof name, "  reverb dry %d: the send at %.2f", d ? 127 : 0, (double)ol[10]);
-            check(name, d ? (ol[10] > 0.6f && ol[10] < 0.8f) : ol[10] == 0.0f);
+            impulse(FXT_REVERB, kd, imp_l, imp_r, SR);           /* the combs answer ~550 samples later */
+            check(d ? "  reverb damp 127: no dry in the return" : "  reverb damp 0: no dry in the return",
+                  imp_l[0] == 0.0f && imp_r[0] == 0.0f);
+            br[d] = bright(imp_l, 4410, SR);                     /* the tail from 0.1 s */
         }
+        snprintf(name, sizeof name, "  damp 0 -> 127: the tail darker (%.4f -> %.4f)", (double)br[0], (double)br[1]);
+        check(name, br[1] < br[0] * 0.5f);
         run_fx(FXT_REVERB, kn, &r, 0);
         snprintf(name, sizeof name, "  after the burst %.1f dB, two seconds on %.1f dB", (double)db(r.rms_after),
                  (double)db(r.rms_end));
@@ -339,7 +390,7 @@ int main(void)
         }
     }
 
-    printf("-- distortion: clip hardens the edge; lofi: drift spreads the sides\n");
+    printf("-- distortion: edge hardens the clip; lofi: width spreads the sides\n");
     {
         float e[2] = {0.0f, 0.0f}, pk[2] = {0.0f, 0.0f};
         int c;
@@ -360,10 +411,10 @@ int main(void)
                     }
             }
         }
-        snprintf(name, sizeof name, "  clip 127 over clip 0: %.1f dB more RMS, the same peak (%.2f, %.2f)",
+        snprintf(name, sizeof name, "  edge 127 over edge 0: %.1f dB more RMS, the same peak (%.2f, %.2f)",
                  (double)(10.0f * 0.30103f * fm_log2f(e[1] / e[0])), (double)pk[0], (double)pk[1]);
         check(name, e[1] > e[0] * 1.1f && pk[1] > pk[0] * 1.1f && pk[1] < 1.0f);
-        for (c = 0; c < 2; c++) {                                /* drift 0: L = R exactly; drift 127: they differ */
+        for (c = 0; c < 2; c++) {                                /* width 0: L = R exactly; width 127: they differ */
             uint8_t kn[4] = {64, 93, 78, (uint8_t)(c ? 127 : 0)};
             float diff = 0.0f, e2 = 0.0f;
             int same = 1;
@@ -381,7 +432,7 @@ int main(void)
                     e2 += ol[i] * ol[i];
                 }
             }
-            snprintf(name, sizeof name, "  lofi drift %d: the sides %s (L-R at %.1f dB of L)", c ? 127 : 0,
+            snprintf(name, sizeof name, "  lofi width %d: the sides %s (L-R at %.1f dB of L)", c ? 127 : 0,
                      c ? "differ" : "are the same", (double)(10.0f * 0.30103f * fm_log2f(diff / e2 + 1e-12f)));
             check(name, c ? (!same && diff > e2 * 0.5f) : same);
         }

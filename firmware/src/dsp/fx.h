@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* LOOM-8 effects: the two send-effect tracks (fx I, fx II: one of chorus, delay, distortion, lofi,
- * phaser, reverb each, four knobs as the OP-XY names them), the tape loop and the master section
+ * phaser, reverb each, four knobs of its own), the tape loop and the master section
  * (3-band EQ with blend, saturator, compressor, limiter, group levels).
  *
  * All run in the audio interrupt. Buffers for the delay, the reverb and the tape live in the pool;
@@ -11,14 +11,16 @@
 enum { FXT_CHORUS, FXT_DELAY, FXT_DIST, FXT_LOFI, FXT_PHASER, FXT_REVERB, NFXT };
 extern const char *const FXT_NAME[NFXT];
 extern const char *const FXT_KNOB[NFXT][4];
-/* the knobs and the printed defaults (the notebook pp. 162-167, values 00..99, stored * 1.28):
- *   chorus      rate depth feedback stereo   59 50 50 50
- *   delay       size fine feedback dry       65 50 50 99   size: 1/32 1/32D 1/16 1/16D 1/8 1/8D 1/4 1/2 (of the tempo)
- *   distortion  drive clip lo cut hi cut     06 99 50 99
- *   lofi        rate bits quality drift      50 73 61 99   drift = the stereo spread of the audio
- *   phaser      frequency depth rate feedback 30 61 30 50
- *   reverb      size mod tone dry            69 00 29 99   tone: filtering low or high; dry: the dry feed (the wet is always there)
- * "dry" (delay, reverb) controls how much of the send passes through dry: the effect sound is always present. */
+/* the knobs and their defaults (stored 0..127), and what the defaults sound like:
+ *   chorus      rate depth feedback width        50 86 20 127   0.33 Hz, +-5.5 ms, light feedback, the sides opposite
+ *   delay       time fine repeats tone           72 64 56 64    1/8 ping-pong, ~4 repeats, repeats low-passed at 4 kHz
+ *   distortion  drive edge low cut high cut      40 32 40 100   3.7x, mostly tanh, 85 Hz .. 9.6 kHz
+ *   lofi        rate bits smooth width           80 80 64 40    8.4 kHz, 11 bits, half smoothed, the right 3.4 ms late
+ *   phaser      freq depth rate feedback         50 90 50 80    466 Hz, +-2.1 octaves, 0.27 Hz, feedback 0.57
+ *   reverb      size motion tone damp            100 40 44 72   combs x1.43 (feedback 0.88), a little wander, 7.4 kHz, damp 0.45
+ * delay time: 1/32 1/32D 1/16 1/16D 1/8 1/8D 1/4 1/2 of the tempo, fine +-25 %; delay tone: the repeats' low-pass,
+ * 800 Hz .. 19 kHz; reverb tone: a low-pass below the centre, a high-pass above it; reverb damp: the combs' damping.
+ * The FX tracks are plain send / return: an effect's output is the wet sound only. */
 extern const uint8_t FXT_DEFAULT[NFXT][4];
 
 #define FX_DLY_LEN 22400              /* int16 samples a side: 0.5 s plus the line's 256-sample margin (the pool's budget) */
