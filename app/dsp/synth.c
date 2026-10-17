@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* LOOM-8 voices: sixteen voices playing ten engines (synth.h), each with two ADSRs, a filter (six
+/* LOOM-8 voices: sixteen voices playing eleven engines (synth.h), each with two ADSRs, a filter (six
  * types), a character stage (six types: drive, fold, crush, ring, tilt, rectify), a steal fade and sends; per track an LFO, a mono stack, parameter locks and
  * performance offsets.
  *
@@ -16,7 +16,11 @@
  * Levels: an engine's raw cycle peaks near 1; the amp envelope, velocity (0.25 + 0.75 vel^2), the
  * preset volume ((v/127)^2) and the mix level (v/127) bring a default note to about -9 dBFS, so a
  * chord of six leaves the master's limiter something to do but not much. Float, no libm (fastmath.h),
- * no malloc, no stack buffer over 128 bytes in the render path (the audio interrupt's stack). */
+ * no malloc, no stack buffer over 128 bytes in the render path (the audio interrupt's stack).
+ *
+ * brocade's saw bank is NuSaw's (the NuSaw plugin, Copyright (c) Charles Vestal, MIT; through its FM-1 port,
+ * fm1-nusaw): the detune offsets and curve, the mix and its power normalisation, the pans, the keytracked
+ * high-pass. */
 #include "synth.h"
 #include "fastmath.h"
 #include "drumline.h"
@@ -40,16 +44,17 @@
 
 /* ------------------------------------------------------------------ names --- */
 const char *const EG_NAME[NENGINE] = {"weft", "stack", "wavetable", "orbit", "tines", "organ", "sync",
-                                      "swarm", "kit", "sample", "slice"};
+                                      "swarm", "kit", "sample", "slice", "brocade"};
 const char *const EG_KNOB[NENGINE][4] = {
     {"bend", "wave", "sweep", "spread"},   {"wave", "ratio", "detune", "spread"}, {"table", "scan", "bend", "ripple"},
     {"bright", "ratio", "edge", "wobble"}, {"bright", "grit", "bite", "bell"},    {"stops", "pedal", "rotor", "rate"},
     {"reach", "sub", "hiss", "thin"},      {"swarm", "ring", "tone", "spread"},   {"-", "-", "-", "-"},
-    {"sample", "start", "length", "mode"},  {"sample", "slices", "pitch", "gate"}};
-/* each engine's plain sound (INIT), 0..127; the organ's four and stack's ratio are discrete 1..8 */
+    {"sample", "start", "length", "mode"},  {"sample", "slices", "pitch", "gate"}, {"saws", "detune", "mix", "spread"}};
+/* each engine's plain sound (INIT), 0..127; the organ's four and stack's ratio are discrete 1..8, brocade's saws 1..9 */
 static const uint8_t EG_DEF[NENGINE][4] = {{40, 0, 20, 0}, {0, 2, 12, 64}, {0, 40, 0, 0}, {40, 25, 0, 0},
                                            {50, 0, 40, 50}, {3, 4, 2, 5},  {30, 0, 0, 0}, {30, 0, 30, 20},
-                                           {0, 0, 0, 0},    {5, 0, 127, SM_ONESHOT}, {SMP_BREAK, 1, 64, 127}};
+                                           {0, 0, 0, 0},    {5, 0, 127, SM_ONESHOT}, {SMP_BREAK, 1, 64, 127},
+                                           {7, 50, 90, 70}};
 static const char *const VMODE_N[3] = {"poly", "mono", "legato"};
 static const char *const FTYPE_N[NFT] = {"lp24", "ladder", "lp12", "hp12", "dynamic", "bp12"};
 static const char *const LTYPE_N[NLT] = {"off", "wave", "wobble", "drift", "pump"};
@@ -169,6 +174,7 @@ struct synth {
     uint32_t counter;                 /* voice ages */
     uint16_t pos;                     /* chunk phase at the next prepare */
     uint8_t nck, max_voices;
+    uint8_t saw_cap;                  /* brocade's saws at most (the guard's thinning: synth_saws) */
     trk_t t[NTRK];
     voice_t v[NVOICE];
 };
@@ -283,6 +289,7 @@ static inline float pf(const synth_t *s, int trk, int p, int dest, float off)
 /* each: eng_prep() turns c.e[] / c.ek[] and c.freq into c.ex[] once a chunk (or after a steal);
  * eng_run() writes m <= SUB raw samples to xl (and xr when c.stereo); the amplitude of a cycle is
  * about 1; eng_chunk() moves the engine's own slow parts every chunk */
+static void br_init(voice_t *v);
 static void eng_init(voice_t *v)
 {
     int i;
@@ -294,6 +301,8 @@ static void eng_init(voice_t *v)
             v->o[i * 2] = 1.0f;                  /* the rotating phasors start at 1 + 0i */
     if (v->engine == EG_WEFT)
         v->o[1] = 0.25f;                         /* the spread copy starts a quarter cycle on */
+    if (v->engine == EG_BROCADE)
+        br_init(v);
     v->o[15] = 1.0f;                             /* tines: its brightness envelopes start full */
     v->o[14] = 1.0f;
     if (v->engine == EG_ORGAN)
@@ -795,6 +804,181 @@ static void dis_run(voice_t *v, float *xl, float *xr, int m)
     v->o[3] = n1;
 }
 
+/* brocade: the supersaw, after NuSaw (the NuSaw plugin, MIT, and its FM-1 port fm1-nusaw): up to nine
+ * PolyBLEP saws a voice, free-running from random phases. saws (1..9): a centre saw and pairs either side,
+ * detuned by NuSaw's offsets (the JP-8000's own table at six or seven, k(k+1) / M(M+1) of the widest pair
+ * otherwise; an even count leaves its outer pair's lower saw out); detune: NuSaw's curve, the widest pair up
+ * to +-11 % of the note (about two semitones); mix: the side saws against the centre one (NuSaw's mix^1.5 x
+ * 0.667, the sum kept at one saw's power); spread: the pairs across the field, the outer ones furthest. Then
+ * NuSaw's keytracked high-pass (12 dB at a third of the note, the JP-8000's), which keeps the beating out of
+ * the bass. The filter, the envelopes and the LFO are the voice's own, not NuSaw's.
+ * Under load (synth_saws, the engine's guard) the outer saws fade out one at a time, 12 ms each, the rest made
+ * up to the same power; the detune offsets stay where the knob set them.
+ * o[0..8] the phases, o[9] the saws sounding (fractional while one fades; -1: the note's first sub-block),
+ * o[10..13] the high-pass (low and band, L then R). ex[0] the increment, ex[1] the detune's, ex[2] the knob's
+ * count, ex[3] the offsets' row, ex[4] the side gain, ex[5..12] the pairs' L and R gains (x sqrt 2: the centre
+ * at 1), ex[13] the high-pass's coefficient, ex[14] the count to sound (the knob's under the guard's cap). */
+#define BR_MAX 9
+#define BR_FADE (1.0f / (0.012f * SY_SR))        /* a saw in or out over 12 ms */
+static const float BR_COEF[5][BR_MAX] = {        /* the saws' detune offsets, by pairs (count / 2) */
+    {0.0f},
+    {0.0f, 1.0f, -1.0f},
+    {0.0f, 1.0f / 3.0f, -1.0f / 3.0f, 1.0f, -1.0f},
+    {0.0f, 128.0f / 720.0f, -128.0f / 720.0f, 408.0f / 720.0f, -412.0f / 720.0f, 704.0f / 720.0f, -1.0f},
+    {0.0f, 0.1f, -0.1f, 0.3f, -0.3f, 0.6f, -0.6f, 1.0f, -1.0f}};
+static inline int knob9(float raw) { int k = (int)(raw + 0.5f); return k < 1 ? 1 : k > BR_MAX ? BR_MAX : k; }
+static inline float br_detune(float x)           /* NuSaw's detune curve: fine at first, wide at the end */
+{
+    if (x < 0.1f)
+        return x * 0.2f;
+    if (x < 0.5f)
+        return 0.02f + (x - 0.1f) * 0.575f;
+    return 0.25f + (x - 0.5f) * 1.5f;
+}
+static void br_prep(voice_t *v)
+{
+    cfg_t *c = &v->c;
+    int n = knob9(c->ek[0]), M = n / 2, k;
+    float f = c->freq * INV_SR, mx = c->e[2], w = c->e[3];
+    c->ex[0] = fm_minf(f, 0.45f);
+    c->ex[1] = f * 0.1102f * br_detune(c->e[1]);
+    c->ex[2] = (float)n;
+    c->ex[3] = (float)M;
+    c->ex[4] = fm_maxf(mx * fm_sqrtf(mx) * 0.667f, 0.015f);
+    for (k = 1; k <= 4; k++) {                   /* pair k: its upper saw towards the right, its lower the left */
+        float a = (1.0f + (M ? (float)(k < M ? k : M) / (float)M * w : 0.0f)) * 0.78539816f;
+        c->ex[3 + 2 * k] = fm_cosf(a) * 1.41421356f;
+        c->ex[4 + 2 * k] = fm_sinf(a) * 1.41421356f;
+    }
+    c->ex[13] = fm_minf(2.07345f * f, 0.9f);    /* 2 sin(pi fc / sr), fc = f / 3 */
+    c->stereo = w > 0.001f && n > 1;
+}
+SY_INLINE void br_saw(float *ph, float dt, float gl, float gr, float *xl, float *xr, int m, const int stereo)
+{
+    float p = *ph, idt = 1.0f / dt;
+    int i;
+    for (i = 0; i < m; i++) {
+        float x;
+        p += dt;
+        if (p >= 1.0f)
+            p -= 1.0f;
+        x = 2.0f * p - 1.0f;
+        if (p < dt) {
+            float t = p * idt;
+            x -= t + t - t * t - 1.0f;
+        } else if (p > 1.0f - dt) {
+            float t = (p - 1.0f) * idt;
+            x -= t * t + t + t + 1.0f;
+        }
+        xl[i] += x * gl;
+        if (stereo)
+            xr[i] += x * gr;
+    }
+    *ph = p;
+}
+SY_INLINE float br_one(float *p, float dt, float idt)   /* a PolyBLEP saw's next sample */
+{
+    float q = *p + dt, x;
+    if (q >= 1.0f)
+        q -= 1.0f;
+    *p = q;
+    x = 2.0f * q - 1.0f;
+    if (q < dt) {
+        float t = q * idt;
+        x -= t + t - t * t - 1.0f;
+    } else if (q > 1.0f - dt) {
+        float t = (q - 1.0f) * idt;
+        x -= t * t + t + t + 1.0f;
+    }
+    return x;
+}
+/* a pair of saws in one pass over the buffers (half the loads and stores of one at a time) */
+SY_INLINE void br_saw2(float *pa, float *pb, float da, float db, const float *g, float *xl, float *xr, int m,
+                       const int stereo)
+{
+    float a = *pa, b = *pb, ia = 1.0f / da, ib = 1.0f / db, gla = g[0], gra = g[1], glb = g[2], grb = g[3];
+    int i;
+    for (i = 0; i < m; i++) {
+        float x = br_one(&a, da, ia), y = br_one(&b, db, ib);
+        xl[i] += x * gla + y * glb;
+        if (stereo)
+            xr[i] += x * gra + y * grb;
+    }
+    *pa = a;
+    *pb = b;
+}
+SY_INLINE void br_hp(float *x, float *lo, float *bp, float f, int m)
+{
+    float l = *lo, b = *bp;
+    int i;
+    for (i = 0; i < m; i++) {
+        float h = x[i] - l - 1.4f * b;
+        b += f * h;
+        l += f * b;
+        x[i] = h;
+    }
+    *lo = fm_flush(l);
+    *bp = fm_flush(b);
+}
+SY_INLINE void br_loop(voice_t *v, float *xl, float *xr, int m, const int stereo)
+{
+    const cfg_t *c = &v->c;
+    const float *co = BR_COEF[(int)c->ex[3] > 4 ? 4 : (int)c->ex[3]];
+    float nf = v->o[9], tg = c->ex[14], st = (float)m * BR_FADE, gs = c->ex[4], norm;
+    int i, j, na;
+    if (nf < 0.0f)
+        nf = tg;
+    else if (nf < tg)
+        nf = fm_minf(nf + st, tg);
+    else if (nf > tg)
+        nf = fm_maxf(nf - st, tg);
+    v->o[9] = nf;
+    na = (int)nf;
+    if ((float)na < nf)
+        na++;
+    norm = fm_rsqrtf(1.0f + (nf - 1.0f) * gs * gs);
+    for (i = 0; i < m; i++) {
+        xl[i] = 0.0f;
+        if (stereo)
+            xr[i] = 0.0f;
+    }
+    for (j = 0; j < na; j++) {                   /* the centre saw alone, then the pairs */
+        float g[4], dt[2];
+        int k, two = j > 0 && j + 1 < na;
+        for (k = 0; k <= two; k++) {
+            int s_ = j + k;
+            float gg = (s_ ? gs : 1.0f) * norm * fm_minf(nf - (float)s_, 1.0f);
+            float a = s_ ? c->ex[3 + 2 * ((s_ + 1) >> 1)] : 1.0f, b = s_ ? c->ex[4 + 2 * ((s_ + 1) >> 1)] : 1.0f;
+            dt[k] = fm_clampf(c->ex[0] + co[s_] * c->ex[1], 1e-6f, 0.45f);
+            g[2 * k] = stereo ? gg * (s_ & 1 ? a : b) : gg;   /* the upper saw (odd) right, the lower left */
+            g[2 * k + 1] = gg * (s_ & 1 ? b : a);
+        }
+        if (two) {
+            br_saw2(&v->o[j], &v->o[j + 1], dt[0], dt[1], g, xl, xr, m, stereo);
+            j++;
+        } else {
+            br_saw(&v->o[j], dt[0], g[0], g[1], xl, xr, m, stereo);
+        }
+    }
+    br_hp(xl, &v->o[10], &v->o[11], c->ex[13], m);
+    if (stereo)
+        br_hp(xr, &v->o[12], &v->o[13], c->ex[13], m);
+}
+static void br_run(voice_t *v, float *xl, float *xr, int m)
+{
+    if (v->c.stereo)
+        br_loop(v, xl, xr, m, 1);
+    else
+        br_loop(v, xl, xr, m, 0);
+}
+static void br_init(voice_t *v)                  /* the saws from random phases, the count from the knob */
+{
+    int j;
+    for (j = 0; j < BR_MAX; j++)
+        v->o[j] = (float)(xs(&v->rng) >> 8) * (1.0f / 16777216.0f);
+    v->o[9] = -1.0f;
+}
+
 /* sample: a sample of the bank (dsp/sample.h) at the note's pitch; its root note plays it at its own rate
  * (22.05 kHz: half a sample a frame), linearly interpolated. start: where in it (0..99 %); length: how much
  * of the rest (127 = to its end): the region. Modes: one-shot (the region once; then the voice ends), loop
@@ -1061,6 +1245,7 @@ static void eng_prep(voice_t *v, float bpm)
     case EG_SYNC: hs_prep(v); break;
     case EG_SAMPLE: smp_prep(v); break;
     case EG_SLICE: slc_prep(v, bpm); break;
+    case EG_BROCADE: br_prep(v); break;
     default: dis_prep(v); break;
     }
 }
@@ -1076,6 +1261,7 @@ static void eng_run(voice_t *v, float *xl, float *xr, int m)
     case EG_SYNC: hs_run(v, xl, xr, m); break;
     case EG_SAMPLE: smp_run(v, xl, xr, m); break;
     case EG_SLICE: slc_run(v, xl, xr, m); break;
+    case EG_BROCADE: br_run(v, xl, xr, m); break;
     default: dis_run(v, xl, xr, m); break;
     }
 }
@@ -1130,13 +1316,69 @@ static int track_voices(const synth_t *s, int trk)
     return n;
 }
 
+/* brocade's cap: at most br_cap() of its voices in the pool, by the saws of the track that wants one
+ * (BR_VOICES at six or fewer, then fewer: its voice costs about two ordinary ones at nine saws). A voice
+ * counts as what it will play (a steal's pending note: its track's engine). */
+#define BR_VOICES 6
+static int br_cap(const synth_t *s, int trk)
+{
+    int n = knob9((float)P(s, trk, TP_E1));
+    return n >= 9 ? 4 : n >= 7 ? 5 : BR_VOICES;
+}
+static int br_voice(const synth_t *s, const voice_t *v)
+{
+    if (!v_sounding(v))
+        return 0;
+    return (v->steal_phase == 1 ? P(s, v->trk, TP_ENGINE) : v->engine) == EG_BROCADE;
+}
+static int br_find(const synth_t *s, int trk)   /* the brocade voice to take when the cap is reached; -1 */
+{
+    int i, n = 0, best = -1, own = 0;
+    float quiet = 1e9f;
+    uint32_t oldest = 0xFFFFFFFFu;
+    for (i = 0; i < s->max_voices; i++)
+        n += br_voice(s, &s->v[i]);
+    if (n < br_cap(s, trk))
+        return -1;
+    for (i = 0; i < s->max_voices; i++) {        /* releasing first (the quietest), then the track's own oldest */
+        const voice_t *v = &s->v[i];
+        if (!br_voice(s, v) || v->steal_phase == 1)
+            continue;
+        if (v->amp.stage == ENV_RELEASE && v->amp.level < quiet) {
+            quiet = v->amp.level;
+            best = i;
+        }
+    }
+    if (best >= 0)
+        return best;
+    for (i = 0; i < s->max_voices; i++) {
+        const voice_t *v = &s->v[i];
+        int mine = v->trk == trk;
+        if (!br_voice(s, v) || v->steal_phase == 1 || (own && !mine))
+            continue;
+        if ((mine && !own) || v->age < oldest) {
+            oldest = v->age;
+            best = i;
+            own = mine;
+        }
+    }
+    if (best < 0)                                /* all of them fading for a note already: the newest of */
+        for (i = 0; i < s->max_voices; i++)      /* those waits for this note instead */
+            if (br_voice(s, &s->v[i]) && (best < 0 || s->v[i].age > s->v[best].age))
+                best = i;
+    return best;
+}
+
 /* a voice for a new note: a free one; else the track's oldest if it holds NVOICE_TRK already; else
- * the quietest releasing; else the oldest of all. A stolen voice fades 15 ms first. */
+ * the quietest releasing; else the oldest of all. A stolen voice fades 15 ms first. brocade first keeps
+ * to its own cap (br_find). */
 static int find_voice(synth_t *s, int trk)
 {
     int i, best = -1;
     float quiet = 1e9f;
     uint32_t oldest = 0xFFFFFFFFu;
+    if (P(s, trk, TP_ENGINE) == EG_BROCADE && (best = br_find(s, trk)) >= 0)
+        return best;
     if (track_voices(s, trk) >= NVOICE_TRK) {
         for (i = 0; i < s->max_voices; i++)
             if (s->v[i].trk == trk && s->v[i].steal_phase == 0 && s->v[i].age < oldest) {
@@ -1376,6 +1618,20 @@ void synth_limit(synth_t *s, int max_voices)
 {
     s->max_voices = (uint8_t)(max_voices < 1 ? 1 : max_voices > NVOICE ? NVOICE : max_voices);
 }
+void synth_saws(synth_t *s, int max_saws)
+{
+    s->saw_cap = (uint8_t)(max_saws < 1 ? 1 : max_saws > BR_MAX ? BR_MAX : max_saws);
+}
+int synth_voice_cost(const synth_t *s, int vi)
+{
+    const voice_t *v = &s->v[vi];
+    if (!v_sounding(v))
+        return 0;
+    if (v->engine != EG_BROCADE)
+        return 4;
+    /* tests/host/brocade_test's cost: 3 + half a unit a saw (stereo, lp24), so (7 + saws) / 2 */
+    return (7 + (int)(v->o[9] < 0.0f ? v->c.ex[14] : v->o[9] + 0.99f)) / 2;
+}
 void synth_duck_trigger(synth_t *s, int src)
 {
     int i;
@@ -1395,6 +1651,7 @@ void synth_init(synth_t *s, uint8_t (*par)[NTP])
     s->par = par;
     s->bpm = 120.0f;
     s->max_voices = NVOICE;
+    s->saw_cap = BR_MAX;
     for (i = 0; i < NTRK; i++) {
         trk_t *t = &s->t[i];
         for (j = 0; j < NTP_LOCK; j++)
@@ -1844,6 +2101,8 @@ static void voice_chunk(synth_t *s, voice_t *v)
             voice_pitch(s, v);
         }
     }
+    if (v->engine == EG_BROCADE)                 /* the saws to sound: the knob's, under the guard's cap */
+        c->ex[14] = fm_minf(c->ex[2], (float)s->saw_cap);
     eng_chunk(v);
     char_prep(s, v, dest, off);
 }
@@ -2278,6 +2537,11 @@ static void eknob_init(void)
                 i->hi = 8;
                 i->kind = PK_NUM;              /* stack's ratio prints "N:1" (tp_text) */
             }
+            if (e == EG_BROCADE && k == 0) {   /* the saws, 1..9 */
+                i->lo = 1;
+                i->hi = BR_MAX;
+                i->kind = PK_NUM;
+            }
             if (e == EG_SAMPLE) {              /* sample, start, length, mode */
                 i->kind = k == 0 ? PK_SAMPLE : k == 3 ? PK_NAMES : PK_PCT;
                 i->hi = (uint8_t)(k == 0 ? smp_slots() - 1 : k == 3 ? NSM - 1 : 127);
@@ -2569,7 +2833,8 @@ void sound_default(uint8_t *par, int engine)
  * (3 = 1/4), above free: 20 is about 0.16 Hz, 40 0.45 Hz, 60 1.2 Hz, 80 3 Hz, 92 5.6 Hz.
  * Times: 32 is about 10 ms, 64 100 ms, 80 330 ms, 96 1.1 s, 110 3 s. Cutoff: 59 is 800 Hz, 80 2.2 kHz,
  * 100 5.6 kHz. Each engine is a material of the loom: weft cotton, stack ply, wavetable silk, orbit linen,
- * tines felt, organ reed, sync wire, swarm fleece, sample jute, slice the loom itself. Each engine's eight span it: a bass, a lead, a pad, something
+ * tines felt, organ reed, sync wire, swarm fleece, sample jute, slice the loom itself, brocade the rich cloth
+ * of many threads. Each engine's eight span it: a bass, a lead, a pad, something
  * struck, a bright one and a dark one, one that moves; the volumes put each preset's phrase (tools/render_presets.sh)
  * near -19.5 dBFS RMS dry, its peak under -1.5 dBFS. */
 #define LFO_(lt, ls, la, ld, lx, lx2) lt, ls, la, ld, lx, lx2
@@ -2677,6 +2942,15 @@ const preset_t PRESETS[] = {
     PR("bobbin", EG_SLICE, SMP_BREAK, 2, 64, 25, VM_POLY, 0, 127, 0, 80, 127, 40, 0, 50, 0, 30, 70, 40, 104, 0, FT_LP12, 15, 25, NOLFO, (CT_RING, 30, 70, 60)),
     PR("selvedge", EG_SLICE, SMP_BREAK, 1, 64, 100, VM_POLY, 0, 113, 0, 80, 127, 80, 0, 60, 0, 40, 70, 20, 64, 0, FT_HP12, 10, 40, NOLFO, (CT_TILT, 60, 100, 127)),
     PR("warp beam", EG_SLICE, SMP_BREAK, 1, 59, 127, VM_LEGATO, 0, 127, 0, 80, 127, 90, 0, 60, 0, 40, 85, 30, 64, 0, FT_LP24, 10, 25, (LT_WAVE, 2, 90, LD_FILTER, 0, 1), (CT_CRUSH, 50, 30, 127)),
+    /* brocade: the rich cloth, woven with many threads, after NuSaw's supersaw. saws (1..9), detune, mix, spread */
+    PR("gold thread", EG_BROCADE, 9, 46, 100, 80, VM_LEGATO, 22, 91, 2, 70, 100, 60, 0, 60, 60, 50, 112, 15, 80, 64, FT_LP24, 30, 35, VIB(40), (CT_DRIVE, 30, 110, 127)),
+    PR("damask", EG_BROCADE, 7, 40, 110, 127, VM_POLY, 0, 72, 92, 90, 100, 100, 80, 90, 60, 90, 78, 10, 74, 50, FT_LP12, 10, 85, (LT_WAVE, 25, 84, LD_FILTER + LD_FREE, 0, 1), NOCH),
+    PR("chenille", EG_BROCADE, 9, 110, 127, 100, VM_MONO, 60, 114, 0, 70, 100, 50, 0, 60, 50, 40, 92, 30, 80, 64, FT_LADDER, 20, 30, (LT_WOBBLE, 88, 90, 64, 40, 0), (CT_FOLD, 35, 70, 100)),
+    PR("sequin", EG_BROCADE, 7, 50, 100, 90, VM_POLY, 0, 105, 0, 84, 30, 56, 0, 66, 10, 44, 76, 22, 100, 64, FT_LP24, 30, 40, NOLFO, (CT_DRIVE, 50, 110, 127)),
+    PR("tweed bass", EG_BROCADE, 5, 30, 80, 30, VM_MONO, 0, 107, 0, 75, 90, 35, 0, 62, 20, 30, 62, 20, 96, 40, FT_LADDER, 0, 5, NOLFO, (CT_DRIVE, 60, 60, 127)),
+    PR("velvet", EG_BROCADE, 9, 34, 90, 70, VM_POLY, 0, 69, 40, 90, 100, 85, 30, 80, 60, 80, 50, 5, 70, 64, FT_LP24, 5, 70, NOLFO, (CT_TILT, 60, 40, 127)),
+    PR("shot silk", EG_BROCADE, 9, 70, 110, 100, VM_POLY, 0, 65, 60, 90, 100, 90, 40, 80, 60, 80, 90, 10, 70, 64, FT_LP12, 10, 75, (LT_WAVE, 22, 88, LD_SYNTH + LD_FREE, 1, 1), NOCH),
+    PR("organza", EG_BROCADE, 9, 56, 127, 110, VM_POLY, 0, 81, 10, 80, 90, 80, 0, 60, 0, 60, 45, 5, 64, 64, FT_HP12, 15, 60, NOLFO, (CT_TILT, 64, 100, 127)),
 };
 const int NPRESETS = (int)(sizeof PRESETS / sizeof PRESETS[0]);
 

@@ -54,6 +54,7 @@ extern volatile uint16_t eng_peak[NALLTRK];              /* meters, Q15, decayin
 extern volatile uint8_t eng_drum_hit[NDRUM];             /* the selected drum track's last hits (255 = full) */
 extern volatile uint8_t eng_voices, eng_voices_max;      /* sounding, and the guard's cap */
 extern volatile uint32_t eng_guard_count;
+extern volatile uint8_t eng_saws_max;                    /* brocade's saws at most: the guard's thinning (9 = none) */
 extern volatile uint32_t eng_punch_drum, eng_punch_mel;  /* the FX in effect */
 extern volatile uint8_t eng_scene_now, eng_scene_cue;
 #define SCOPE_N 256u

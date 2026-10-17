@@ -3,7 +3,8 @@
  * critical path is the longer of the second core's voices [0, k) and the first core's voices [k, NVOICE)
  * plus its drum tracks. For a few loads (N synth voices, with and without a kit playing), the mean
  * instructions a sample of that path with the old fixed split (k = 8) and with split_at's, which this
- * file copies (keep the two the same). The rest of the stretch (the FX, the master) runs after both and
+ * file copies (keep the two the same; a voice's cost is synth_voice_cost's: brocade's by its saws). brocade:
+ * a quarter of the notes on a nine-saw brocade track, the rest weft. The rest of the stretch (the FX, the master) runs after both and
  * is the same either way. Nothing here plays audio (macOS: proc_pid_rusage; elsewhere it prints 0).
  *   tests/host/split_bench.sh */
 #include <stdio.h>
@@ -45,7 +46,7 @@ static int split_at(int drums)                  /* app/engine.c split_at, with o
     }
     pre[0] = 0;
     for (i = 0; i < NVOICE; i++)
-        pre[i + 1] = pre[i] + 4 * synth_sounding(S, i, i + 1);
+        pre[i + 1] = pre[i] + synth_voice_cost(S, i);
     for (k = 0; k <= NVOICE; k++) {
         int a = pre[k], b = pre[NVOICE] - pre[k] + drum, c = a > b ? a : b;
         int dk = k > NVOICE / 2 ? k - NVOICE / 2 : NVOICE / 2 - k, db = best > NVOICE / 2 ? best - NVOICE / 2 : NVOICE / 2 - best;
@@ -63,8 +64,10 @@ static double run(int e, int nv, int drums, int dynamic, int *k_out)
 {
     int t, b, s, k;
     uint64_t total = 0;
-    for (t = 0; t < NTRK; t++)
-        sound_default(par[t], e);
+    for (t = 0; t < NTRK; t++)                   /* brocade: track 1 nine saws, the others weft */
+        sound_default(par[t], e == EG_BROCADE && t ? EG_WEFT : e);
+    if (e == EG_BROCADE)
+        par[0][TP_E1] = 9;
     synth_init(S, par);
     synth_tempo(S, 120.0f);
     memset(par[7], 0, NTP);
@@ -106,8 +109,8 @@ int main(void)
     static const int NV[] = {2, 4, 6, 8, 12, 16};
     int d, i, e;
     printf("-- the cores' split: the critical path, instructions a sample (fixed k = 8 -> split_at)\n");
-    for (e = 0; e < 2; e++) {
-        int eng = e ? EG_WAVETABLE : EG_WEFT;
+    for (e = 0; e < 3; e++) {
+        int eng = e == 2 ? EG_BROCADE : e ? EG_WAVETABLE : EG_WEFT;
         for (d = 0; d < 2; d++)
             for (i = 0; i < (int)(sizeof NV / sizeof NV[0]); i++) {
                 int k0, k1;

@@ -132,13 +132,47 @@ int engine_core2_state(void)
 #define GUARD_OFF 65u
 #define GUARD_CALM_FRAMES (3u * 44100u)
 #define GUARD_VOICES 8
+/* before that, brocade's saws thin (synth_saws): past 80 % in a block or 72 % on average its voices lose
+ * their outer pair, 9 -> 7 -> 5 -> 3 saws, a step every 50 ms while it lasts; after a second under 60 % a
+ * pair comes back (each saw fades out or in over 12 ms: no click). Without brocade playing it changes nothing. */
+#define THIN_ON_LAST 80u
+#define THIN_ON_AVG 72u
+#define THIN_OFF 60u
+#define THIN_STEP_FRAMES (44100u / 20u)
+#define THIN_CALM_FRAMES 44100u
+#define THIN_FEWEST 3
 static uint8_t guard_on, guard_applied;
 static uint32_t guard_avg_q8, guard_calm, guard_frames;
+volatile uint8_t eng_saws_max = 9, eng_saws_applied = 9;
+static uint32_t thin_wait, thin_calm;
+static void thin_load(uint32_t pct, uint32_t frames)
+{
+    if (pct > THIN_ON_LAST || guard_avg_q8 > THIN_ON_AVG * 256u) {
+        thin_calm = 0;
+        if (thin_wait > frames) {
+            thin_wait -= frames;
+        } else {
+            thin_wait = THIN_STEP_FRAMES;
+            if (eng_saws_max > THIN_FEWEST)
+                eng_saws_max = (uint8_t)(eng_saws_max - 2);
+        }
+    } else if (pct < THIN_OFF && guard_avg_q8 < THIN_OFF * 256u) {
+        thin_wait = 0;
+        if ((thin_calm += frames) >= THIN_CALM_FRAMES) {
+            thin_calm = 0;
+            if (eng_saws_max < 9)
+                eng_saws_max = (uint8_t)(eng_saws_max + 2);
+        }
+    } else {
+        thin_calm = 0;
+    }
+}
 void engine_load(uint32_t pct)
 {
     uint32_t frames = guard_frames;
     guard_frames = 0;
     guard_avg_q8 = (guard_avg_q8 * 15u + pct * 256u) / 16u;
+    thin_load(pct, frames);
     if (!guard_on) {
         if (pct > GUARD_ON_LAST || guard_avg_q8 > GUARD_ON_AVG * 256u) {
             guard_on = 1;
@@ -153,6 +187,10 @@ void engine_load(uint32_t pct)
 }
 static void guard_apply(void)
 {
+    if (eng_saws_max != eng_saws_applied) {
+        eng_saws_applied = eng_saws_max;
+        synth_saws(SY, eng_saws_applied);
+    }
     if (guard_on == guard_applied)
         return;
     guard_applied = guard_on;
@@ -678,8 +716,9 @@ static void core2_job(uint32_t arg)
 /* where the pool splits between the cores: the second renders voices [0, k), the first [k, NVOICE) and
  * the drum tracks, so k evens the two out. A free voice is the lowest one (synth.c find_voice): with a
  * fixed half, eight voices or fewer all landed on the second core while the first waited (and the
- * overload guard's eight did too). The cost in rough units: a synth voice 4, a drum voice 2, a drum
- * track's own filter and mix 1 (tests/host: ~180, ~95 and ~50 instructions a sample). Of the k that
+ * overload guard's eight did too). The cost in rough units: a synth voice 4 (brocade's more, by its saws:
+ * synth_voice_cost), a drum voice 2, a drum track's own filter and mix 1 (tests/host: ~180, ~95 and ~50
+ * instructions a sample). Of the k that
  * do best, the one nearest the middle (the old fixed split). The same k with one core or two: the
  * samples stay the same either way (only the order of the halves' sum depends on k). */
 static uint32_t split_at(void)
@@ -693,7 +732,7 @@ static uint32_t split_at(void)
         }
     pre[0] = 0;
     for (i = 0; i < NVOICE; i++)
-        pre[i + 1] = pre[i] + 4 * synth_sounding(SY, i, i + 1);
+        pre[i + 1] = pre[i] + synth_voice_cost(SY, i);
     for (k = 0; k <= NVOICE; k++) {
         int a = pre[k], b = pre[NVOICE] - pre[k] + drum, c = a > b ? a : b;
         int dk = k > NVOICE / 2 ? k - NVOICE / 2 : NVOICE / 2 - k, db = best > NVOICE / 2 ? best - NVOICE / 2 : NVOICE / 2 - best;
@@ -915,6 +954,7 @@ void engine_init(patterns_t *P, uint8_t (*par)[NTP])
     for (t = 0; t < NSEQT; t++)
         eng_step[t] = 0;
     eng_voices_max = NVOICE;
+    eng_saws_max = eng_saws_applied = 9;
 }
 
 /* the UI asks before offering an effect: FX I has no reverb line, FX II no delay (the memory plan) */

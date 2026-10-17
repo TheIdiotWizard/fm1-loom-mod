@@ -2352,6 +2352,25 @@ static void pic_swarm(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_
             cv_rect(cx + dx, y0 + h / 2 + dy, 2, 2, (r >> 4 & 3u) ? K_DIM : K_NOW);
     }
 }
+static void pic_brocade(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
+{
+    /* saws: one line each; detune: their cycles drift apart (the moire of a supersaw); mix: the side saws
+     * brighter; spread: the pairs fanned up and down from the centre one */
+    static const float OFF[9] = {0.0f, 0.1f, -0.1f, 0.3f, -0.3f, 0.6f, -0.6f, 1.0f, -1.0f};
+    int n = p[TP_E1] < 1 ? 1 : p[TP_E1] > 9 ? 9 : p[TP_E1];
+    float det = (float)p[TP_E2] / 127.0f, amp = (float)h / 6.0f, fan = (float)p[TP_E4] / 127.0f * ((float)h / 2.0f - amp - 2.0f);
+    cv_rect(x0, y0 + h / 2, w, 1, K_LINE);
+    for (int j = n - 1; j >= 0; j--) {          /* the centre one last, on top */
+        pen_t pn = {0, 0, 0};
+        float o = OFF[j], cyc = 3.0f * (1.0f + o * det * 0.25f), drift = o * det * (float)f / 24.0f;
+        float cy = (float)(y0 + h / 2) - o * fan;
+        uint16_t col = j == 0 ? K_NOW : p[TP_E3] > 64 ? K_DIM : K_FAINT;
+        for (int32_t x = 0; x <= w; x++) {
+            float ph = (float)x / (float)w * cyc + drift, fr = ph - fm_floorf(ph);
+            pen_to(&pn, (float)(x0 + x), cy - (1.0f - 2.0f * fr) * amp, col);
+        }
+    }
+}
 /* the sample engine: the sample's waveform (each column its lowest and highest), the region that plays bright,
  * the rest faint, the loop's ends marked; its name, root and the mode above */
 static int8_t smp_col_lo[200], smp_col_hi[200];
@@ -2549,6 +2568,7 @@ static void draw_engine(void)
     case EG_SWARM: pic_swarm(20, 24, 200, 88, p, ui.frame); break;
     case EG_SAMPLE: pic_sample(20, 24, 200, 88, p); break;
     case EG_SLICE: pic_slice(20, 24, 200, 88, p, trk); break;
+    case EG_BROCADE: pic_brocade(20, 24, 200, 88, p, ui.frame); break;
     default: pic_drumline(10, 26, 220, 90, p, ui.frame); break;
     }
     cv_blit(0, MAIN_Y);
@@ -3246,7 +3266,7 @@ static void draw_status(void)
     char t[24], *e;
     uint32_t cpu = plat_cpu_pct(), peak = plat_cpu_peak_pct(), xr = plat_xruns();
     uint32_t h = hash_u(2166136261u, 0x57A00u | cpu | peak << 8 | (uint32_t)eng_voices << 16 | (uint32_t)eng_voices_max << 24);
-    h = hash_u(h, xr ^ eng_guard_count << 8 ^ (uint32_t)engine_core2_state() << 28);
+    h = hash_u(h, xr ^ eng_guard_count << 8 ^ (uint32_t)engine_core2_state() << 28 ^ (uint32_t)eng_saws_max << 24);
     if (!begin_main(h))
         return;
     e = num_s(cpu, t);
@@ -3257,7 +3277,11 @@ static void draw_status(void)
     setup_row(22, "peak", t);
     e = num_s((uint32_t)eng_voices, t);
     e = s_cat(e, " of ");
-    num_s((uint32_t)eng_voices_max, e);
+    e = num_s((uint32_t)eng_voices_max, e);
+    if (eng_saws_max < 9) {                          /* the guard has thinned brocade's saws */
+        e = s_cat(e, ", saws ");
+        num_s((uint32_t)eng_saws_max, e);
+    }
     setup_row(40, "voices", t);
     setup_row(58, "second core", CORE2_NAME[engine_core2_state() & 3]);
     num_s(eng_guard_count, t);

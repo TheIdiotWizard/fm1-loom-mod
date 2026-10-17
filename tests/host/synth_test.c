@@ -1335,7 +1335,7 @@ int main(void)
     tp_text(TP_PORTA, 50, 0, num, unit);
     check("portamento shows 0..127", !strcmp(num, "50") && !unit[0]);
 
-    check("80 presets, 8 an engine", NPRESETS == 80);
+    check("88 presets, 8 an engine", NPRESETS == 88);
     {   /* names: lower case words, at most 11 characters, each its own; stack's first is a bass */
         int ok = 1, j;
         for (k = 0; k < NPRESETS && ok; k++) {

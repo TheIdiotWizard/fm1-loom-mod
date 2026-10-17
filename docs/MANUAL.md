@@ -365,9 +365,23 @@ SCRAMBLE for a random sound, SAVE AS PRESET, RESET SOUND, and whether the track 
 | organ | type, bass, tremolo, speed |
 | sync | freq, sub, noise, lowcut |
 | swarm | swarm, am, fm, detune |
+| brocade | saws, detune, mix, spread |
 | kit | the shown key's model knobs |
 | sample | sample, start, length, mode |
 | slice | sample, slices, pitch, gate |
+
+### Brocade
+
+Brocade is the supersaw: up to nine saws a voice, detuned against each other, the big trance sound. Its saws
+are NuSaw's. **saws** sets how many, from one to nine: a centre saw and pairs either side. **detune** spreads
+their pitches, fine at first and wide at the end. **mix** sets the side saws against the centre one: low, one
+saw with a shimmer; high, a wall. **spread** opens the pairs across the stereo field. The filter, the envelopes
+and the LFO work on it as on any engine; an LFO on detune makes it swirl.
+
+Nine saws cost about two ordinary voices. So brocade plays at most six voices, five with seven or eight saws, and
+four with nine; a new note past that takes its oldest. When the FM-1 runs short of time, brocade thins first: its
+voices lose their outer saws, two at a time, fading out so you hear no click. The saws come back when it is
+calm again. Status shows it beside the voices, as "saws 7".
 
 ### Kit
 

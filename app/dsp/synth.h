@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* LOOM-8 synth: a pool of voices playing ten engines (weft, stack, wavetable, orbit, tines, organ,
- * sync, swarm, sample and slice), each voice with two ADSRs, a state-variable filter, a character stage, an LFO
+/* LOOM-8 synth: a pool of voices playing eleven engines (weft, stack, wavetable, orbit, tines, organ,
+ * sync, swarm, sample, slice and brocade), each voice with two ADSRs, a state-variable filter, a character stage, an LFO
  * and sends. (The kit, EG_DRUMLINE, is dsp/drumline.c's.)
  *
  * A track's sound is a flat byte array par[NTP] (four modules, four knobs each: engine, envelope, filter,
@@ -27,7 +27,7 @@
  * slice = (note - root) mod slices. A sample that states its bars (sample.h smp_t.bars) plays at the
  * tempo (its bars last as many bars of the song), the pitch knob on top; one that does not, at its own rate */
 enum { EG_WEFT, EG_STACK, EG_WAVETABLE, EG_ORBIT, EG_TINES, EG_ORGAN, EG_SYNC, EG_SWARM, EG_DRUMLINE, EG_SAMPLE,
-       EG_SLICE, NENGINE };
+       EG_SLICE, EG_BROCADE, NENGINE };   /* (saved by number: a new engine goes at the end) */
 static inline int eg_synth(int e) { return e >= 0 && e < NENGINE && e != EG_DRUMLINE; }   /* a voice engine */
 enum { SM_ONESHOT, SM_LOOP, SM_REVERSE, SM_PINGPONG, NSM };   /* the sample engine's modes (TP_E4) */
 #define SL_NCOUNT 4                                  /* the slice engine's counts: 4 << TP_E2 */
@@ -202,4 +202,11 @@ int synth_voices_used(const synth_t *s);
  * the sample; 0 when none plays. Called from the main loop: a racy read of the voices, for the screen only */
 int synth_slice_now(const synth_t *s, int trk, int *slice, int32_t *pos);
 void synth_limit(synth_t *s, int max_voices);                  /* the overload guard: fewer voices */
+/* brocade (EG_BROCADE), the supersaw after NuSaw: up to nine saws a voice (E1), and at most six of its voices in
+ * the pool (five at seven or eight saws, four at nine: synth.c br_cap). The guard's first step: its saws at most (1..9;
+ * the outer ones fade out over 12 ms each, the rest made up to the same power) */
+void synth_saws(synth_t *s, int max_saws);
+/* what voice vi costs to render, in rough units for the cores' split (engine.c split_at): 0 silent, 4 an
+ * ordinary voice, brocade (7 + its saws sounding) / 2: 8 at nine saws */
+int synth_voice_cost(const synth_t *s, int vi);
 extern volatile uint16_t synth_peak[NTRK];                     /* per track meters, Q15, decaying (UI) */
