@@ -1,12 +1,13 @@
-# live recording: tap REC to arm, PLAY records at once (no waiting); chords on the conductor land on its
-# beat steps, a new chord replacing the step's old one; REC held shows the record settings
+# live recording: REC + PLAY starts from step 1 and records at once (the transport starts only from PLAY);
+# chords on the conductor land on its beat steps, a new chord replacing the step's old one; REC held while
+# playing records while held; REC held shows the record settings on the knobs, and a hold toggles nothing
 wait 300
 turn ALGO 8
 expect trk 9
 tap SEQ
-tap REC
-expect playing 0
+press REC
 tap PLAY
+release REC
 expect playing 1
 wait 480
 key 0 down
@@ -21,8 +22,9 @@ tap PLAY
 expect playing 0
 expect note 9 1 2 53
 # again over it: the new chord replaces the old one on that step
-tap REC
+press REC
 tap PLAY
+release REC
 wait 480
 key 2 down
 key 5 down
@@ -34,23 +36,16 @@ key 9 up
 wait 300
 tap PLAY
 expect note 9 1 2 55
-# punch in and out while playing, on T2
-turn ALGO -7
-expect trk 2
-tap PLAY
-tap REC
-wait 200
-tapkey 0
-wait 100
-tap REC
-wait 200
-tap PLAY
-expect playing 0
-# REC held: the record settings on the knobs
+# REC held, stopped: the record settings; turning them, or just holding, toggles nothing
 press REC
 turn K1 1
 turn K2 1
 wait 60
 shot rec_knobs.png
 release REC
+press REC
+wait 600
+release REC
+wait 60
+shot after_hold.png
 expect playing 0

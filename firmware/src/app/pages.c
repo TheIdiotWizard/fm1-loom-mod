@@ -156,8 +156,7 @@ static struct {
     uint8_t ccomp;                                   /* HOME + step: the component the black keys value */
     uint8_t lockpg;                                  /* a step held + EDIT / ENV / FX / LFO: the lock editor's page + 1 */
     uint8_t cursor;                                  /* step record: the step the keys write */
-    uint8_t rec_armed;                               /* REC held while stopped: step record */
-    uint8_t rec_live;                                /* REC tapped while stopped: PLAY records */
+    uint8_t rec_armed;                               /* REC tapped while stopped: step record */
     uint8_t srec_down;                               /* step record: the keys of the chord being written still down */
     uint8_t rec_held, rec_latched;                   /* REC down while playing (momentary); REC + PLAY latched it */
     uint8_t maestro_rec;                             /* REC on Players with maestro: the next chord is recorded */
@@ -438,7 +437,7 @@ static int cur_scene(void) { return seq.scene < NSCENE ? seq.scene : 0; }
 static int cur_pat(int t) { return is_seqt(t) ? seq.ppat[t] % NPATT : 0; }
 static tpat_t *tpat(int t) { return &pats.pat[is_seqt(t) ? t : 0][cur_pat(t)]; }
 static int playing(void) { return seq.playing; }
-static int recording(void) { return seq.rec || seq.rec_wait || ui.rec_armed || ui.rec_live || ui.maestro_rec; }
+static int recording(void) { return seq.rec || seq.rec_wait || ui.rec_armed || ui.maestro_rec; }
 static int step_shown(int i) { return ui.bar * 16 + i; }
 static int home_held(void) { return ui.btn >> B_HOME & 1u; }
 static int pl_type(int t) { return is_aux(t) ? PL_OFF : proj.trk[t].par[TP_PLAYER] % NPL; }
@@ -1109,7 +1108,7 @@ static void page_footer(char *t)
         return;
     }
     if ((ui.btn >> B_REC & 1u) && !home_held()) {   /* REC held: its knobs, and step record */
-        s_cat(t, playing() ? "KNOBS record settings|PLAY stop" : "KNOBS record settings|SEQ step record");
+        s_cat(t, playing() ? "KNOBS record settings|KEYS record" : "KNOBS record settings|PLAY record");
         return;
     }
     if (ui.card) {
@@ -1460,9 +1459,9 @@ static const struct { uint8_t btn; uint32_t pages; const char *title, *l1, *l2; 
      "Hold SAVE and press a white key: the sound as that user preset."},
     {B_SAVE, PG_ANY, "Save", "Tap to save the project.", "Hold SAVE and press white key 1 to 4 to save to that slot."},
     {B_REC, PG(P_PLAYERS) | PG(P_PLAYERS2) | PG(P_PLAYERS3), "Recording",
-     "With strum, the chord you hold next becomes its chord.", "Else a tap arms recording; PLAY records."},
-    {B_REC, PG_ANY, "Recording", "A tap arms it; PLAY records. Playing, a tap punches in or out.",
-     "Held: the knobs set click, count-in, quantise. + SEQ: step record."},
+     "With strum, the chord you hold next becomes its chord.", "Else: hold it and play; stopped, a tap arms step record."},
+    {B_REC, PG_ANY, "Recording", "Stopped: a tap, then each key writes a step. + PLAY: live.",
+     "Playing: hold it and play. Held, the knobs set click, count-in, mode."},
     {B_PLAY, PG(P_SONG), "Play", "Plays the song from slot 1. PLAY again stops.", "HOME + PLAY redoes."},
     {B_PLAY, PG_ANY, "Play", "Starts and stops. Twice quickly: from the top.", "HOME + PLAY redoes."},
     {B_OCTDN, PG_STEPS, "Bar", "Shows the bar before. A step held: nudges it earlier.",

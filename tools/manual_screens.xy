@@ -56,10 +56,8 @@ press SEQ
 tapkey 0
 release SEQ
 tapkey w13
-# step record: REC + SEQ, three notes from the cursor
-press REC
-tap SEQ
-release REC
+# step record: REC, three notes from the cursor
+tap REC
 wait 1600
 shot step_record.png
 tapkey 7
