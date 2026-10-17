@@ -5,22 +5,33 @@
 
 uint32_t plat_ms(void) { return fm1_ms; }
 
+/* remote control over USB-MIDI (main_fm1.c remote_frame, fm1-base's tools/fm1_remote.py): buttons and keys held,
+ * turns and MASTER, added to the panel's own, so a program can drive the app as a player would */
+static struct {
+    volatile uint32_t btn, keys;
+    volatile int32_t enc[NE];
+    volatile int32_t master;                     /* -1: the pot's own */
+} remote = {0, 0, {0}, -1};
+
 uint32_t plat_buttons(void)
 {
     uint32_t raw = fm1_in.buttons, out = 0, i;
     for (i = 0; i < NB; i++)
         if (raw & (1u << panel.btn[i]))
             out |= 1u << i;
-    return out;
+    return out | remote.btn;
 }
 
-uint32_t plat_keys(void) { return fm1_in.notes & ((1u << NKEYS) - 1u); }
+uint32_t plat_keys(void) { return (fm1_in.notes | remote.keys) & ((1u << NKEYS) - 1u); }
 
 int32_t plat_enc(int role)
 {
+    int32_t r;
     if (role < 0 || role >= NE)
         return 0;
-    return fm1_enc_take(panel.enc[role]) * panel.dir[role];
+    r = remote.enc[role];
+    remote.enc[role] = 0;
+    return r + fm1_enc_take(panel.enc[role]) * panel.dir[role];
 }
 
 static volatile uint32_t master_q12 = 2048;

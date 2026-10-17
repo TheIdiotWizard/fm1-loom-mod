@@ -241,6 +241,45 @@ static void safe_main(void)
     }
 }
 
+/* remote control: F0 7D 4C 43 ("LC") op ... F7, 7-bit bytes (fm1-base's, tools/fm1_remote.py there):
+ *   1 b0 b1          the buttons held (B_* bits: b0 the low seven, b1 the next seven)
+ *   2 k0 k1 k2 k3    the keys held (bit k = key k, seven bits a byte, low first)
+ *   3 role delta     an encoder turned (EN_*; delta - 64 detents)
+ *   4 lo hi          MASTER's position (0..4096; 4097 or more: the pot's own again)
+ * Each is added to the panel's own input (plat_fm1.c remote); the answer is F0 7D 4C 43 op F7. */
+static int remote_frame(const uint8_t *p, uint32_t n)
+{
+    static uint8_t ack[6] = {0xF0, 0x7D, 0x4C, 0x43, 0, 0xF7};
+    if (n < 4u || p[0] != 0x7Du || p[1] != 0x4Cu || p[2] != 0x43u)
+        return 0;
+    switch (p[3]) {
+    case 1:
+        if (n >= 6u)
+            remote.btn = ((uint32_t)p[4] | (uint32_t)p[5] << 7) & ((1u << NB) - 1u);
+        break;
+    case 2:
+        if (n >= 8u)
+            remote.keys = ((uint32_t)p[4] | (uint32_t)p[5] << 7 | (uint32_t)p[6] << 14 | (uint32_t)p[7] << 21) &
+                          ((1u << NKEYS) - 1u);
+        break;
+    case 3:
+        if (n >= 6u && p[4] < NE)
+            remote.enc[p[4]] += (int32_t)p[5] - 64;
+        break;
+    case 4:
+        if (n >= 6u) {
+            uint32_t v = (uint32_t)p[4] | (uint32_t)p[5] << 7;
+            remote.master = v > 4096u ? -1 : (int32_t)v;
+        }
+        break;
+    default:
+        return 1;
+    }
+    ack[4] = p[3];
+    ota_wire_send(ack, sizeof ack);
+    return 1;
+}
+
 static void splash(void)
 {
     /* the name over the eight tracks' inks woven as threads, in the default theme (pages.c THEMES[0]) */
@@ -346,7 +385,7 @@ static void fm1_main(void)
                 uint32_t k10;
                 knob += (a * 16 - knob) / 8;
                 k10 = (uint32_t)(knob / 16);
-                master_q12 = (k10 * k10) >> 8;           /* 0 .. ~4096 */
+                master_q12 = remote.master >= 0 ? (uint32_t)remote.master : (k10 * k10) >> 8;   /* 0 .. ~4096 */
             }
         }
         {   /* OCT- + OCT+ held 5 s: update mode (Felucca's, unchanged) */
@@ -371,7 +410,7 @@ static void fm1_main(void)
         {   /* a screen reader's SysEx (announce.c), before the updater looks */
             const uint8_t *p;
             uint32_t n;
-            if (ota_frame_get(&p, &n) && ann_frame(p, n, fm1_ms))
+            if (ota_frame_get(&p, &n) && (ann_frame(p, n, fm1_ms) || remote_frame(p, n)))
                 ota_frame_done();
         }
         ota_service();                              /* M-UPGRADE handshake (other SysEx is dropped) */
