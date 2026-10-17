@@ -1004,12 +1004,68 @@ static int ext_tps(const seq_t *s, int t)   /* external clock ticks a step of tr
 
 static void ext_arm(seq_t *s, int t) { s->t[t].ext_ticks = (uint8_t)(ext_tps(s, t) - 1); }   /* the next tick fires */
 
+/* now, in half-sixteenths since the start, Q8: the clock every track's phase is counted on */
+static uint32_t now_h8(const seq_t *s)
+{
+    uint32_t six = six_q8(s) >> 9, frac = 0;            /* (six: samples a 1/512 of a sixteenth, Q8) */
+    if (s->six_to_next != NEVER && six)
+        frac = s->six_to_next / six;
+    if (frac > 512u)
+        frac = 512u;
+    return (s->step_tick << 9) - frac;
+}
+/* half-sixteenths (Q8) to samples (Q8), without overflowing */
+static uint32_t h8_to_q8(const seq_t *s, uint32_t h8)
+{
+    uint32_t six = six_q8(s), hi = six >> 9, lo = six & 511u;
+    return h8 * hi + (h8 * lo >> 9);
+}
+static void origins_zero(seq_t *s)                       /* the transport (re)starts: every track's step 1 is now */
+{
+    for (int t = 0; t < NSEQT; t++)
+        s->t[t].origin_h8 = 0;
+}
+
+/* the scale or the length changed under a running track: put it where it would be had it always run so since
+ * its step 1. On that grid now: that step plays now; between two of its steps: the next one, on time. */
+static void resync(seq_t *s, int t)
+{
+    seq_trk_t *tr = &s->t[t];
+    const tpat_t *tp = tpat(s, t);
+    uint32_t h = (uint32_t)ts_halves(tp), len = (uint32_t)pat_len(tp), d = h << 8, e, g, rem, k;
+    if (!tr->started || !tr->grid_h || (tr->grid_h == h && tr->grid_len == len))
+        return;
+    tr->grid_h = (uint8_t)h;
+    tr->grid_len = (uint8_t)len;
+    if (s->ext || tr->to_next == NEVER)
+        return;
+    e = now_h8(s) - tr->origin_h8;
+    g = e / d;
+    rem = e - g * d;
+    k = rem < 16u ? g : g + 1u;              /* (just past one of its steps, by a block or so: that step, now) */
+    tr->stall = 0;
+    tr->loop_on = 0;
+    tr->off_q8 = 0;
+    tr->jump_to = (uint8_t)(k % len);
+    {   /* timed from the next sixteenth, whose time is exact (a track's step 1 is always on a sixteenth) */
+        uint32_t target = tr->origin_h8 + k * d, b6 = s->step_tick << 9, half = six_q8(s) >> 1;
+        if (target >= b6)
+            tr->to_next = s->six_to_next + h8_to_q8(s, target - b6);
+        else
+            tr->to_next = s->six_to_next > half ? s->six_to_next - half : 0u;   /* the half before it */
+        if (rem < 16u)
+            tr->to_next = 0;
+    }
+}
+
 static void track_reset(seq_t *s, int t)
 {
     seq_trk_t *tr = &s->t[t];
     int k;
     tr->started = 0;
     tr->pos = 0;
+    tr->grid_h = tr->grid_len = 0;
+    tr->origin_h8 = now_h8(s);
     tr->pass = 0;
     tr->stall = 0;
     tr->ratchet = tr->ratchets = 0;
@@ -1121,6 +1177,8 @@ static void fire_step(seq_t *s, int t, const seq_sink_t *o)
     tp = tpat(s, t);
     st = &tp->st[p];
     tr->pos = (uint8_t)p;
+    tr->grid_h = (uint8_t)ts_halves(tp);
+    tr->grid_len = (uint8_t)pat_len(tp);
     tr->age = 0;
     L = seq_step_q8(s, t);
     tr->step_q8 = L;
@@ -1652,6 +1710,7 @@ static void rec_go(seq_t *s, int t, int note, int vel, const seq_sink_t *o)
     s->bar16 = 0;
     s->bar_fresh = 1;
     s->step_tick = 0;
+    origins_zero(s);
     if (step_empty(st)) {
         st->note[0] = (uint8_t)note;
         st->vel = (uint8_t)vel;
@@ -1899,6 +1958,7 @@ static void do_start(seq_t *s, int from_top, const seq_sink_t *o)
         s->bar_six = 0;
         s->bar16 = 0;
         s->step_tick = 0;
+        origins_zero(s);
     }
     bar_len_update(s);
     for (t = 0; t < NSEQT; t++)
@@ -1984,6 +2044,7 @@ static void six_tick(seq_t *s, const seq_sink_t *o)
         s->bar_six = 0;
         s->bar_fresh = 1;
         s->step_tick = 0;
+        origins_zero(s);
         if (!s->ext && s->send_clock)
             midi(o, 0xFA, 0, 0);
     }
@@ -2192,6 +2253,9 @@ void seq_advance(seq_t *s, uint32_t k, const seq_sink_t *o)
             o->tape_step(o->ctx, six);
         }
     }
+    if (s->playing)                   /* a scale or length changed: back in phase */
+        for (t = 0; t < NSEQT; t++)
+            resync(s, t);
     /* move time */
     for (t = 0; t < NSEQT; t++) {
         seq_trk_t *tr = &s->t[t];

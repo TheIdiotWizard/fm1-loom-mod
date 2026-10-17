@@ -126,7 +126,7 @@ press…" means keep **HOME** down while you press the next thing.
 | edit a drum sound | On a drum track, press **EDIT** and press the sound's black key. The knobs are the model's own four. Turn **SELECT** for the model, random, pan and volume; its **SEL** list has the play mode. |
 | change the filter | Press **ENV** and turn **SELECT** to Filter. **PRESETS** turns the filter type. |
 | use the effects | Press **FX**: the track's sends. Turn **SELECT** for FX I and FX II; **PRESETS** picks the effect. |
-| play | Press **PLAY**. Press it twice quickly to start from the top. |
+| play | Press **PLAY**: every track starts from step 1. |
 | record live | Hold **REC** and press **PLAY**. Step 1 blinks red until you play the first key. |
 | record while playing | Hold **REC** and play: it records while you hold it. Hold **REC** and press **PLAY** to keep it on. |
 | record step by step | Stopped, on Steps, tap **REC**. The red cursor starts after the last note; each key (or chord) you play writes it and moves on. **OCT+** leaves a rest, **OCT−** goes back. **REC** again ends. |
@@ -146,7 +146,7 @@ press…" means keep **HOME** down while you press the next thing.
 
 | Control | What it does |
 | --- | --- |
-| **PLAY** | Starts and stops. Twice quickly: from the top. On the Song page, it plays the song. With **REC** held, it starts live recording. |
+| **PLAY** | Starts (every track from step 1) and stops. A track whose scale or length you change stays in phase with the rest. On the Song page, it plays the song. With **REC** held, it starts live recording. |
 | **REC** | Held while playing: records while held. Stopped: a tap arms step record. On Players with strum, it records the chord. |
 | **SEL** | Opens a list of this page's settings and actions. With a step held, its notes. When LOOM-8 asks a question, **SEL** means yes. |
 | **HOME** | Opens Arrange. On Arrange, it opens the Song page. Held, it is the shift key: tricks, throws, undo and redo, the fine tempo, scenes, mutes on Mix. When LOOM-8 asks a question, **HOME** means no. |

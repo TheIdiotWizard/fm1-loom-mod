@@ -1735,9 +1735,66 @@ static void t_weave(void)
     printf("ok %s\n", cur);
 }
 
+/* phase: a track's position comes from the time since its step 1, so a scale or length change while it plays
+ * lands where it would be had it always run so; PLAY after STOP starts every track from step 1 */
+static ev_t *step_after(int trk, uint32_t t0)
+{
+    for (int i = 0; i < nev; i++)
+        if (ev[i].kind == E_STEP && ev[i].trk == trk && ev[i].t >= t0)
+            return &ev[i];
+    return 0;
+}
+#define T16(n) ((uint32_t)(n) * 11025u / 2u)   /* n sixteenths at 120 BPM, exactly */
+static void t_phase(void)
+{
+    ev_t *e;
+    uint32_t t0;
+    cur = "phase";
+    reset();
+    for (int i = 0; i < 16; i++)
+        note(0, i, 60, 100), note(1, i, 62, 100);
+    start();
+    run_to(5 * L16 + 100);                       /* step 6 (index 5) is playing */
+    P.pat[0][0].scale = TS_2;                    /* two sixteenths a step from now */
+    t0 = now;
+    run(4 * L16);
+    e = step_after(0, t0);                       /* on its new grid: at 6 sixteenths, index 3 */
+    CHECK(e && near(e->t, T16(6), 3) && e->a == 3);
+    P.pat[0][0].scale = TS_4;                    /* a beat a step, set between two of its steps (at ~9.x) */
+    run_to(9 * L16 + 2000);
+    t0 = now;
+    run(6 * L16);
+    e = step_after(0, t0);
+    CHECK(e && near(e->t, T16(12), 3) && e->a == 3);
+    P.pat[0][0].scale = TS_1;                    /* back to a sixteenth a step, at ~15.4: the next sixteenth */
+    t0 = now;
+    run(2 * L16);
+    e = step_after(0, t0);
+    CHECK(e && near(e->t, T16(16), 3) && e->a == 0);
+    e = step_after(1, t0);                       /* the other track never moved: with it */
+    CHECK(e && near(e->t, T16(16), 3) && e->a == 0);
+    run_to(T16(17) + 2500);
+    P.pat[0][0].len = 12;                        /* a shorter pattern at ~17.5: at 18, where 12 steps would be */
+    t0 = now;
+    run(2 * L16);
+    e = step_after(0, t0);
+    CHECK(e && near(e->t, T16(18), 3) && e->a == 18 % 12);
+    /* stop, start: from step 1 */
+    stop();
+    nev = 0;
+    start();
+    run(L16 / 2);
+    e = step_after(0, 0);
+    CHECK(e && e->a == 0);
+    e = step_after(1, 0);
+    CHECK(e && e->a == 0);
+    printf("ok %s\n", cur);
+}
+
 int main(void)
 {
     t_pattern_helpers();
+    t_phase();
     t_weave();
     t_timing();
     t_scale();

@@ -9,7 +9,7 @@
  *   SEQ    Steps (page 2 Bar)      EDIT Engine (Play; a drum key's pages)   ENV Envelope (filter envelope)
  *   FX     Filter (Sends)          LFO  LFO (LFO 2)        ARP  Players (its page 2, hold)
  *   GLO    Mix, Master, Setup, Status
- *   PLAY   start / stop (twice quickly: from the top); REC + PLAY = live recording (stopped: waits for the
+ *   PLAY   start (from the top: every track's step 1) / stop; REC + PLAY = live recording (stopped: waits for the
  *          first key; playing: keeps REC on)
  *   REC    held while playing: records while held; stopped: a tap arms step record
  *   SAVE   save (held + white key: a slot, or a user preset on the sound pages)
@@ -384,7 +384,7 @@ static void play_press(void)
             seq_rec(&seq, 2);
             say("RECORDING", "play to start");
         }
-        engine_transport(1);
+        engine_transport(3);
         return;
     }
     if (ui.rec_armed) {
@@ -395,7 +395,7 @@ static void play_press(void)
             ui.rec_latched = 1;
         }
     }
-    engine_transport(twice ? 3 : 1);
+    engine_transport(3);                         /* from a stop, always from the top: every track's step 1 */
 }
 static void rec_tap(void)                        /* REC released, unused, while stopped */
 {

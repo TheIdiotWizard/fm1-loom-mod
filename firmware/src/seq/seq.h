@@ -114,6 +114,8 @@ enum { OFF_NOTE, OFF_PUNCH, OFF_TAPE, OFF_DRUM };
 typedef struct {                      /* one track's runtime (interrupt only) */
     uint8_t pos;                      /* the step playing */
     uint8_t started;
+    uint8_t grid_h, grid_len;         /* the scale (half-sixteenths a step) and length it last stepped with */
+    uint32_t origin_h8;               /* when its step 1 began: half-sixteenths since start, Q8 (the phase) */
     uint8_t stall;                    /* pulse / hold repeats left on this step */
     uint8_t ratchet, ratchets;        /* multiply: hits done, hits wanted */
     uint16_t pass;                    /* passes of the pattern since start (conditions, skips, ramps) */
