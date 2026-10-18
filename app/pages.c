@@ -1914,8 +1914,13 @@ static void draw_song(void)
 #define ST_CW 29
 #define ST_Y 22
 #define ST_CH 46
-/* a step's first line of text: the notes (two a line), a drum's sounds (the shown one first), a punch effect,
- * a brain chord */
+#define ST_TW (ST_CW - 8)   /* a cell's line: at most this wide, clear of a held cell's two-pixel frame */
+#define ST_MID ((ST_CW - 2) / 2)   /* a line's centre */
+#define ST_NUM 0            /* the rows' text y in a cell (ink 3-11, 13-21, 23-31, 33-41) */
+#define ST_L1 10
+#define ST_L2 20
+#define ST_MK 30
+/* a cell's text: its notes or chord, the shown drum sound, a throw track's effect (draw_steps) */
 static int step_on(const step_t *st, int trk)       /* the cell is "on" for the sound shown (drums) or any note */
 {
     if (is_drum(trk)) {
@@ -1926,13 +1931,14 @@ static int step_on(const step_t *st, int trk)       /* the cell is "on" for the 
     }
     return !step_empty(st);
 }
-/* a chord's name from its notes (3 or 4): "C", "Am", "G7", "Fmaj7", "Dm7", "Bdim", "Caug", "Dsus2", "Gsus4";
- * the root is a note whose intervals to the others match a shape (the lowest tried first); 0 = none */
-static int chord_name(const uint8_t *notes, int n, char *t)
+/* a chord from its notes (3 or 4): its shape (CHORD_SHAPE's, +1; 0 = none) and its root's pitch class. The root is a
+ * note whose intervals to the others match a shape (the lowest tried first). A cell names it in full when that fits
+ * ("C", "Am", "G7", "Dm7"), else by the short form ("CM7", "C+", "Co", "Ds2"): draw_steps */
+static const struct { uint16_t mask; const char *suf, *sh; } CHORD_SHAPE[] = {
+    {0x091, "", ""}, {0x089, "m", "m"}, {0x491, "7", "7"}, {0x891, "maj7", "M7"}, {0x489, "m7", "m7"},
+    {0x049, "dim", "o"}, {0x111, "aug", "+"}, {0x085, "sus2", "s2"}, {0x0A1, "sus4", "s4"}};
+static int chord_shape(const uint8_t *notes, int n, int *root)
 {
-    static const struct { uint16_t mask; const char *suf; } SHAPE[] = {
-        {0x091, ""}, {0x089, "m"}, {0x491, "7"}, {0x891, "maj7"}, {0x489, "m7"}, {0x049, "dim"}, {0x111, "aug"},
-        {0x085, "sus2"}, {0x0A1, "sus4"}};
     uint16_t pcs = 0;
     int lo = 0;
     if (n < 3)
@@ -1946,15 +1952,21 @@ static int chord_name(const uint8_t *notes, int n, char *t)
         for (int i = 0; i < n; i++) {
             int r = notes[pass ? i : lo] % 12;
             uint16_t rot = (uint16_t)(((pcs >> r) | (pcs << (12 - r))) & 0xFFFu);
-            for (uint32_t k = 0; k < sizeof SHAPE / sizeof SHAPE[0]; k++)
-                if (rot == SHAPE[k].mask) {
-                    s_cat(s_cat(t, NOTE_NAME[r]), SHAPE[k].suf);
-                    return 1;
+            for (uint32_t k = 0; k < sizeof CHORD_SHAPE / sizeof CHORD_SHAPE[0]; k++)
+                if (rot == CHORD_SHAPE[k].mask) {
+                    *root = r;
+                    return (int)k + 1;
                 }
             if (!pass)
                 break;
         }
     return 0;
+}
+static void cell_note(int n, char *b)               /* a note's name in a cell; the octave -1's "C#-1" too wide: "C#" */
+{
+    note_name(n, b);
+    if (text_w(&FONT_XS, b) > ST_TW)
+        b[b[1] == '#' || b[1] == 'b' ? 2 : 1] = 0;
 }
 /* how many steps a step's note covers (its length, rounded up; the pattern's note length is under a step) */
 static int step_cover(const step_t *st) { return st->len ? (st->len + 3) / 4 : 1; }
@@ -2052,9 +2064,10 @@ static void draw_steps(void)
         if ((ui.rec_armed && s == ui.cursor) || (seq.rec_wait && s == 0 && (ui.frame / 8 & 1u)))
             cv_frame(x, y, ST_CW - 2, ST_CH, 4, K_REC, bg);
         num_s((uint32_t)s + 1u, t);
-        cv_text(x + 4, y + 1, &FONT_XS, t, bg == K_NOW ? K_BG : K_DIM);
-        /* the cell, top down: the number (and the lock's dot), the notes or the shown sound, a kit's ticks, then the
-         * marks row (the chance's sign at the left, the tricks' letters at the right), the length's bar */
+        cv_text(x + 4, y + ST_NUM, &FONT_XS, t, bg == K_NOW ? K_BG : K_DIM);
+        /* the cell, top down, every row in the small font (ink rows from the cell's top): the number and the lock's
+         * dot (3-11), line 1 (13-21), line 2 (23-31) or a kit's ticks (26-29), the marks (33-41: the chance's sign
+         * at the left, the tricks' letters at the right), the length's bar (42-43). A line is at most ST_TW wide. */
         if (drum && !step_empty(st)) {               /* every sound on the step: a tick each, by key, the shown one bright */
             uint16_t have = 0;
             int nt = 0;
@@ -2067,74 +2080,81 @@ static void draw_steps(void)
                 if (have >> b & 1u) {
                     int32_t tx = x + (ST_CW - 2) / 2 - (nt * 5 - 1) / 2 + j++ * 5;
                     uint16_t tc = b == ui.dsound ? (bg == K_NOW ? K_BG : K_TEXT) : (bg == K_NOW ? K_PANEL2 : K_NOW_M);
-                    cv_round(tx, y + 27, 4, 4, 1, tc);   /* their own row, between the name and the marks */
+                    cv_round(tx, y + 26, 4, 4, 1, tc);   /* their own row, between the name and the marks */
                 }
             if (on) {
                 s_cat(t, DL_SOUND_NAME[ui.dsound % DL_NSOUND]);
                 t[3] = 0;
-                text_c(x + (ST_CW - 2) / 2, y + 11, &FONT_XS, t, fg);
+                text_c(x + ST_MID, y + ST_L1, &FONT_XS, t, fg);
             }
         } else if (on) {
+            uint16_t dim = bg == K_NOW ? K_BG : K_DIM;
             if (trk == AUX_PUNCH) {
                 int fx = st->note[0] - 1;
-                text_fit(x + 2, y + 11, &FONT_XS, PX_VALID(fx) ? PUNCH_NAME[fx & 15] : "?", ST_CW - 5, fg);
-                text_fit(x + 2, y + 23, &FONT_XS, PX_VALID(fx) && fx >= PX_MEL ? "mel" : "drum", ST_CW - 5, bg == K_NOW ? K_BG : K_DIM);
-            } else {
-                char l1[12], *e = l1, cn[12];
-                int n = 0, line = 0, nn = 0;
-                for (int k = 0; k < SN && st->note[k]; k++)
+                /* the effect in capitals (no descender to meet the line under it), three letters, over its group */
+                static const char *const PX_CELL[NPUNCH] = {"MUT", "STU", "REP", "ECH", "BLD", "FLR", "JMB", "WBL",
+                                                            "PAN", "OCT", "CHP", "RNG"};
+                text_c(x + ST_MID, y + ST_L1, &FONT_XS, PX_VALID(fx) ? PX_CELL[(fx & 15) % NPUNCH] : "?", fg);
+                text_c(x + ST_MID, y + ST_L2, &FONT_XS, PX_VALID(fx) && fx >= PX_MEL ? "mel" : "drm", dim);
+            } else {                                 /* notes: two lines, each one name (they never fit two a line) */
+                char l1[12], l2[12];
+                int nn = 0, lo = 0, root = 0, sh;
+                uint16_t c2 = fg;
+                for (int k = 0; k < SN && st->note[k]; k++) {
+                    if (st->note[k] < st->note[lo])
+                        lo = k;
                     nn++;
-                cn[0] = 0;
-                if (chord_name(st->note, nn, cn)) {  /* a chord: its name, the bass note under it */
-                    int lo = 0;
-                    for (int k = 1; k < nn; k++)
-                        if (st->note[k] < st->note[lo])
-                            lo = k;
-                    text_c(x + (ST_CW - 2) / 2, y + 11, text_w(&FONT_B, cn) <= ST_CW - 4 ? &FONT_B : &FONT_XS, cn, fg);
-                    note_name(st->note[lo], l1);
-                    text_c(x + (ST_CW - 2) / 2, y + 26, &FONT_XS, l1, bg == K_NOW ? K_BG : K_DIM);
-                    nn = 0;
                 }
-                {                                    /* two notes a line when they fit the cell, else one; two lines */
-                    char two[12], *t2;
-                    int per = 2;
-                    t2 = note_name(st->note[0], two);
-                    if (nn > 1) {
-                        note_name(st->note[1], s_cat(t2, " "));
-                        if (text_w(&FONT_XS, two) > ST_CW - 8)
-                            per = 1;
-                    }
-                    for (int k = 0; k < nn && line < 2; k++) {
-                        e = note_name(st->note[k], e);
-                        n++;
-                        if (n == per || k == nn - 1) {
-                            if (line == 1 && k < nn - 1)
-                                s_cat(e, "+");       /* more notes than show */
-                            text_c(x + (ST_CW - 2) / 2, y + (line ? 25 : 13), &FONT_XS, l1, fg);
-                            e = l1;
-                            n = 0;
-                            line++;
-                        } else
-                            e = s_cat(e, " ");
-                    }
+                l2[0] = 0;
+                if ((sh = chord_shape(st->note, nn, &root)) != 0) {
+                    /* a chord: its name, the bass note under it (dim). The quality in full when the name fits and
+                     * the quality has no descender (it would touch the line under it), else short ("CM7", "C+", "Co",
+                     * "Ds2"); when even that is too wide ("C#M7", "Ebm7", "F#s4"), the root over its quality (in full
+                     * when it fits: "sus4"), the bass left out */
+                    const char *suf = CHORD_SHAPE[sh - 1].suf, *q;
+                    for (q = suf; *q; q++)
+                        if (*q == 'g' || *q == 'j' || *q == 'p' || *q == 'q' || *q == 'y')
+                            suf = CHORD_SHAPE[sh - 1].sh;
+                    s_cat(s_cat(l1, NOTE_NAME[root]), suf);
+                    if (text_w(&FONT_XS, l1) > ST_TW)
+                        s_cat(s_cat(l1, NOTE_NAME[root]), CHORD_SHAPE[sh - 1].sh);
+                    if (text_w(&FONT_XS, l1) > ST_TW) {
+                        s_cat(l1, NOTE_NAME[root]);
+                        s_cat(l2, suf);
+                        if (text_w(&FONT_XS, l2) > ST_TW)
+                            s_cat(l2, CHORD_SHAPE[sh - 1].sh);
+                    } else
+                        cell_note(st->note[lo], l2), c2 = dim;
+                } else {                             /* the first note; under it the second, or "+3": three more */
+                    cell_note(st->note[0], l1);
+                    if (nn == 2)
+                        cell_note(st->note[1], l2);
+                    else if (nn > 2)
+                        num_s((uint32_t)nn - 1u, s_cat(l2, "+"));
                 }
+                text_c(x + ST_MID, y + ST_L1, &FONT_XS, l1, fg);
+                if (l2[0])
+                    text_c(x + ST_MID, y + ST_L2, &FONT_XS, l2, c2);
             }
         }
-        if (st->comp || st->comp2) {                 /* the components' letters, bottom right */
+        if (st->comp || st->comp2) {                 /* the tricks' letters, bottom right */
             char g[4] = {0};
             char *e = g;
             if (st->comp)
                 e = s_cat(e, COMP_GLYPH[st->comp % NSC]);
             if (st->comp2)
                 s_cat(e, COMP_GLYPH[st->comp2 % NSC]);
-            text_r(x + ST_CW - 6, y + ST_CH - 17, &FONT_XS, g, fg);
+            text_r(x + ST_CW - 6, y + ST_MK, &FONT_XS, g, fg);
         }
         if (st->cond) {                              /* a small percent sign (5 x 7): the font's is too wide beside two letters */
             static const uint8_t PCT[7] = {0x19, 0x1A, 0x02, 0x04, 0x08, 0x0B, 0x13};
             for (int r = 0; r < 7; r++)
                 for (int b = 0; b < 5; b++)
                     if (PCT[r] >> (4 - b) & 1u)
-                        cv_rect(x + 3 + b, y + ST_CH - 13 + r, 1, 1, bg == K_NOW ? K_BG : K_DIM);
+                        cv_rect(x + 3 + b, y + ST_MK + 4 + r, 1, 1, bg == K_NOW ? K_BG : K_DIM);
+#ifdef GFX_AUDIT
+            ga_text("%", x + 3, y + ST_MK + 4 + cv_oy, x + 7, y + ST_MK + 10 + cv_oy, 0);   /* audited as a label */
+#endif
         }
         if (step_has_lock(pats.lane, trk, pt, s))
             cv_round(x + ST_CW - 9, y + 3, 4, 4, 2, K_REC);
@@ -2148,7 +2168,7 @@ static void draw_steps(void)
         for (int j = i; j <= last && j < 16; j++) {
             int32_t x = ST_X + (j % 8) * ST_CW, y = ST_Y + (j / 8) * (ST_CH + 4) + ST_CH - 4;
             int32_t x0 = j == i ? x + 3 : x - 2, x1 = j == last || j == 15 || j % 8 == 7 ? x + ST_CW - 5 : x + ST_CW;
-            cv_rect(x0, y - 1, x1 - x0, 3, K_DIM);
+            cv_rect(x0, y, x1 - x0, 2, K_DIM);       /* rows 42-43, under the marks */
         }
         if (last > 15) {                             /* it goes on past the bar: an arrow at its end */
             int32_t x = ST_X + 7 * ST_CW + ST_CW - 5, y = ST_Y + (ST_CH + 4) + ST_CH - 6;

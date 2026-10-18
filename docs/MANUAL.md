@@ -274,7 +274,10 @@ A step's chance and its skip trigger decide whether the step happens at all. Whe
 either, a jump included: a jump with a 25 % chance jumps about one time in four. A jump back, or stay, starts a new
 pass, so the A:B cycles, the skips and the ramps keep counting inside the loop it makes.
 
-A cell shows its notes, or a chord's name with its bass note under it. On a drum track, every sound on the
+A cell shows its note, two notes one over the other, or the first note and how many more ("+2"). A chord shows
+its name with its bass note under it; a name too long for the cell is shortened (CM7 for maj7, C+ for aug, Co for
+dim, Cs2 and Cs4 for the sus chords), and one still too long (C#M7, Ebm7) puts the root over its quality. An
+effect on the throw track shows three letters (PAN) over its group (drm or mel). On a drum track, every sound on the
 step has a tick, the shown sound's bright, so the whole beat is visible while you edit one sound. A bar along
 the foot of the cells shows how far a long note reaches; an arrow at the bar's end means it goes on. The
 tricks' letters sit at the bottom right, a percent sign marks a chance, and a red dot marks locks.
