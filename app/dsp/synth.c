@@ -1369,6 +1369,13 @@ static int br_voice(const synth_t *s, const voice_t *v)
         return 0;
     return (v->steal_phase == 1 ? P(s, v->trk, TP_ENGINE) : v->engine) == EG_BROCADE;
 }
+int synth_brocade_voices(const synth_t *s)
+{
+    int i, n = 0;
+    for (i = 0; i < NVOICE; i++)
+        n += br_voice(s, &s->v[i]);
+    return n;
+}
 static int br_find(const synth_t *s, int trk)   /* the brocade voice to take when the cap is reached; -1 */
 {
     int i, n = 0, best = -1, own = 0;

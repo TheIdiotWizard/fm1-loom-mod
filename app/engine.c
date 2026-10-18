@@ -133,22 +133,34 @@ int engine_core2_state(void)
 #define GUARD_OFF 65u
 #define GUARD_CALM_FRAMES (3u * 44100u)
 #define GUARD_VOICES 8
-/* before that, brocade's saws thin (synth_saws): past 80 % in a block or 72 % on average its voices lose
- * their outer pair, 9 -> 7 -> 5 -> 3 saws, a step every 50 ms while it lasts; after a second under 60 % a
- * pair comes back (each saw fades out or in over 12 ms: no click). Without brocade playing it changes nothing. */
-#define THIN_ON_LAST 80u
-#define THIN_ON_AVG 72u
-#define THIN_OFF 60u
+/* before that, brocade's saws thin (synth_saws), and only while a brocade voice sounds: on sustained load, not
+ * on one block's spike (a chord's note-ons, a kit's hit pass 80 % for a block while the average stays in the 60s,
+ * as brocade and a kit run on the FM-1). A pair of saws goes (9 -> 7 -> 5 -> 3, a step every 50 ms while it lasts)
+ * when the average (guard_avg: sixteen blocks, ~90 ms) passes 76 %, or four blocks in a row pass 86 % (a load
+ * rising too fast for the average); both under the overload guard's 85 % / 92 %, so the saws go first. A pair comes
+ * back once the average has stayed 8 points under (68 %) with no block over 86 % for half a second, and another
+ * after each further half second; between 68 and 76 % the saws stay as they are. Each saw fades out or in over
+ * 12 ms: no click. With no brocade voice sounding the cap is lifted at once: nothing thins, Status shows no saws. */
+#define THIN_ON_AVG 76u
+#define THIN_ON_RUN 86u
+#define THIN_RUN 4u
+#define THIN_OFF_AVG (THIN_ON_AVG - 8u)
 #define THIN_STEP_FRAMES (44100u / 20u)
-#define THIN_CALM_FRAMES 44100u
+#define THIN_CALM_FRAMES (44100u / 2u)
 #define THIN_FEWEST 3
 static uint8_t guard_on, guard_applied;
 static uint32_t guard_avg_q8, guard_calm, guard_frames;
 volatile uint8_t eng_saws_max = 9, eng_saws_applied = 9;
-static uint32_t thin_wait, thin_calm;
-static void thin_load(uint32_t pct, uint32_t frames)
+static uint32_t thin_wait, thin_calm, thin_run;
+static void thin_load(uint32_t pct, uint32_t frames, int brocade)
 {
-    if (pct > THIN_ON_LAST || guard_avg_q8 > THIN_ON_AVG * 256u) {
+    thin_run = pct > THIN_ON_RUN ? thin_run + 1u : 0u;
+    if (!brocade) {                                  /* nothing to thin: the cap lifted, the timers at rest */
+        eng_saws_max = 9;
+        thin_wait = thin_calm = 0;
+        return;
+    }
+    if (guard_avg_q8 > THIN_ON_AVG * 256u || thin_run >= THIN_RUN) {
         thin_calm = 0;
         if (thin_wait > frames) {
             thin_wait -= frames;
@@ -157,14 +169,14 @@ static void thin_load(uint32_t pct, uint32_t frames)
             if (eng_saws_max > THIN_FEWEST)
                 eng_saws_max = (uint8_t)(eng_saws_max - 2);
         }
-    } else if (pct < THIN_OFF && guard_avg_q8 < THIN_OFF * 256u) {
+    } else if (guard_avg_q8 < THIN_OFF_AVG * 256u && pct <= THIN_ON_RUN) {
         thin_wait = 0;
-        if ((thin_calm += frames) >= THIN_CALM_FRAMES) {
+        if (eng_saws_max < 9 && (thin_calm += frames) >= THIN_CALM_FRAMES) {
             thin_calm = 0;
-            if (eng_saws_max < 9)
-                eng_saws_max = (uint8_t)(eng_saws_max + 2);
+            eng_saws_max = (uint8_t)(eng_saws_max + 2);
         }
     } else {
+        thin_wait = 0;
         thin_calm = 0;
     }
 }
@@ -173,7 +185,7 @@ void engine_load(uint32_t pct)
     uint32_t frames = guard_frames;
     guard_frames = 0;
     guard_avg_q8 = (guard_avg_q8 * 15u + pct * 256u) / 16u;
-    thin_load(pct, frames);
+    thin_load(pct, frames, synth_brocade_voices(SY) > 0);
     if (!guard_on) {
         if (pct > GUARD_ON_LAST || guard_avg_q8 > GUARD_ON_AVG * 256u) {
             guard_on = 1;
@@ -454,6 +466,9 @@ static void pump_drum(int trk, int sound, int vel)
         master_key(MST, PB_KICK, vel);
     master_key(MST, PB_T1 + trk, vel);
 }
+#ifdef PLAT_HOST
+static uint32_t host_drum_hits;
+#endif
 static void s_note_on(void *x, int trk, int note, int vel, int glide_ms, uint32_t tag)
 {
     (void)x;
@@ -484,6 +499,9 @@ static void s_drum(void *x, int trk, int sound, int vel, int pitch_semi, int sho
     if (trk < 0 || trk >= NTRK || !eng_drum[trk] || sound < 0 || sound >= NDRUM)
         return;
     drumline_hit(DL(trk), sound, vel, pitch_semi, short_gate, long_tail || perf_tail[trk]);
+#ifdef PLAT_HOST
+    host_drum_hits++;                                  /* (the host's load model: a hit's own cost) */
+#endif
     synth_duck_trigger(SY, trk);                       /* duck LFOs listening to this track drop */
     pump_drum(trk, sound, vel);
     if (trk == proj.trk_sel)

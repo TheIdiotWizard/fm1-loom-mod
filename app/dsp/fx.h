@@ -57,6 +57,9 @@ void fx_filter(fxslot_t *f, int hp, int lp);                /* the slot's filter
 /* process n frames of the send (mono in) into out L/R (added) */
 void fx_process(fxslot_t *f, const float *in, float *out_l, float *out_r, uint32_t n);
 int fx_has(const fxslot_t *f, int pick);                    /* the slot can do this effect (reverb needs its line) */
+int fx_awake(const fxslot_t *f);                            /* the slot works this block: its input heard, or its line
+                                                            * still ringing (a delay or reverb sleeps on silence; the
+                                                            * others always work) */
 
 /* ---- master ---- */
 /* the master's knobs, three pages of four: EQ (low, mid, high, blend), tape (TapeScam-lite: drive, color,
