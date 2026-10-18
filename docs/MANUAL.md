@@ -442,7 +442,7 @@ start of each note (none to long), on whisper the share of noise against a buzz 
 **arp** runs the note through a chord fifty times a second, the way chip music does: oct, fifth, power, major,
 minor, maj7, min7, sus4, or off. On chord, the whole chord arpeggiates.
 
-Most of these models cost about as much as any voice; cane's bell, with its eleven partials, about two.
+Most of these models cost about as much as any voice or less; cane's bell, with its eleven partials, about a third more.
 
 ### Kit
 

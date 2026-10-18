@@ -216,7 +216,7 @@ void synth_limit(synth_t *s, int max_voices);                  /* the overload g
  * the outer ones fade out over 12 ms each, the rest made up to the same power) */
 void synth_saws(synth_t *s, int max_saws);
 /* what voice vi costs to render, in rough units for the cores' split (engine.c split_at): 0 silent, 4 an
- * ordinary voice, brocade (7 + its saws sounding) / 2: 8 at nine saws; the Braids engines by their model (cane's
- * bell 8, the most) */
+ * ordinary voice, brocade (7 + its saws sounding) / 2: 8 at nine saws; the Braids engines by their model (braids.h:
+ * 2 .. 5, cane's bell the most) */
 int synth_voice_cost(const synth_t *s, int vi);
 extern volatile uint16_t synth_peak[NTRK];                     /* per track meters, Q15, decaying (UI) */
