@@ -45,7 +45,8 @@ for s in $SONGS; do
     echo "== $s"
     rc=0
     app/build/host/loom_host "tools/demos/$s.xy" "$d" > "$d/log.txt" 2>&1 || rc=$?
-    # the simulator's layout audit (gfx_loom.c) may flag the screen the song left behind: a note, not a failure
+    # the simulator's layout audit (gfx_loom.c): none of the songs' screens is flagged; a LAYOUT line is printed
+    # below as a note, not a failure (the audio is still good)
     if [ $rc -ne 0 ] && { grep -qE '^(FAIL|demo: |line [0-9]+: unknown)' "$d/log.txt" || [ ! -f "$d/loom_demo_$s.wav" ]; }; then
         tail -20 "$d/log.txt"
         exit 1

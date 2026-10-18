@@ -14,7 +14,8 @@
  * and the recording all run in one context and the sink is only ever called from the interrupt.
  *
  * Components. A step's two components both run; the three skips gate the trigger, the step's locks or
- * the step's other component by the pass count. The components in force on a step are resolved once
+ * the step's other component by the pass count. The step's condition (a chance, A:B) and its skip trigger
+ * decide whether the step happens at all, its jump included; a jump back or stay starts a new pass. The components in force on a step are resolved once
  * when the step is reached (tr->act) and reused by its pulse repeats and ratchets.
  *
  * Locks. A lane's value at a step is sent before the step's notes; it holds until the lane's next
@@ -1091,7 +1092,8 @@ static void restart(seq_t *s, uint32_t tracks)   /* tracks whose pattern switche
 
 /* ------------------------------------------------------------- a step --- */
 /* the next step: a jump, the punch loop's span, or the next one; wrapped = a new pass begins (the
- * pattern's end, or the loop going back to its start) */
+ * pattern's end, the loop going back to its start, or a jump back or stay: a jump loop counts its passes, so
+ * the conditions, skips and ramps keep moving inside it) */
 static int next_pos(seq_t *s, int t, int *wrapped)
 {
     seq_trk_t *tr = &s->t[t];
@@ -1100,7 +1102,7 @@ static int next_pos(seq_t *s, int t, int *wrapped)
     if (tr->jump_to != 0xFF) {
         n = tr->jump_to % len;
         tr->jump_to = 0xFF;
-        *wrapped = n == 0 && p != 0;
+        *wrapped = n <= p;
         return n;
     }
     if (t < NTRK && tr->loop_on) {
@@ -1148,7 +1150,7 @@ static void fire_step(seq_t *s, int t, const seq_sink_t *o)
     const tpat_t *tp;
     const step_t *st;
     uint32_t L, carry = tr->to_next < 256u ? tr->to_next : 0, nL;
-    int p, wrapped = 0, retrig = 1, plays, np, dummy, trig_ok = 1, lock_ok = 1, kind;
+    int p, wrapped = 0, retrig = 1, happens = 0, plays, np, dummy, trig_ok = 1, lock_ok = 1, kind;
     int32_t off, noff;
     if (!tr->started) {
         tr->started = 1;
@@ -1190,9 +1192,12 @@ static void fire_step(seq_t *s, int t, const seq_sink_t *o)
         apply_locks(s, t, p, L, o);
     if (o->step)
         o->step(o->ctx, t, p);
-    plays = retrig && !(s->mute >> t & 1u) && !punch_muted(s, t) && !tr->fill_on && !step_empty(st) && trig_ok &&
-            cond_plays(s, t, st);
-    if (retrig && tr->act[SC_JUMP])   /* a jump works on an empty step too */
+    /* the step happens when its chance (or A:B) and its skip trigger say so: then its tricks run, the jump too
+     * (a jump works on an empty or muted step, which happens without playing) */
+    if (retrig && trig_ok)
+        happens = cond_plays(s, t, st);
+    plays = happens && !(s->mute >> t & 1u) && !punch_muted(s, t) && !tr->fill_on && !step_empty(st);
+    if (happens && tr->act[SC_JUMP])
         jump_set(s, t, tr->act[SC_JUMP] - 1, p);
     kind = tr->act[SC_PULSE] ? SC_PULSE : tr->act[SC_HOLD] ? SC_HOLD : 0;
     if (plays) {

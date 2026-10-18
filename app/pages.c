@@ -2053,6 +2053,8 @@ static void draw_steps(void)
             cv_frame(x, y, ST_CW - 2, ST_CH, 4, K_REC, bg);
         num_s((uint32_t)s + 1u, t);
         cv_text(x + 4, y + 1, &FONT_XS, t, bg == K_NOW ? K_BG : K_DIM);
+        /* the cell, top down: the number (and the lock's dot), the notes or the shown sound, a kit's ticks, then the
+         * marks row (the chance's sign at the left, the tricks' letters at the right), the length's bar */
         if (drum && !step_empty(st)) {               /* every sound on the step: a tick each, by key, the shown one bright */
             uint16_t have = 0;
             int nt = 0;
@@ -2065,12 +2067,12 @@ static void draw_steps(void)
                 if (have >> b & 1u) {
                     int32_t tx = x + (ST_CW - 2) / 2 - (nt * 5 - 1) / 2 + j++ * 5;
                     uint16_t tc = b == ui.dsound ? (bg == K_NOW ? K_BG : K_TEXT) : (bg == K_NOW ? K_PANEL2 : K_NOW_M);
-                    cv_round(tx, y + 30, 4, 7, 1, tc);
+                    cv_round(tx, y + 27, 4, 4, 1, tc);   /* their own row, between the name and the marks */
                 }
             if (on) {
                 s_cat(t, DL_SOUND_NAME[ui.dsound % DL_NSOUND]);
                 t[3] = 0;
-                text_c(x + (ST_CW - 2) / 2, y + 12, &FONT_XS, t, fg);
+                text_c(x + (ST_CW - 2) / 2, y + 11, &FONT_XS, t, fg);
             }
         } else if (on) {
             if (trk == AUX_PUNCH) {
@@ -2127,8 +2129,13 @@ static void draw_steps(void)
                 s_cat(e, COMP_GLYPH[st->comp2 % NSC]);
             text_r(x + ST_CW - 6, y + ST_CH - 17, &FONT_XS, g, fg);
         }
-        if (st->cond)
-            cv_text(x + 4, y + ST_CH - 17, &FONT_XS, "%", bg == K_NOW ? K_BG : K_DIM);
+        if (st->cond) {                              /* a small percent sign (5 x 7): the font's is too wide beside two letters */
+            static const uint8_t PCT[7] = {0x19, 0x1A, 0x02, 0x04, 0x08, 0x0B, 0x13};
+            for (int r = 0; r < 7; r++)
+                for (int b = 0; b < 5; b++)
+                    if (PCT[r] >> (4 - b) & 1u)
+                        cv_rect(x + 3 + b, y + ST_CH - 13 + r, 1, 1, bg == K_NOW ? K_BG : K_DIM);
+        }
         if (step_has_lock(pats.lane, trk, pt, s))
             cv_round(x + ST_CW - 9, y + 3, 4, 4, 2, K_REC);
     }

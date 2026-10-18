@@ -546,6 +546,65 @@ static void t_jump(void)
     printf("ok %s\n", cur);
 }
 
+/* a step's chance and its pass tricks decide whether the step happens, its jump included; a jump back (or stay)
+ * starts a new pass, so the pass tricks keep counting inside a jump loop */
+static void t_jump_chance(void)
+{
+    int i, visits = 0, jumps = 0, prev = -1;
+    static const int want_ab[] = {60, 61, 60, 62, 63, 60, 61, 60, 62, 63};
+    static const int want_sk[] = {60, 60, 61, 62, 63, 60, 60, 61, 62, 63};
+    cur = "jump chance";
+    reset();
+    P.pat[0][0].len = 4;              /* empty steps (a jump works on one): the log keeps only the steps */
+    st(0, 1)->comp = SC_JUMP;
+    st(0, 1)->cval = 5;               /* one back */
+    st(0, 1)->cond = 25;
+    S.t[0].rng = 0x12345678u;         /* a fixed seed */
+    start();
+    run(1600 * L16);
+    CHECK(nev < NEV);
+    for (i = 0; i < nev; i++) {
+        if (ev[i].kind != E_STEP || ev[i].trk != 0)
+            continue;
+        if (prev == 1) {
+            visits++;
+            jumps += ev[i].a == 0;
+        }
+        prev = ev[i].a;
+    }
+    CHECK(visits > 300 && jumps * 100 > visits * 18 && jumps * 100 < visits * 32);
+    /* a condition inside the loop: step 2 plays (and jumps back) on the first of every two passes */
+    stop();
+    reset();
+    P.pat[0][0].len = 4;
+    for (i = 0; i < 4; i++)
+        note(0, i, 60 + i, 100);
+    st(0, 1)->comp = SC_JUMP;
+    st(0, 1)->cval = 5;
+    st(0, 1)->cond = COND_AB + 0;     /* 1:2 */
+    start();
+    run(16 * L16);   /* a step that does not happen still takes its time */
+    CHECK(count(E_ON, 0) >= 10);
+    for (i = 0; i < 10; i++)
+        CHECK(on_n(i)->a == want_ab[i]);
+    /* skip trigger inside a stay loop: step 1 stays twice in every three passes, then the pattern goes on */
+    stop();
+    reset();
+    P.pat[0][0].len = 4;
+    for (i = 0; i < 4; i++)
+        note(0, i, 60 + i, 100);
+    st(0, 0)->comp = SC_JUMP;
+    st(0, 0)->cval = 7;               /* stay */
+    st(0, 0)->comp2 = SC_SKIP;
+    st(0, 0)->cval2 = SK_VAL(2, 1);   /* a cycle of three, skipping its last pass */
+    start();
+    run(16 * L16);   /* a step that does not happen still takes its time */
+    CHECK(count(E_ON, 0) >= 10);
+    for (i = 0; i < 10; i++)
+        CHECK(on_n(i)->a == want_sk[i]);
+    printf("ok %s\n", cur);
+}
+
 static void t_skip(void)
 {
     int k;
@@ -1825,6 +1884,7 @@ int main(void)
     t_portamento();
     t_bend();
     t_jump();
+    t_jump_chance();
     t_skip();
     t_components();
     t_cond();

@@ -270,6 +270,10 @@ For the three skips, black key 11 cycles which pass of the cycle plays: the last
 the first. A new trick starts at its default: pulse and hold 4, multiply 2, velocity 64, the
 ramps and random 4, portamento 40 %, bend down-up, tonality fifth up, jump forward, the skips a cycle of 2.
 
+A step's chance and its skip trigger decide whether the step happens at all. When it does not, its tricks do not
+either, a jump included: a jump with a 25 % chance jumps about one time in four. A jump back, or stay, starts a new
+pass, so the A:B cycles, the skips and the ramps keep counting inside the loop it makes.
+
 A cell shows its notes, or a chord's name with its bass note under it. On a drum track, every sound on the
 step has a tick, the shown sound's bright, so the whole beat is visible while you edit one sound. A bar along
 the foot of the cells shows how far a long note reaches; an arrow at the bar's end means it goes on. The
