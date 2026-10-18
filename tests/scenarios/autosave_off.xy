@@ -1,0 +1,25 @@
+# AUTOSAVE off (GLO's list): saved at once, then a change waits for SAVE; the setting kept over a restart
+wait 300
+tap GLO
+tap SEL
+turn SELECT 30
+turn SELECT -1
+wait 50
+turn ALGO -1
+wait 100
+shot aoff_list.png
+tap HOME
+turn SELECT 3
+wait 100
+shot aoff_setup.png
+expect dirty 0
+tap SEQ
+tapkey w2
+wait 4500
+expect dirty 1
+reboot
+wait 400
+tap GLO
+turn SELECT 3
+wait 100
+shot aoff_after_reboot.png

@@ -769,8 +769,8 @@ level. Turn **SELECT** for Master EQ (low, mid and high; 64 is flat) and
 Master out (the drums' level, the melodic tracks' level, the compressor and the pump; its **SEL** list has
 what the pump follows, its release and accent, and the output level). Setup's knobs are the lights, sending MIDI
 clock, sending MIDI notes and the theme (tape deck or blueprint); the page also says where the tempo comes from
-(LOOM-8, or a MIDI clock coming in), the USB audio level and the version, and its **SEL** list sets the USB audio
-level. The projects are on **HOME**'s **SEL** list; the count-in is on **REC**'s knobs.
+(LOOM-8, or a MIDI clock coming in), the USB audio level, the autosave and the version, and **GLO**'s **SEL** list
+sets the USB audio level and AUTOSAVE. The projects are on **HOME**'s **SEL** list; the count-in is on **REC**'s knobs.
 
 **Pump** (Master out's fourth knob) lowers the whole mix each time the kick plays, by up to 24 dB, and lets it
 swell back up: the big-beat breathing of house and French touch. Accented kicks pump harder. It works even with
@@ -797,7 +797,8 @@ At power-on LOOM-8 opens the project you saved or loaded last. It saves by itsel
 flash would cut the sound). The header says "unsaved" and **SAVE** lights until then. Press **SAVE** to save at
 once. To save to another slot, hold **SAVE** and press white key 1 to 3, or use **HOME**'s **SEL** list: SAVE TO
 (turn **ALGORITHM** to the slot); LOOM-8 asks first if the slot holds another project. NEW PROJECT starts in the
-first empty slot; when all three are taken it has none, and waits for SAVE TO before it saves.
+first empty slot; when all three are taken it has none, and waits for SAVE TO before it saves. To save only when you
+press **SAVE**, set AUTOSAVE to off in **GLO**'s **SEL** list (Setup shows it); a new project keeps the choice.
 
 **A project's name.** **HOME**'s **SEL** list has RENAME. The keys type: F3 to E5 are a to z and G5 deletes;
 hold **OCT−** for capitals and **OCT+** for digits, a space and symbols. The keys on the screen show what each

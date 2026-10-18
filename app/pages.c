@@ -31,6 +31,7 @@ static const theme_t THEMES[] = {
 #define NTHEMES (sizeof THEMES / sizeof THEMES[0])
 static const theme_t *theme = &THEMES[0];
 #define THEME_OF_PROJ() (&THEMES[proj.rsv[1] % NTHEMES])
+#define AUTOSAVE_OFF 4u                              /* proj.rsv[2]: LOOM-8 saves only when SAVE is pressed */
 #define SCENES_AT_END 2u                              /* proj.rsv[2]: a scene's key waits for T1's pattern's end (bit 0: REC's mode) */
 #define K_BG theme->bg
 #define K_PANEL theme->panel
@@ -184,13 +185,13 @@ enum { A_CLEAR_NOTES, A_CLEAR_LOCKS, A_CLEAR_BOTH, A_COPY_PAT, A_PASTE_PAT, A_RO
        A_ENGINE, A_PRESET, A_SCRAMBLE, A_SAVE_PRESET, A_INIT, A_FOLLOW, A_INSERT_SLOT, A_DELETE_SLOT, A_CLEAR_SONG,
        A_PLAY_SONG, A_LOAD_PROJ, A_NEW_PROJ, A_USB_AUDIO, A_CLEAR_SCENE, A_PANIC, A_EFFECT, A_REMOVE_NOTE,
        A_COUNT_IN, A_PLAYMODE, A_FTYPE, A_FX_HP, A_FX_LP, A_FX_SEND, A_WEAVE, A_THEME, A_PUMP_BY, A_PUMP_REL,
-       A_PUMP_ACC, A_LEVEL, A_SCENE_AT, A_SAVE_TO, A_RENAME, NACTIONS };
+       A_PUMP_ACC, A_LEVEL, A_SCENE_AT, A_SAVE_TO, A_RENAME, A_AUTOSAVE, NACTIONS };
 static const char *const ACTION_NAME[NACTIONS] = {
     "CLEAR NOTES", "CLEAR LOCKS", "CLEAR NOTES AND LOCKS", "COPY PATTERN", "PASTE PATTERN", "ROTATE FORWARD",
     "ROTATE BACK", "DUPLICATE BAR", "ENGINE", "PRESET", "SCRAMBLE", "SAVE AS PRESET", "RESET SOUND", "FOLLOWS CONDUCTOR",
     "INSERT SCENE", "DELETE SLOT", "CLEAR SONG", "PLAY SONG", "LOAD PROJECT", "NEW PROJECT", "USB AUDIO", "CLEAR SCENE",
     "ALL NOTES OFF", "EFFECT", "REMOVE", "COUNT-IN", "PLAY MODE", "FILTER TYPE", "HIGH-PASS", "LOW-PASS",
-    "TO FX II", "WEAVE WITH COPIED", "THEME", "PUMP BY", "RELEASE", "ACCENT", "LEVEL", "SCENES SWITCH", "SAVE TO", "RENAME"};
+    "TO FX II", "WEAVE WITH COPIED", "THEME", "PUMP BY", "RELEASE", "ACCENT", "LEVEL", "SCENES SWITCH", "SAVE TO", "RENAME", "AUTOSAVE"};
 /* the weave's ways (pattern.h WV_*): what this pattern keeps of itself */
 static const char *const WEAVE_NAME[NWV] = {"bars", "steps", "rhythm", "notes"};
 #define LIST_ROWS 28
@@ -1794,6 +1795,7 @@ static void list_build(void)
         list_add(ACTION_NAME[A_PUMP_ACC], proj.master[MS_PUMP_ACC] ? "on" : "off", LK_PICK, A_PUMP_ACC);
         list_add(ACTION_NAME[A_LEVEL], lev, LK_PICK, A_LEVEL);
         list_add(ACTION_NAME[A_USB_AUDIO], USBA_NAME[proj.usb_full & 1u], LK_PICK, A_USB_AUDIO);
+        list_add(ACTION_NAME[A_AUTOSAVE], proj.rsv[2] & AUTOSAVE_OFF ? "off" : "on", LK_PICK, A_AUTOSAVE);
         list_add(ACTION_NAME[A_PANIC], 0, LK_ACTION, A_PANIC);
     }
     if (lst.sel >= lst.n)
@@ -3628,7 +3630,7 @@ static void draw_setup(void)
     char t[24], nm[NAME_LEN + 1];
     uint32_t h = hash_u(2166136261u, 0x5E700u | (uint32_t)proj_slot | (uint32_t)proj.usb_full << 4 | (uint32_t)seq.ext << 8 |
                                           (uint32_t)proj.rsv[0] << 12 | (uint32_t)proj.send_clock << 16 | (uint32_t)proj.send_notes << 17 |
-                                          (uint32_t)proj.rsv[1] << 20);
+                                          (uint32_t)proj.rsv[1] << 20 | (uint32_t)(proj.rsv[2] & AUTOSAVE_OFF) << 26);
     h = hash_s(h, proj.name);
     if (!begin_main(h))
         return;
@@ -3636,12 +3638,13 @@ static void draw_setup(void)
         nm[i] = proj.name[i];
     nm[NAME_LEN] = 0;
     (void)t;
-    setup_row(4, "tempo from", seq.ext ? "MIDI clock in" : "LOOM-8");
-    setup_row(22, "sends clock", proj.send_clock ? "yes" : "no");
-    setup_row(40, "sends notes", proj.send_notes ? "yes" : "no");
-    setup_row(58, "USB audio", USBA_NAME[proj.usb_full & 1u]);
-    setup_row(76, "theme", THEME_OF_PROJ()->name);
-    setup_row(94, "version", APP_VERSION);
+    setup_row(2, "tempo from", seq.ext ? "MIDI clock in" : "LOOM-8");
+    setup_row(18, "sends clock", proj.send_clock ? "yes" : "no");
+    setup_row(34, "sends notes", proj.send_notes ? "yes" : "no");
+    setup_row(50, "USB audio", USBA_NAME[proj.usb_full & 1u]);
+    setup_row(66, "autosave", proj.rsv[2] & AUTOSAVE_OFF ? "off: SAVE saves" : "on");
+    setup_row(82, "theme", THEME_OF_PROJ()->name);
+    setup_row(98, "version", APP_VERSION);
     cv_blit(0, MAIN_Y);
 }
 static uint32_t status_peak;                          /* the highest peak shown since the screen reader said it (ui.c) */

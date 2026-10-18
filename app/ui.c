@@ -1680,6 +1680,12 @@ static void list_change(int32_t e)
                 mark_dirty();
             }
             break;
+        case A_AUTOSAVE:                         /* (saved at once when stopped: off, nothing would save it) */
+            proj.rsv[2] = (uint8_t)(d > 0 ? proj.rsv[2] & ~AUTOSAVE_OFF : proj.rsv[2] | AUTOSAVE_OFF);
+            mark_dirty();
+            if (!playing() && proj_slot < NPROJ)
+                save_project(proj_slot);
+            break;
         case A_SCENE_AT:
             proj.rsv[2] = (uint8_t)(d > 0 ? proj.rsv[2] | SCENES_AT_END : proj.rsv[2] & ~SCENES_AT_END);
             mark_dirty();
@@ -2068,7 +2074,7 @@ static void action_run(int a)
         say("RESET", EG_NAME[proj.trk[sel_trk()].par[TP_ENGINE] % NENGINE]);
         break;
     case A_FOLLOW: case A_USB_AUDIO: case A_COUNT_IN: case A_THEME: case A_PLAYMODE: case A_FTYPE: case A_FX_HP: case A_FX_LP:
-    case A_FX_SEND: case A_PUMP_BY: case A_PUMP_REL: case A_PUMP_ACC: case A_LEVEL: case A_SCENE_AT: return;                      /* (ALGORITHM sets them; SEL leaves the list) */
+    case A_FX_SEND: case A_PUMP_BY: case A_PUMP_REL: case A_PUMP_ACC: case A_LEVEL: case A_SCENE_AT: case A_AUTOSAVE: return;                      /* (ALGORITHM sets them; SEL leaves the list) */
     case A_REMOVE_NOTE: act_remove_note(lst.sel); break;
     case A_INSERT_SLOT:
         if (sg->len >= NSONG) {
@@ -2945,7 +2951,7 @@ void ui_init(void)
 #define AUTOSAVE_QUIET 90u                       /* blocks of quiet (256 samples: about 0.5 s) */
 static void autosave(void)
 {
-    if (!ui.dirty || proj_slot >= NPROJ || playing() || seq.rec || seq.rec_wait || ui.ask || ui.naming || lst.open ||
+    if (!ui.dirty || (proj.rsv[2] & AUTOSAVE_OFF) || proj_slot >= NPROJ || playing() || seq.rec || seq.rec_wait || ui.ask || ui.naming || lst.open ||
         ui.btn || ui.keys || plat_ms() - ui.act_t < AUTOSAVE_MS || eng_voices || eng_quiet < AUTOSAVE_QUIET)
         return;
     if (project_save(proj_slot) == 0)

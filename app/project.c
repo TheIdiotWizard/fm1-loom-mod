@@ -125,10 +125,12 @@ void project_defaults(void)
     static const uint8_t ORDER[NTRK] = {EG_DRUMLINE, EG_STACK, EG_WEFT, EG_WAVETABLE, EG_ORBIT, EG_TINES,
                                         EG_ORGAN, EG_SYNC};
     int t, k;
-    uint8_t *z = (uint8_t *)&proj, theme = proj.rsv[1];   /* a new project keeps the theme */
+    uint8_t *z = (uint8_t *)&proj, theme = proj.rsv[1], aoff = proj.rsv[2] & 4u;   /* a new project keeps the theme
+                                                                                    * and the autosave (pages.c AUTOSAVE_OFF) */
     for (k = 0; k < (int)sizeof proj; k++)
         z[k] = 0;
     proj.rsv[1] = theme;
+    proj.rsv[2] = aoff;
     proj.magic = PROJ_MAGIC;
     proj.format = PROJ_FORMAT;
     proj.name[0] = 'N';
