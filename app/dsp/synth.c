@@ -346,13 +346,16 @@ static void eng_init(voice_t *v)
 }
 
 /* a rising saw crossfading into a pulse that is low first and high after pw: the two in step, so the
- * morph keeps its level (a pulse high first would cancel the saw's fundamental halfway) */
+ * morph keeps its level (a pulse high first would cancel the saw's fundamental halfway). The pulse's
+ * second edge sits at p + 1 - pw in (0.5, 2): its wrap is a compare (the same bits as wrap1's floor) */
 SY_INLINE float saw_pulse(float p, float dt, float idt, float pw, float mix)
 {
-    float b0 = blep(p, dt, idt), saw = 2.0f * p - 1.0f - b0, pl;   /* the wrap's residual serves both */
+    float b0 = blep(p, dt, idt), saw = 2.0f * p - 1.0f - b0, pl, q;   /* the wrap's residual serves both */
     if (mix <= 0.0f)
         return saw;
-    pl = (p < pw ? -1.0f : 1.0f) - b0 + blep(wrap1(p + 1.0f - pw), dt, idt);
+    q = p + 1.0f - pw;
+    q = q >= 1.0f ? q - 1.0f : q;
+    pl = (p < pw ? -1.0f : 1.0f) - b0 + blep(q, dt, idt);
     if (mix >= 1.0f)
         return pl;
     return saw + (pl - saw) * mix;
@@ -363,90 +366,183 @@ SY_INLINE float saw_pulse(float p, float dt, float idt, float pw, float mix)
  * wave: a sine at sweep times the note (1..16) under a window that falls across each cycle (the CZ's
  * resonance, a formant that moves with sweep); spread opens a detuned copy across the field. The steep
  * parts keep at least 2.5 samples (softer corners on high notes) and the resonance stays under 0.4 x the
- * sample rate. The resonant wave carries some DC: a one-pole blocker while it sounds. */
+ * sample rate. The resonant wave carries some DC: a one-pole blocker while it sounds.
+ *
+ * The bent phases run straight between four corners (the bend point d, 0.5, 0.5 + d and the wrap), so between
+ * corners every cosine is a steady sine: a sample at a corner (and a sub-block's first) reads the waves exactly,
+ * the samples after it rotate a phasor by the stretch's step (four multiplies, no polynomial). The steps'
+ * cosines and sines are made here, three a copy: plain, the bent phase's in stretches A (0..d), B and D, C;
+ * resonant, the pulse's in A and C (B and D hold it still) and the resonance's in A and in B, C, D. Rotating
+ * for at most a sub-block (16 samples) keeps the difference from reading every sample exactly under -100 dB. */
+/* n phasor steps (turns): cos, sin each (apart: one polynomial in the code for the preps) */
+__attribute__((noinline)) static void cos_sin_steps(float *out, const float *a, int n)
+{
+    int i;
+    for (i = 0; i < 2 * n; i++)
+        out[i] = fm_sin_turns(a[i >> 1] + (i & 1 ? 0.0f : 0.25f));
+}
 static void weft_prep(voice_t *v)
 {
     cfg_t *c = &v->c;
-    float dt = fm_minf(c->freq * INV_SR, 0.45f), w = c->e[1], sp = c->e[3], d;
+    float dt = fm_minf(c->freq * INV_SR, 0.45f), w = c->e[1], sp = c->e[3], d, kd, kd2, mo, r, ga, gb, norm, a[6];
+    int k;
     d = 0.5f * fm_exp2f(-4.64f * c->e[0]);                         /* the bend point 0.5 .. 0.02 */
     d = fm_maxf(d, fm_minf(2.5f * dt, 0.5f));
+    kd = 0.5f / d;
+    kd2 = 0.5f / (1.0f - d);
+    mo = w < 0.5f ? w * 2.0f : w * 2.0f - 1.0f;                   /* the morph inside its half */
+    r = fm_minf(1.0f + 15.0f * c->e[2], fm_maxf(0.4f / dt, 1.0f));
+    ga = fm_cosf((1.0f - sp) * 0.78539816f);                      /* the field: both in the middle .. one a side */
+    gb = fm_sinf((1.0f - sp) * 0.78539816f);
+    norm = 1.0f / (ga + gb);
+    c->stereo = sp > 0.001f;
     c->ex[0] = dt;
     c->ex[1] = fm_minf(c->freq * fm_exp2f(sp * 0.01f) * INV_SR, 0.45f);   /* the copy: up to 12 cents up */
     c->ex[2] = d;
-    c->ex[3] = 0.5f / d;
-    c->ex[4] = 0.5f / (1.0f - d);
-    c->ex[5] = w < 0.5f ? w * 2.0f : w * 2.0f - 1.0f;             /* the morph inside its half */
-    c->ex[6] = w < 0.5f ? 0.0f : 1.0f;                            /* 0: saw .. pulse, 1: pulse .. resonant */
-    c->ex[7] = fm_minf(1.0f + 15.0f * c->e[2], fm_maxf(0.4f / dt, 1.0f));
-    c->ex[8] = fm_cosf((1.0f - sp) * 0.78539816f);                /* the field: both in the middle .. one a side */
-    c->ex[9] = fm_sinf((1.0f - sp) * 0.78539816f);
-    c->stereo = sp > 0.001f;
+    c->ex[3] = mo;
+    c->ex[4] = r;
+    c->ex[5] = ga * norm;
+    c->ex[6] = gb * norm;
+    c->ex[7] = w < 0.5f ? 0.0f : 1.0f;                            /* 0: saw .. pulse, 1: pulse .. resonant */
+    for (k = 0; k <= (c->stereo != 0); k++) {                     /* the steps' phasors, ex[8..13] and [14..19] */
+        float dk = c->ex[k];
+        a[3 * k] = kd * dk;
+        if (w < 0.5f) {
+            a[3 * k + 1] = (1.0f - mo) * kd2 * dk;
+            a[3 * k + 2] = ((1.0f - mo) * kd2 + mo * kd) * dk;
+        } else {
+            a[3 * k + 1] = r * kd * dk;
+            a[3 * k + 2] = r * kd2 * dk;
+        }
+    }
+    cos_sin_steps(c->ex + 8, a, 3 * k);
+    v->o[14] = 1.0f;                             /* (the phasors: read again) */
 }
-SY_INLINE float weft_wave(float p, float d, float kd, float kd2, float mo, float r, const int reso)
+/* a copy's stretch (from its phase p): the next corner and the stretch's rotations; and its waves read at p */
+typedef struct { float y, z, u, uc, c, s, c2, s2, nb; int turn; } weft_seg_t;
+SY_INLINE void weft_stretch(weft_seg_t *g, float p, float d, const float *rot, const int reso)
+{
+    int st = p < d ? 0 : p < 0.5f ? 1 : p < 0.5f + d ? 2 : 3, j;
+    g->nb = st == 0 ? d : st == 1 ? 0.5f : st == 2 ? 0.5f + d : 1.0f;   /* the next corner */
+    if (!reso) {
+        j = st == 0 ? 0 : st == 2 ? 4 : 2;
+    } else {
+        g->turn = !(st & 1);                     /* (the pulse holds in B, D) */
+        g->c2 = rot[st == 0 ? 2 : 4];
+        g->s2 = rot[st == 0 ? 3 : 5];
+        j = 0;
+    }
+    g->c = rot[j];
+    g->s = rot[j + 1];
+}
+SY_INLINE void weft_read(weft_seg_t *g, float p, float d, float kd, float kd2, float mo, float r, const int reso)
 {
     float qs = p < d ? p * kd : 0.5f + (p - d) * kd2;                               /* the saw's bent phase */
     float qp = p < 0.5f ? fm_minf(p * kd, 0.5f) : 0.5f + fm_minf((p - 0.5f) * kd, 0.5f);   /* the pulse's */
-    if (!reso)
-        return fm_sin_turns(qs + (qp - qs) * mo + 0.25f);
-    {
-        float pl = fm_sin_turns(qp + 0.25f), rs = (1.0f - p) * fm_sin_turns(r * qs) * 1.2f;
-        return pl + (rs - pl) * mo;
+    if (!reso) {
+        float q = qs + (qp - qs) * mo;
+        g->y = fm_sin_turns(q + 0.25f);                                      /* cos 2 pi q: the sample */
+        g->z = fm_sin_turns(q);
+    } else {
+        float rq = r * qs;
+        g->y = fm_sin_turns(qp + 0.25f);                                     /* the pulse: cos, sin */
+        g->z = fm_sin_turns(qp);
+        g->u = fm_sin_turns(rq);                                             /* the resonance: sin, cos */
+        g->uc = fm_sin_turns(rq + 0.25f);
     }
 }
-SY_INLINE void weft_loop(voice_t *v, float *xl, float *xr, int m, const int reso, const int stereo)
+/* one copy's m samples into x (the resonant half through its DC blocker), from phase *pp; ph keeps the phasors
+ * from run to run (read again when seed: a sub-block's start, or a new configuration) */
+SY_INLINE void weft_osc(const cfg_t *c, float *pp, float dp, const float *rot, float *x, int m, float *bx, float *by,
+                        float *ph, int seed, const int reso)
 {
-    const cfg_t *c = &v->c;
-    float p1 = v->o[0], p2 = v->o[1], d1 = c->ex[0], d2 = c->ex[1];
-    float d = c->ex[2], kd = c->ex[3], kd2 = c->ex[4], mo = c->ex[5], r = c->ex[7];
-    float ga = c->ex[8], gb = c->ex[9], norm = 1.0f / (ga + gb);
-    float xa = v->o[2], ya = v->o[3], xb = v->o[4], yb = v->o[5], a = 0.0f, b = 0.0f;
+    float p = *pp, d = c->ex[2], kd = 0.5f / d, kd2 = 0.5f / (1.0f - d), mo = c->ex[3], r = c->ex[4];
+    float xa = *bx, ya = *by, a = 0.0f;
+    weft_seg_t g = {0};
     int i;
-    ga *= norm;
-    gb *= norm;
+    if (seed) {
+        g.nb = -1.0f;                            /* (the first sample is read) */
+    } else {                                     /* (the stretch the last sample was in) */
+        weft_stretch(&g, p, d, rot, reso);
+        g.y = ph[0];
+        g.z = ph[1];
+        g.u = ph[2];
+        g.uc = ph[3];
+    }
     for (i = 0; i < m; i++) {
-        p1 = step1(p1, d1);
-        a = weft_wave(p1, d, kd, kd2, mo, r, reso);
-        if (reso) {
-            float y = a - xa + 0.999f * ya;
+        p += dp;                                 /* (step1: past a corner, maybe the wrap) */
+        if (p >= g.nb) {
+            if (p >= 1.0f)
+                p -= 1.0f;
+            weft_stretch(&g, p, d, rot, reso);
+            weft_read(&g, p, d, kd, kd2, mo, r, reso);
+        } else {
+            float t;
+            if (!reso || g.turn) {
+                t = g.y * g.c - g.z * g.s;
+                g.z = g.z * g.c + g.y * g.s;
+                g.y = t;
+            }
+            if (reso) {
+                t = g.u * g.c2 + g.uc * g.s2;
+                g.uc = g.uc * g.c2 - g.u * g.s2;
+                g.u = t;
+            }
+        }
+        if (!reso) {
+            a = g.y;
+        } else {
+            float rs = (1.0f - p) * g.u * 1.2f, y;
+            a = g.y + (rs - g.y) * mo;
+            y = a - xa + 0.999f * ya;
             xa = a;
             ya = y;
-            a = y;
         }
-        if (stereo) {
-            p2 = step1(p2, d2);
-            b = weft_wave(p2, d, kd, kd2, mo, r, reso);
-            if (reso) {
-                float y = b - xb + 0.999f * yb;
-                xb = b;
-                yb = y;
-                b = y;
-            }
-            xl[i] = a * ga + b * gb;
-            xr[i] = a * gb + b * ga;
-        } else {
-            xl[i] = a;
-        }
+        x[i] = reso ? ya : a;
     }
-    if (!reso) {                                 /* the blocker passes the wave unchanged from here, so */
+    if (!reso)                                   /* the blocker passes the wave unchanged from here, so */
         xa = ya = a;                             /* turning wave into the resonant half is seamless */
-        if (stereo)
-            xb = yb = b;
-    }
-    v->o[0] = p1;
-    v->o[1] = p2;
-    v->o[2] = xa;
-    v->o[3] = fm_flush(ya);
-    v->o[4] = xb;
-    v->o[5] = fm_flush(yb);
+    *pp = p;
+    *bx = xa;
+    *by = fm_flush(ya);
+    ph[0] = g.y;
+    ph[1] = g.z;
+    ph[2] = g.u;
+    ph[3] = g.uc;
 }
+static void weft_osc_pd(const cfg_t *c, float *o, int k, float *x, int m, int seed)
+{
+    weft_osc(c, &o[k], c->ex[k], c->ex + 8 + 6 * k, x, m, &o[2 + 2 * k], &o[3 + 2 * k], &o[6 + 4 * k], seed, 0);
+}
+static void weft_osc_res(const cfg_t *c, float *o, int k, float *x, int m, int seed)
+{
+    weft_osc(c, &o[k], c->ex[k], c->ex + 8 + 6 * k, x, m, &o[2 + 2 * k], &o[3 + 2 * k], &o[6 + 4 * k], seed, 1);
+}
+/* the copies' state: phases o[0..1], blockers o[2..5], phasors o[6..13]; o[14] 1: read them again (eng_init
+ * and weft_prep set it). Every sub-block's start reads the waves again, so a run split anywhere (two renders,
+ * the cores' halves) makes the same samples */
 static void weft_run(voice_t *v, float *xl, float *xr, int m)
 {
-    switch ((v->c.ex[6] > 0.5f) * 2 + (v->c.stereo != 0)) {
-    case 0: weft_loop(v, xl, xr, m, 0, 0); break;
-    case 1: weft_loop(v, xl, xr, m, 0, 1); break;
-    case 2: weft_loop(v, xl, xr, m, 1, 0); break;
-    default: weft_loop(v, xl, xr, m, 1, 1); break;
+    const cfg_t *c = &v->c;
+    const int reso = c->ex[7] > 0.5f, seed = (v->pos & (SUB - 1)) == 0 || v->o[14] != 0.0f;
+    int i;
+    if (reso)
+        weft_osc_res(c, v->o, 0, xl, m, seed);
+    else
+        weft_osc_pd(c, v->o, 0, xl, m, seed);
+    if (c->stereo) {
+        float ga = c->ex[5], gb = c->ex[6];
+        if (reso)
+            weft_osc_res(c, v->o, 1, xr, m, seed);
+        else
+            weft_osc_pd(c, v->o, 1, xr, m, seed);
+        for (i = 0; i < m; i++) {
+            float a = xl[i], b = xr[i];
+            xl[i] = a * ga + b * gb;
+            xr[i] = a * gb + b * ga;
+        }
     }
+    v->o[14] = 0.0f;
 }
 
 /* stack: two oscillators, the second at ratio N:1 (1..8, the knob's own range) and detuned, one each
@@ -454,7 +550,7 @@ static void weft_run(voice_t *v, float *xl, float *xr, int m)
 static void stack_prep(voice_t *v)
 {
     cfg_t *c = &v->c;
-    float w = c->e[3], ratio = fm_clampf(fm_floorf(c->ek[1] + 0.5f), 1.0f, 8.0f), cents = c->e[2] * 50.0f;
+    float w = c->e[3], ratio = fm_clampf(fm_floorf(c->ek[1] + 0.5f), 1.0f, 8.0f), cents = c->e[2] * 50.0f, ga, gb, norm;
     c->ex[0] = fm_minf(c->freq * INV_SR, 0.45f);
     c->ex[1] = fm_minf(c->freq * ratio * fm_exp2f(cents * (1.0f / 1200.0f)) * INV_SR, 0.45f);
     if (c->e[0] < 0.5f) {                        /* saw .. square */
@@ -464,33 +560,75 @@ static void stack_prep(voice_t *v)
         c->ex[2] = 1.0f;
         c->ex[3] = 0.5f - (c->e[0] - 0.5f) * 0.8f;
     }
-    c->ex[5] = fm_cosf((1.0f - w) * 0.78539816f);
-    c->ex[6] = fm_sinf((1.0f - w) * 0.78539816f);
+    ga = fm_cosf((1.0f - w) * 0.78539816f);
+    gb = fm_sinf((1.0f - w) * 0.78539816f);
+    norm = 1.0f / (ga + gb);
+    c->ex[5] = ga * norm;                        /* the field's gains, normalised */
+    c->ex[6] = gb * norm;
+    c->ex[7] = 1.0f / c->ex[0];                  /* the PolyBLEPs' 1 / increment */
+    c->ex[8] = 1.0f / c->ex[1];
     c->stereo = w > 0.001f;
 }
-static void stack_run(voice_t *v, float *xl, float *xr, int m)
+/* one oscillator's m samples into x. Away from its two edges (the saw's wrap, the pulse's step at pw) both
+ * PolyBLEPs are exactly 0 and the pulse is -1 or 1, so there saw_pulse is the plain saw + (pulse - saw) mix:
+ * the run takes that whenever the phase is inside one of the two stretches clear of both (the pulse's ends
+ * kept 1e-6 further off than its edge's reach, the rounding of p + 1 - pw), and saw_pulse itself elsewhere.
+ * The same bits either way. */
+static void stack_osc(float *pp, float d, float id, float pw, float mix, float *x, int m)
+{
+    float p = *pp, a1 = d, b1 = pw - d - 1e-6f, a2 = pw + d + 1e-6f, b2 = 1.0f - d;   /* the clear stretches */
+    float lo = 2.0f, hi = 0.0f, s = 0.0f;        /* the stretch the phase is in or heading for (none yet) */
+    int i;
+    for (i = 0; i < m; i++) {
+        p = step1(p, d);
+        if (p >= lo && p <= hi) {
+            float saw = 2.0f * p - 1.0f;
+            x[i] = mix <= 0.0f ? saw : mix >= 1.0f ? s : saw + (s - saw) * mix;
+        } else {
+            x[i] = saw_pulse(p, d, id, pw, mix);
+            if (p <= b1 || p > b2)               /* (before the pulse's edge, or past the wrap's reach) */
+                lo = a1, hi = b1, s = -1.0f;
+            else
+                lo = a2, hi = b2, s = 1.0f;
+        }
+    }
+    *pp = p;
+}
+SY_INLINE void stack_loop(voice_t *v, float *xl, float *xr, int m, const int stereo)
 {
     const cfg_t *c = &v->c;
-    float p1 = v->o[0], p2 = v->o[1], d1 = c->ex[0], d2 = c->ex[1], i1 = 1.0f / d1, i2 = 1.0f / d2;
-    float mix = c->ex[2], pw = c->ex[3], ga = c->ex[5], gb = c->ex[6], norm = 1.0f / (ga + gb);
+    float mix = c->ex[2], pw = c->ex[3], ga = c->ex[5], gb = c->ex[6];
     int i;
-    ga *= norm;
-    gb *= norm;
+    if (mix <= 0.0f) {                           /* the plain saws: the two in one pass */
+        float p1 = v->o[0], p2 = v->o[1], d1 = c->ex[0], d2 = c->ex[1], i1 = c->ex[7], i2 = c->ex[8];
+        for (i = 0; i < m; i++) {
+            p1 = step1(p1, d1);
+            p2 = step1(p2, d2);
+            xl[i] = 2.0f * p1 - 1.0f - blep(p1, d1, i1);   /* (saw_pulse's saw) */
+            xr[i] = 2.0f * p2 - 1.0f - blep(p2, d2, i2);
+        }
+        v->o[0] = p1;
+        v->o[1] = p2;
+    } else {
+        stack_osc(&v->o[0], c->ex[0], c->ex[7], pw, mix, xl, m);
+        stack_osc(&v->o[1], c->ex[1], c->ex[8], pw, mix, xr, m);
+    }
     for (i = 0; i < m; i++) {
-        float a, b;
-        p1 = step1(p1, d1);
-        p2 = step1(p2, d2);
-        a = saw_pulse(p1, d1, i1, pw, mix);
-        b = saw_pulse(p2, d2, i2, pw, mix);
-        if (c->stereo) {
+        float a = xl[i], b = xr[i];
+        if (stereo) {
             xl[i] = a * ga + b * gb;
             xr[i] = a * gb + b * ga;
         } else {
             xl[i] = (a + b) * 0.5f;
         }
     }
-    v->o[0] = p1;
-    v->o[1] = p2;
+}
+static void stack_run(voice_t *v, float *xl, float *xr, int m)
+{
+    if (v->c.stereo)
+        stack_loop(v, xl, xr, m, 1);
+    else
+        stack_loop(v, xl, xr, m, 0);
 }
 
 /* wavetable: a frame crossfade (scan) through one of nine tables, bend bends the phase (symmetry), ripple
@@ -593,7 +731,11 @@ static void orbit_chunk(voice_t *v)               /* the wobble: +-20 cents at t
 
 /* tines: a tine (carrier with a 1:1 modulator whose index decays, as a struck reed's brightness),
  * grit = a 2:1 modulator, bite = a short index burst at the start, bell = a high partial
- * (14x) that dies quickly. The brightness envelopes live in o[13..15] and step once a chunk. */
+ * (14x) that dies quickly. The brightness envelopes live in o[13..15] and step once a chunk.
+ * The carrier and the 1:1 modulator share their phase (both start at 0 and step alike). The modulator and the
+ * tine partial are plain sines: a sub-block reads them once, from the phases, and rotates phasors (the steps'
+ * cosines and sines made here), the 2:1 one is 2 sin cos of the modulator's; only the carrier, read through
+ * the modulation, takes a polynomial every sample. (Under -100 dB from reading every sine every sample.) */
 static void tines_prep(voice_t *v)
 {
     cfg_t *c = &v->c;
@@ -603,6 +745,8 @@ static void tines_prep(voice_t *v)
     c->ex[3] = c->e[1] * 1.2f;                                              /* texture: the 2:1 index */
     c->ex[4] = c->e[2] * 3.0f;                                              /* punch: the burst's index */
     c->ex[5] = c->e[3] * 0.5f;                                              /* tine level */
+    cos_sin_steps(c->ex + 6, c->ex, 2);                                     /* the steps: cos, sin */
+    v->o[7] = 0.0f;                                                         /* (the phasors: read again) */
     c->stereo = 0;
 }
 static void tines_chunk(voice_t *v)                 /* the brightness envelopes, once a chunk */
@@ -614,32 +758,55 @@ static void tines_chunk(voice_t *v)                 /* the brightness envelopes,
 SY_INLINE void tines_loop(voice_t *v, float *xl, int m, const int has_tine, const int has_tex)
 {
     const cfg_t *c = &v->c;
-    float cp = v->o[0], mp = v->o[1], tp = v->o[2];
+    float mp = v->o[1], tp = v->o[2], mc = v->o[3], ms = v->o[4], tc = v->o[5], ts = v->o[6];
     float d = c->ex[0], dt = c->ex[1], idx = c->ex[2] * v->o[15] + c->ex[4] * v->o[14], tex = c->ex[3] * v->o[15];
-    float tine = c->ex[5] * v->o[13];
+    float tine = c->ex[5] * v->o[13], kc = c->ex[6], ks = c->ex[7], tkc = c->ex[8], tks = c->ex[9];
     int i;
     for (i = 0; i < m; i++) {
-        float mo;
-        mp = step1(mp, d);
-        cp = step1(cp, d);
-        mo = fm_sin_turns(mp) * idx;
-        if (has_tex)                             /* (texture 0, felt piano's and soft felt's: a sine less) */
-            mo += fm_sin_turns(mp + mp) * tex;
-        xl[i] = fm_sin_turns(cp + mo * 0.25f) * 0.9f;
+        float mo, x;
+        mp = step1(mp, d);                       /* the phases and their phasors step */
+        x = ms * kc + mc * ks;
+        mc = mc * kc - ms * ks;
+        ms = x;
         if (has_tine) {
             tp = step1(tp, dt);
-            xl[i] += fm_sin_turns(tp) * tine;
+            x = ts * tkc + tc * tks;
+            tc = tc * tkc - ts * tks;
+            ts = x;
         }
+        mo = ms * idx;
+        if (has_tex)                             /* (texture 0, felt piano's and soft felt's: a sine less) */
+            mo += ms * (mc + mc) * tex;
+        x = fm_sin_turns(mp + mo * 0.25f) * 0.9f;
+        if (has_tine)
+            x += ts * tine;
+        xl[i] = x;
     }
-    v->o[0] = cp;
+    v->o[0] = mp;
     v->o[1] = mp;
     v->o[2] = tp;
+    v->o[3] = mc;
+    v->o[4] = ms;
+    v->o[5] = tc;
+    v->o[6] = ts;
 }
+/* the state: the phases o[0..2], their phasors o[3..6] (cos, sin), o[7] 1 while they hold (eng_init and
+ * tines_prep clear it); every sub-block's start reads the phasors again from the phases, so a run split anywhere
+ * makes the same samples */
 static void tines_run(voice_t *v, float *xl, float *xr, int m)
 {
+    const int tex = v->c.ex[3] * v->o[15] != 0.0f, tine = v->c.ex[5] * v->o[13] > 0.0005f;
     (void)xr;
-    const int tex = v->c.ex[3] * v->o[15] != 0.0f;
-    if (v->c.ex[5] * v->o[13] > 0.0005f) {      /* the tine partial dies in a quarter second */
+    if ((v->pos & (SUB - 1)) == 0 || v->o[7] == 0.0f)
+    {
+        v->o[3] = fm_sin_turns(v->o[1] + 0.25f);
+        v->o[4] = fm_sin_turns(v->o[1]);
+        if (tine) {
+            v->o[5] = fm_sin_turns(v->o[2] + 0.25f);
+            v->o[6] = fm_sin_turns(v->o[2]);
+        }
+    }
+    if (tine) {                                  /* the tine partial dies in a quarter second */
         if (tex)
             tines_loop(v, xl, m, 1, 1);
         else
@@ -649,6 +816,7 @@ static void tines_run(voice_t *v, float *xl, float *xr, int m)
     } else {
         tines_loop(v, xl, m, 0, 0);
     }
+    v->o[7] = 1.0f;
 }
 
 /* organ: six drawbars (16' 8' 4' 2 2/3' 2' 1 1/3') as rotating phasors (a complex multiply a sine:
