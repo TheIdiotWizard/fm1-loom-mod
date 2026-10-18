@@ -1682,7 +1682,7 @@ static void list_build(void)
         }
         return;
     }
-    if (keep >= P_MIX || PAGE_BTN[g].btn == B_FX)
+    if (PAGE_BTN[g].btn == B_FX)                     /* (FX I and FX II each their own effect: the page's list) */
         f = keep, n = 1;
     for (int p = f; p < f + n; p++) {
         ui.page = (uint8_t)p;
@@ -1710,18 +1710,17 @@ static void list_build(void)
             list_add(ACTION_NAME[A_ROT_BACK], 0, LK_ACTION, A_ROT_BACK);
             list_add(ACTION_NAME[A_DUP_BAR], 0, LK_ACTION, A_DUP_BAR);
         }
-    } else if (keep == P_ARRANGE) {                 /* the projects, then the scenes */
+    } else if (keep == P_ARRANGE || keep == P_SONG) {   /* HOME's one list: the projects, the song, the scenes */
         proj_slot_text(ui.pick_slot % NPROJ, slot_t);
         list_add(ACTION_NAME[A_LOAD_PROJ], slot_t, LK_PICK, A_LOAD_PROJ);
         list_add(ACTION_NAME[A_NEW_PROJ], 0, LK_ACTION, A_NEW_PROJ);
-        list_add(ACTION_NAME[A_SCENE_AT], proj.rsv[2] & SCENES_AT_END ? "pattern end" : "next bar", LK_PICK, A_SCENE_AT);
-        list_add(ACTION_NAME[A_CLEAR_SCENE], 0, LK_ACTION, A_CLEAR_SCENE);
-        list_add(ACTION_NAME[A_PANIC], 0, LK_ACTION, A_PANIC);
-    } else if (keep == P_SONG) {
+        list_add(ACTION_NAME[A_PLAY_SONG], 0, LK_ACTION, A_PLAY_SONG);
         list_add(ACTION_NAME[A_INSERT_SLOT], 0, LK_ACTION, A_INSERT_SLOT);
         list_add(ACTION_NAME[A_DELETE_SLOT], 0, LK_ACTION, A_DELETE_SLOT);
         list_add(ACTION_NAME[A_CLEAR_SONG], 0, LK_ACTION, A_CLEAR_SONG);
-        list_add(ACTION_NAME[A_PLAY_SONG], 0, LK_ACTION, A_PLAY_SONG);
+        list_add(ACTION_NAME[A_SCENE_AT], proj.rsv[2] & SCENES_AT_END ? "pattern end" : "next bar", LK_PICK, A_SCENE_AT);
+        list_add(ACTION_NAME[A_CLEAR_SCENE], 0, LK_ACTION, A_CLEAR_SCENE);
+        list_add(ACTION_NAME[A_PANIC], 0, LK_ACTION, A_PANIC);
     } else if (fx_page(keep)) {                     /* an effect: the type, its filter, the feed into FX II */
         int ft = keep == P_FX1 ? AUX_FX1 : AUX_FX2;
         static char hp[8], lp[8], fd[8];
@@ -1771,9 +1770,7 @@ static void list_build(void)
             s_cat(fol_t, FOLLOW_NAME[proj.trk[trk].par[TP_BRAIN] % 3]);
             list_add(ACTION_NAME[A_FOLLOW], fol_t, LK_PICK, A_FOLLOW);
         }
-    } else if (keep == P_MIX) {
-        list_add(ACTION_NAME[A_PANIC], 0, LK_ACTION, A_PANIC);
-    } else if (keep == P_MASTER3) {                 /* the out page: the pump's settings, the level */
+    } else if (keep >= P_MIX) {                     /* GLO's one list: the pump's settings, the level, USB audio */
         static char by[8], rel[12], lev[8];
         char *e = num_i((int32_t)(master_pump_ms(proj.master[MS_PUMP_REL]) + 0.5f), rel);
         s_cat(e, " ms");
@@ -1782,8 +1779,8 @@ static void list_build(void)
         list_add(ACTION_NAME[A_PUMP_REL], rel, LK_PICK, A_PUMP_REL);
         list_add(ACTION_NAME[A_PUMP_ACC], proj.master[MS_PUMP_ACC] ? "on" : "off", LK_PICK, A_PUMP_ACC);
         list_add(ACTION_NAME[A_LEVEL], lev, LK_PICK, A_LEVEL);
-    } else if (keep == P_SETUP) {
         list_add(ACTION_NAME[A_USB_AUDIO], USBA_NAME[proj.usb_full & 1u], LK_PICK, A_USB_AUDIO);
+        list_add(ACTION_NAME[A_PANIC], 0, LK_ACTION, A_PANIC);
     }
     if (lst.sel >= lst.n)
         lst.sel = (uint8_t)(lst.n ? lst.n - 1 : 0);
