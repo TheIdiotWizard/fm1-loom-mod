@@ -833,9 +833,18 @@ static void t_locks(void)
     /* the pattern wraps: 50 holds to the end (nothing restores the knob), then step 1's 10 again */
     run(14 * L16);
     CHECK(count(E_LOCK, 0) == 3 && nth(E_LOCK, 0, 2)->b == 10 && near(nth(E_LOCK, 0, 2)->t, 16 * L16 + 8, 1));
-    /* shape: the value walks from 10 to 50 across the two steps */
     stop();
     CHECK(nth(E_LOCK, 0, 3) && nth(E_LOCK, 0, 3)->b == LOCK_NONE);     /* stop: the knob again */
+    /* a step that plays without a lock gets the knob back; the empty steps before it kept the lock */
+    note(0, 5, 64, 100);
+    nev = 0;
+    start();
+    run(6 * L16);
+    CHECK(count(E_LOCK, 0) == 3 && nth(E_LOCK, 0, 1)->b == 50 && nth(E_LOCK, 0, 2)->b == LOCK_NONE &&
+          near(nth(E_LOCK, 0, 2)->t, 5 * L16 + 1, 1));
+    stop();
+    memset(&P.pat[0][0].st[5], 0, sizeof P.pat[0][0].st[5]);
+    /* shape: the value walks from 10 to 50 across the two steps */
     P.pat[0][0].shape = 100;
     nev = 0;
     start();

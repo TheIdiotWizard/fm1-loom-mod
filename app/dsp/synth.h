@@ -103,12 +103,12 @@ enum { FT_LP24, FT_LADDER, FT_LP12, FT_HP12, FT_DYNAMIC, FT_BP12, NFT };
  *   ring:    a ring modulator, a sine at a ratio of the note (tone: 0.25:1 .. 7:1 in 16 steps); amount = depth
  *   tilt:    a tilt EQ: amount = its pivot (150 Hz .. 6 kHz), tone = the tilt (below 64 darker, above brighter,
  *            +-6 dB each side at the ends)
- * mix: dry (0) .. wet (127); at 0 the stage is skipped. The LFO reaches the amount (the amp module's knob 4). */
+ * mix: dry (0) .. wet (127); at 0 the stage is skipped. The LFO reaches the amount (the voice module's knob 4). */
 enum { CT_OFF, CT_DRIVE, CT_FOLD, CT_CRUSH, CT_RING, CT_TILT, NCT };
 /* the LFO: TP_LSPEED is one knob: 0..7 synced 2/1, 1, 1/2, 1/4, 1/8, 1/16, 1/32, 1/64
  * (counter-clockwise), 8..127 free (clockwise, 0.1..30 Hz). Per type the five values TP_LSPEED / TP_LAMT /
  * TP_LDEST / TP_LX / TP_LX2 mean:
- *   wave:    speed, amount -100..100 % (64 = 0), destination (LD_*: the module synth / envelope / filter / amp,
+ *   wave:    speed, amount -100..100 % (64 = 0), destination (LD_*: the module synth / envelope / filter / voice,
  *            + LD_FREE for the free-running version), parameter (TP_LX: the module's knob
  *            0..3: the engine's four, attack / decay / sustain / release, cutoff / reso / env / keytrack, volume /
  *            pitch / pan / character (its amount)), shape (TP_LX2: square, sine, ramp, saw).
@@ -123,7 +123,7 @@ enum { CT_OFF, CT_DRIVE, CT_FOLD, CT_CRUSH, CT_RING, CT_TILT, NCT };
  * The envelope knob: 64 = none; below, the LFO fades in from the note over up to 3 s (0 = 3 s, 63 = at once);
  * above, it fades out over up to 3 s (65 = 3 s, 127 = 50 ms). */
 enum { LT_OFF, LT_WAVE, LT_WOBBLE, LT_DRIFT, LT_PUMP, NLT };
-enum { LD_SYNTH, LD_ENV, LD_FILTER, LD_AMP, LD_FREE = 4, NLD = 8 };   /* TP_LDEST: module, + LD_FREE = free-running */
+enum { LD_SYNTH, LD_ENV, LD_FILTER, LD_AMP, LD_FREE = 4, NLD = 8 };   /* TP_LDEST: module (LD_AMP: "voice"), + LD_FREE = free-running */
 #define LS_SYNC_N 8                                /* TP_LSPEED values below this are synced divisions */
 enum { PL_OFF, PL_ARP, PL_STRUM, PL_HOLD, NPL };
 /* arp: P1 speed (1/4 1/4T 1/8 1/8T 1/16 1/16T 1/32 1/32T 1/64), P2 pattern (up, down, bounce (up and down, the
@@ -160,6 +160,9 @@ void sound_default(uint8_t *par, int engine);       /* par[NTP] for a fresh trac
  * quantised; ring: two cycles of a sine (u 0..1) ring-modulated (its peak at 1); tilt: the response in dB / 6 from 50 Hz
  * (u = 0) to 20 kHz (u = 1). The mix is in it. */
 float char_picture(const uint8_t *par, float u);
+/* the Engine page's picture of the organ: the six drawbars' levels (16' 8' 4' 2 2/3' 2' 1 1/3', 0..1, the loudest 1) that
+ * stops and pedal set (organ_prep's registration) */
+void organ_bars(const uint8_t *par, float bars[6]);
 /* a track's level (TP_LEVEL) as a gain: a fader's law, cubic (60 dB over 0..100: half way -18 dB), 100 = 0 dB,
  * 127 = +6.2 dB, 0 = off. The drums and the FX returns take it as is; the synth's voices with 100/127 under it
  * (their headroom: synth.c) */

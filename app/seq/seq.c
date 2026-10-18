@@ -18,11 +18,12 @@
  * decide whether the step happens at all, its jump included; a jump back or stay starts a new pass. The components in force on a step are resolved once
  * when the step is reached (tr->act) and reused by its pulse repeats and ratchets.
  *
- * Locks. A lane's value at a step is sent before the step's notes; it holds until the lane's next
- * locked step. With shape > 0, the value moves toward the next locked step's value across the gap:
- * flat for (100 - shape) % of the gap, then a straight line. A pattern start does not restore the
- * knob: if step 1 has no lock, the last value keeps holding. The knob gets its lane back (LOCK_NONE)
- * when the track leaves the pattern, and when the transport stops.
+ * Locks. A lane's value at a step is sent before the step's notes; it lasts until the next step that plays
+ * without a lock of its own on the lane, which gets the knob back (LOCK_NONE): a lock is its step's (and the
+ * empty steps' after it). With shape > 0 the lane is a line instead: the value holds until the lane's next
+ * locked step and moves toward it across the gap, flat for (100 - shape) % of the gap, then a straight line
+ * (a pattern start does not restore the knob then). The knob gets its lane back too when the track leaves the
+ * pattern, and when the transport stops.
  *
  * Grooves. The project's type (seq.groove_type) picks a timing table (ticks a sixteenth) and a
  * velocity table over the bar's sixteenths; a pattern's signed amount scales them (a negative amount
@@ -557,14 +558,14 @@ static void emit_note(seq_t *s, int t, int note, int vel, int glide_ms, uint32_t
     add_off(s, t, tag, OFF_NOTE, note, len_q8, o);
 }
 
-/* a drum hit, through the drum punch-in FX (pitch, short, long); len_q8 > 0 schedules its drum_off (the gated and
+/* a drum hit semi semitones from its key's pitch (a step's note), through the drum punch-in FX (pitch, short, long); len_q8 > 0 schedules its drum_off (the gated and
  * loop play modes end with it; a hit of the same sound under the same tag moves the off), 0 = the key holds it */
-static void emit_drum(seq_t *s, int t, int sound, int vel, uint32_t tag, uint32_t len_q8, const seq_sink_t *o)
+static void emit_drum(seq_t *s, int t, int sound, int vel, int semi, uint32_t tag, uint32_t len_q8, const seq_sink_t *o)
 {
     if (sound < 0 || sound >= NDRUM)
         return;
     if (o->drum)
-        o->drum(o->ctx, t, sound, vel, fx_on(s, t, PX_OCTAVE) ? 12 : 0, fx_on(s, t, PX_CHOP), fx_on(s, t, PX_RING));
+        o->drum(o->ctx, t, sound, vel, semi + (fx_on(s, t, PX_OCTAVE) ? 12 : 0), fx_on(s, t, PX_CHOP), fx_on(s, t, PX_RING));
     if (s->send_notes && s->par[t][TP_CHAN]) {
         midi_on(s, t, GM_DRUM[sound], vel, o);
         midi_off(s, t, GM_DRUM[sound], o);
@@ -608,11 +609,12 @@ static void fire_notes(seq_t *s, int t, const step_t *st, int p, uint32_t L, int
     else
         len_q8 = L / 100u * (tp->nlen > 100 ? 100u : tp->nlen);
     if (is_drum(s, t)) {
+        int semi = step_tune(s->P->lane, t, s->ppat[t], p);
         if (act[SC_MULTIPLY] && tr->ratchets > 1 && len_q8 > L / tr->ratchets)
             len_q8 = L / tr->ratchets;
         for (i = 0; i < SN; i++)
             if (st->note[i] >= 1 && st->note[i] <= NDRUM && st->note[i] != tr->skip_note)
-                emit_drum(s, t, st->note[i] - 1, vel, TAG_STEP | (uint32_t)(ratchet * 1024), len_q8, o);
+                emit_drum(s, t, st->note[i] - 1, vel, semi, TAG_STEP | (uint32_t)(ratchet * 1024), len_q8, o);
         return;
     }
     if (fx_on(s, t, PX_CHOP))
@@ -820,14 +822,19 @@ static void apply_locks(seq_t *s, int t, int p, uint32_t L, const seq_sink_t *o)
             r->trk = l->trk;
             r->param = l->param;
         }
+        if (l->param == LANE_TUNE)
+            continue;                 /* (a drum step's note: fire_notes reads it) */
         if (l->pat != s->ppat[t]) {   /* another pattern's lane: the knob has it */
             lock_put(s, t, l, r, LOCK_NONE, o);
             r->ramp = 0;
             continue;
         }
         v = l->val[p];
-        if (v == LOCK_NONE)
-            continue;                 /* holds (or keeps ramping toward the next lock) */
+        if (v == LOCK_NONE) {
+            if (!tp->shape && !step_empty(&tp->st[p]))
+                lock_put(s, t, l, r, LOCK_NONE, o);   /* a step that plays, unlocked: the knob's value */
+            continue;                 /* (shape: holds, or keeps ramping toward the next lock) */
+        }
         r->ramp = 0;
         lock_put(s, t, l, r, v, o);
         if (!tp->shape || nramp >= RAMP_MAX)
@@ -1379,7 +1386,7 @@ static void fill_hit(seq_t *s, int t, int sound, int vel, const seq_sink_t *o)
 {
     uint32_t half = six_q8(s) / 2u;
     if (is_drum(s, t))
-        emit_drum(s, t, sound, vel, TAG_FILL, half, o);
+        emit_drum(s, t, sound, vel, 0, TAG_FILL, half, o);
     else if (s->t[t].nfill == 3) {
         int note = s->t[t].fill_notes[sound];
         emit_note(s, t, note, vel, 0, TAG_FILL | (uint32_t)note, half, o);
@@ -1865,7 +1872,7 @@ static void key_in(seq_t *s, int t, int note, int on, int vel, int raw, const se
             return;
         if (on) {
             pl->drums_down |= (uint16_t)(1u << (note - 1));
-            emit_drum(s, t, note - 1, vel, TAG_KEY, 0, o);
+            emit_drum(s, t, note - 1, vel, 0, TAG_KEY, 0, o);
         } else if (pl->drums_down >> (note - 1) & 1u) {
             pl->drums_down &= (uint16_t)~(1u << (note - 1));
             if (o->drum_off)

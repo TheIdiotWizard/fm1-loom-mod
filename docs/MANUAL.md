@@ -73,7 +73,7 @@ to 16 from the left, black keys 1 to 11.
    <img src="img/screen-arrange.png" width="240" alt="Arrange: each track&#x27;s pattern with its playhead, scene 2 playing; knobs tempo, groove, amount, click" title="Arrange">
 8. **Save.** Press **SAVE**.
 
-From here: hold a step to see its velocity, length, chance and nudge; hold a step and press **EDIT** to lock a
+From here: hold a step to see its velocity, length, chance and pitch; hold a step and press **EDIT** to lock a
 knob on it; press **ARP** on T2 and turn **KNOB 1** to arp; press **GLO**, turn **SELECT** to Master out and turn
 **KNOB 4** (the pump) while it plays. Hold any button for a second and a card explains it.
 
@@ -112,9 +112,10 @@ press…" means keep **HOME** down while you press the next thing.
 | write a note | On Steps, hold **SEQ** and play the note, let go, and press a white key: the note goes on that step. |
 | write a chord | On Steps, hold **SEQ** and hold the notes together, let go, and press a step. |
 | pick a drum sound | On a drum track's Steps page, press its black key, or hold **SEQ** and press any key. |
-| see a step | On Steps, hold its white key. The knobs show its velocity, length, chance and nudge. |
+| see a step | On Steps, hold its white key. The knobs show its velocity, length, chance and pitch. |
 | make a note longer | Hold its step and press a later white key. A bar under the cells shows how far a note reaches. |
 | nudge a step | Hold its step and press **OCT−** or **OCT+**. |
+| change a step's note | Hold its step and turn **KNOB 4** (a drum step too: its hits play higher or lower), or hold its step, hold **SEQ** and play the new note or chord. |
 | put a second sound on a drum step | Hold the step and press the sound's black key. |
 | take one note off a step | Hold the step, press **SEL**, pick the note and press **SEL**. |
 | add a trick | Hold **HOME**, hold the step, and press a white key: 1 pulse, 2 hold, 3 multiply, 4 velocity, 5 ramp up, 6 ramp down, 7 random, 8 portamento, 9 bend, 10 tonality, 11 jump, 12 skip lock, 13 skip trick, 14 skip trigger. Press a black key for its value: 1 to 9, black key 10 for random. The same white key again takes it off. |
@@ -232,15 +233,19 @@ remembered notes, which are the last keys you held together on a play page; on t
 effect you played. The four squares at the right are the bars.
 **OCT−** and **OCT+** show the bar before or after.
 
-<img src="img/screen-step-held.png" width="240" alt="Step 13 held on T1: its velocity, length, chance and nudge on the knobs; the footer offers its length, its sounds, the nudge and the lock pages" title="A step held">
+<img src="img/screen-step-held.png" width="240" alt="Step 13 held on T1: its velocity, length, chance and pitch on the knobs; the footer offers its length, its sounds, the nudge and the lock pages" title="A step held">
 
 - **Hold SEQ and play keys** to choose what a step writes: the keys play the track, and the ones you hold
   together become the remembered notes (a chord). On a drum track, the key you play becomes the sound shown.
   Let go of **SEQ** and nothing else changes.
-- **Press a white key** to put the remembered notes on that step, or to clear the step.
-- **Hold a white key** to see the step. **KNOB 1** is its velocity, **KNOB 2** its length in steps, **KNOB 3**
-  its chance (always, a percentage, then the A:B cycles: on the A-th of every B passes) and **KNOB 4** its
-  nudge. **OCT−** and **OCT+** nudge it too.
+- **Tap a white key** to put the remembered notes on that step, or to clear the step.
+- **Hold a white key** to see the step (held longer than a tap, it stays as it is). **KNOB 1** is its velocity,
+  **KNOB 2** its length in steps, **KNOB 3** its chance (always, a percentage, then the A:B cycles: on the A-th
+  of every B passes) and **KNOB 4** its pitch: on a synth track its notes move by semitones, a chord together;
+  on a drum track the step's hits play up to 24 semitones from their key's pitch, the step's own note, apart
+  from the key's pitch knob and its locks. **OCT−** and **OCT+** nudge it, earlier or later.
+- **Hold a step, then hold SEQ and play keys** to give it new notes: the keys you hold together become its
+  chord.
 - **Hold a step and press a later white key** to make its note reach that step.
 - **Hold a step and press a black key** on a drum track to put that sound on the step, or take it off.
 - **Hold a step and press SEL** for a list of its notes. Pick one and press **SEL** to take it off.
@@ -290,9 +295,10 @@ tricks' letters sit at the bottom right, a percent sign marks a chance, and a re
 Hold a step and press **EDIT**, **ENV**, **FX** or **LFO**. The knob strip becomes that module's four knobs
 for the held step (turn **SELECT** for its other pages: **ENV** has the envelope, the filter and the filter's
 envelope; **FX** the character and the sends), showing "–" where the step has no lock and the locked values in red. Turn a knob to lock
-a value on the step. Let go of the step to go back. Hold a step and press **SAVE** to clear its locks. While
-recording, a knob you turn writes locks on the steps as they play. The Bar page's SHAPE knob smooths between
-locks.
+a value on the step. Let go of the step to go back. A lock lasts until the next step that plays without one,
+which plays the knob's own value again. Hold a step and press **SAVE** to clear its locks (a drum step's pitch
+stays). While recording, a knob you turn writes locks on the steps as they play. The Bar page's SHAPE knob turns
+a track's locks into a line: each holds until the next lock and moves toward it.
 
 <img src="img/screen-lock.png" width="240" alt="Step 1 held with ENV&#x27;s filter page: the cutoff locked at 481 Hz in red; the other knobs show a dash, unlocked" title="A lock">
 
@@ -626,8 +632,10 @@ type and its first three knobs; page 2 its fourth and fifth. A new type starts f
 | tremolo | rate, vibrato, volume | envelope, shape |
 | duck | source, amount, hold | release |
 
-The speed knob is synced from 2/1 to 1/64 turned left, and free in Hz turned right. A destination with
-"free" after it runs on without restarting on each note.
+The speed knob is synced from 2/1 to 1/64 turned left, and free in Hz turned right. The destination is a
+module, and the parameter one of its four: synth (the engine's four knobs), envelope (attack, decay, sustain,
+release), filter (cutoff, resonance, envelope, key tracking) or voice (volume, pitch, pan, character). A
+destination with "free" after it runs on without restarting on each note.
 
 ### Character
 
@@ -649,7 +657,7 @@ to wet); at mix 0 it is off. The factory presets each have their own, so a prese
 | tilt | the pivot, 150 Hz to 6 kHz | the tilt: left darker, right brighter, 6 dB each side at the ends |
 
 Lock the amount, tone or mix on a step like any knob (hold the step, press **FX**). The LFO reaches the amount:
-the amp module's fourth knob, "character". A drum track's voices have no character: on a kit the page says
+the voice module's fourth knob, "character". A drum track's voices have no character: on a kit the page says
 so.
 
 ## Players
@@ -801,7 +809,7 @@ On a sound page, hold **SAVE** and press white key 1 to 16 to keep the track's s
 | HOME | Arrange | tempo | groove | amount | click | white: scenes, black: mutes |
 | HOME, SELECT | Song | slot | scene | bars | at end | white: add a scene |
 | SEQ | Steps | pattern | length | scale | groove | white: steps, black: sound (drums); SEQ held: a keyboard |
-| SEQ, a step held | Steps | velocity | length | chance | nudge | white: length, black: sounds |
+| SEQ, a step held | Steps | velocity | length | chance | pitch | white: length, black: sounds; SEQ held: its notes |
 | SEQ, HOME + a step | Steps | the tricks and values shown | | | | white: trick, black: value |
 | SEQ, SELECT | Bar | quant | note | groove | shape | black: scale |
 | EDIT | Engine | the engine's four | | | | play |

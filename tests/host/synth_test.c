@@ -1044,7 +1044,7 @@ static void char_tests(void)
     p[TP_LTYPE] = LT_WAVE;
     p[TP_LDEST] = LD_AMP;
     tp_text_par(TP_LX, 3, p, num, unit);
-    check("the LFO's amp module, knob 4: the character's amount", !strcmp(num, "character"));
+    check("the LFO's voice module, knob 4: the character's amount", !strcmp(num, "character"));
 
     /* every type, the knobs at their ends and the middle, a resonant filter and a stereo engine: finite,
      * bounded, silent after the release */
@@ -1351,7 +1351,7 @@ int main(void)
         check("wave LFO: the synth module's knobs are the engine's", !strcmp(num, "ratio"));
         p[TP_LDEST] = LD_AMP;
         tp_text_par(TP_LX, 1, p, num, unit);
-        check("wave LFO: the amp module's knob 1 is pitch", !strcmp(num, "pitch"));
+        check("wave LFO: the voice module's knob 1 is pitch", !strcmp(num, "pitch"));
         tp_text_par(TP_LX2, 2, p, num, unit);
         check("wave LFO: shape 2 is ramp", !strcmp(num, "ramp") && !strcmp(tp_info_par(TP_LX2, p)->name, "shape"));
         p[TP_LTYPE] = LT_PUMP;

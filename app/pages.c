@@ -810,12 +810,22 @@ static void step_knobs(knob_t *k)
     t[0] = 0;
     cond_text(st->cond, t);
     kv(&k[2], "CHANCE", t, 0, 0);
-    {
+    if (is_drum(sel_trk())) {                         /* the step's note: semitones from the keys' pitch */
+        int semi = step_tune(pats.lane, sel_trk(), cur_pat(sel_trk()), step_shown(ui.held_first));
         char *e = t;
-        if (st->nudge > 0)
+        if (semi > 0)
             e = s_cat(e, "+");
-        num_i(st->nudge, e);
-        kv(&k[3], "NUDGE", t, st->nudge + 12, 24);
+        s_cat(num_i(semi, e), " st");
+        kv(&k[3], "PITCH", t, semi + TUNE_MAX, 2 * TUNE_MAX);
+    } else {                                          /* the step's (first) note */
+        int n = 0;
+        for (int i = 0; i < SN && !n; i++)
+            n = st->note[i];
+        if (n)
+            note_name(n, t);
+        else
+            s_cat(t, "-");
+        kv(&k[3], "PITCH", t, n, 127);
     }
 }
 /* HOME + a step held: the strip shows the step's components and their values */
@@ -2292,6 +2302,10 @@ static float weft_pic_v(float ph, float d, float kd, float kd2, float mo, float 
         return pl + (rs - pl) * mo;
     }
 }
+/* the engine pictures move while the track sounds and rest when it is quiet: their clock (pic_f) runs only then, and
+ * pic_lvl is the track's level (eng_peak, held and falling: a plucked string rings and settles with its note) */
+static uint32_t pic_f;
+static float pic_lvl;
 static void pic_weft(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
 {
     /* two cycles of the wave over its bent phase (the faint ramp): bend moves the bend point, wave turns
@@ -2395,11 +2409,31 @@ static void pic_tines(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_
 }
 static void pic_organ(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
 {
-    (void)f;
-    for (int k = 0; k < 4; k++) {                    /* four drawbars: stops, pedal, rotor, rate */
-        int32_t x = x0 + 20 + k * (w - 40) / 3 - 6, v = p[TP_E1 + k] * (h - 20) / 127;
-        cv_round(x, y0 + 4, 12, h - 8, 3, K_PANEL2);
-        cv_round(x, y0 + h - 4 - v - 8, 12, v + 8, 3, k ? K_DIM : K_NOW);
+    /* the six drawbars stops and pedal pull out (synth.c organ_bars), each from the top as far as its level, its
+     * footage under it; the rotor at the right: a horn turning at rate, as wide as its amount (still at 1) */
+    static const char *const FT[6] = {"16", "8", "4", "2 2/3", "2", "1 1/3"};
+    float bars[6];
+    int32_t bw = 18, gap = 9, bh = h - 22, rx = x0 + w - 24, ry = y0 + bh / 2 + 4;
+    int amt = p[TP_E3] < 1 ? 1 : p[TP_E3] > 8 ? 8 : p[TP_E3], rate = p[TP_E4] < 1 ? 1 : p[TP_E4] > 8 ? 8 : p[TP_E4];
+    organ_bars(p, bars);
+    for (int k = 0; k < 6; k++) {
+        int32_t x = x0 + k * (bw + gap), v = 6 + (int32_t)(bars[k] * (float)(bh - 6) + 0.5f);
+        cv_round(x, y0, bw, bh, 3, K_PANEL2);
+        cv_round(x, y0, bw, v, 3, k == 1 ? K_NOW : K_DIM);
+        cv_rect(x + 3, y0 + v - 4, bw - 6, 2, K_BG);        /* the bar's handle */
+        text_c(x + bw / 2, y0 + bh + 4, &FONT_XS, FT[k], K_DIM);
+    }
+    {
+        float a = amt > 1 ? (float)f * 0.012f * (float)rate : 0.0f;   /* (rate 1..8: 0.5 .. 8 Hz, drawn slower) */
+        float r = 6.0f + (float)(amt - 1) * 2.0f;
+        pen_t ring = {0, 0, 0};
+        for (int i = 0; i <= 32; i++) {
+            float t = (float)i / 32.0f;
+            pen_to(&ring, (float)rx + fm_sin_turns(t + 0.25f) * 20.0f, (float)ry + fm_sin_turns(t) * 20.0f, K_LINE);
+        }
+        cv_linef((float)rx - fm_sin_turns(a + 0.25f) * r, (float)ry - fm_sin_turns(a) * r * 0.4f,
+                 (float)rx + fm_sin_turns(a + 0.25f) * r, (float)ry + fm_sin_turns(a) * r * 0.4f, K_NOW, 2.0f);
+        text_c(rx, y0 + bh + 4, &FONT_XS, "rotor", K_DIM);
     }
 }
 static void pic_sync(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
@@ -2465,7 +2499,7 @@ static void pic_cane(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t
     uint32_t r = 77u ^ (f / 2);
     pen_t pn = {0, 0, 0};
     if (md <= 1) {                                   /* a string between its nut and its bridge */
-        float a = (float)h * 0.3f * fm_sin_turns((float)f * 0.09f) * (md ? 0.25f : 0.3f + 0.7f * tb);
+        float a = (float)h * 0.3f * fm_sin_turns((float)f * 0.09f) * (md ? 0.25f : 0.3f + 0.7f * tb) * pic_lvl;
         cv_round(x0 + 2, (int32_t)cy - 8, 6, 16, 2, K_DIM);
         cv_round(x0 + w - 8, (int32_t)cy - 8, 6, 16, 2, K_DIM);
         pen_to(&pn, xl, cy, ink);
@@ -2755,12 +2789,27 @@ static void pic_drumline(int32_t x0, int32_t y0, int32_t w, int32_t h, const uin
         cv_text(x + 3, y, &FONT_XS, t, hit > 40 ? K_BG : K_FAINT);
     }
 }
+static void pic_clock(int trk)
+{
+    static uint32_t last;
+    float q = (float)eng_peak[trk] * (1.0f / 16383.5f);
+    eng_peak[trk] = 0;                               /* (taken, as the Mix page takes it) */
+    pic_lvl = fm_maxf(fm_minf(q * 2.0f, 1.0f), pic_lvl * 0.86f);
+    if (pic_lvl < 0.01f)
+        pic_lvl = 0.0f;
+    else
+        pic_f += ui.frame - last;
+    last = ui.frame;
+}
 static void draw_engine(void)
 {
     int trk = sel_trk(), eg = proj.trk[trk].par[TP_ENGINE] % NENGINE;
     const uint8_t *p = proj.trk[trk].par;
-    uint32_t h = hash_u(hash_u(2166136261u, 0xE0u), (uint32_t)trk | (uint32_t)eg << 4 | (uint32_t)ui.dsound << 8 |
-                                          (eg == EG_SAMPLE || eg == EG_SLICE ? 0u : (ui.frame / 2) << 12));
+    uint32_t h;
+    pic_clock(trk);
+    h = hash_u(hash_u(2166136261u, 0xE0u), (uint32_t)trk | (uint32_t)eg << 4 | (uint32_t)ui.dsound << 8 |
+                                          (eg == EG_SAMPLE || eg == EG_SLICE ? 0u : (pic_f / 2) << 12));
+    h = hash_u(h, (uint32_t)(pic_lvl * 32.0f));
     for (int i = 0; i < 4; i++)
         h = hash_u(h, p[TP_E1 + i]);
     if (eg == EG_SAMPLE || eg == EG_SLICE)           /* (the bank: an upload changes what the picture shows) */
@@ -2788,21 +2837,21 @@ static void draw_engine(void)
             text_r(230, 3, &FONT_S, nm, K_DIM);
     }
     switch (eg) {
-    case EG_WEFT: pic_weft(20, 24, 200, 88, p, ui.frame); break;
-    case EG_STACK: pic_stack(20, 24, 200, 88, p, ui.frame); break;
-    case EG_WAVETABLE: pic_wave(20, 24, 200, 88, p, ui.frame); break;
-    case EG_ORBIT: pic_orbit(20, 24, 200, 88, p, ui.frame); break;
-    case EG_TINES: pic_tines(20, 24, 200, 88, p, ui.frame); break;
-    case EG_ORGAN: pic_organ(20, 24, 200, 88, p, ui.frame); break;
-    case EG_SYNC: pic_sync(20, 24, 200, 88, p, ui.frame); break;
-    case EG_SWARM: pic_swarm(20, 24, 200, 88, p, ui.frame); break;
+    case EG_WEFT: pic_weft(20, 24, 200, 88, p, pic_f); break;
+    case EG_STACK: pic_stack(20, 24, 200, 88, p, pic_f); break;
+    case EG_WAVETABLE: pic_wave(20, 24, 200, 88, p, pic_f); break;
+    case EG_ORBIT: pic_orbit(20, 24, 200, 88, p, pic_f); break;
+    case EG_TINES: pic_tines(20, 24, 200, 88, p, pic_f); break;
+    case EG_ORGAN: pic_organ(20, 24, 200, 88, p, pic_f); break;
+    case EG_SYNC: pic_sync(20, 24, 200, 88, p, pic_f); break;
+    case EG_SWARM: pic_swarm(20, 24, 200, 88, p, pic_f); break;
     case EG_SAMPLE: pic_sample(20, 24, 200, 88, p); break;
     case EG_SLICE: pic_slice(20, 24, 200, 88, p, trk); break;
-    case EG_BROCADE: pic_brocade(20, 24, 200, 88, p, ui.frame); break;
-    case EG_CANE: pic_cane(20, 24, 200, 88, p, ui.frame); break;
-    case EG_VOILE: pic_voile(20, 24, 200, 88, p, ui.frame); break;
-    case EG_GINGHAM: pic_gingham(20, 24, 200, 88, p, ui.frame); break;
-    default: pic_drumline(10, 26, 220, 90, p, ui.frame); break;
+    case EG_BROCADE: pic_brocade(20, 24, 200, 88, p, pic_f); break;
+    case EG_CANE: pic_cane(20, 24, 200, 88, p, pic_f); break;
+    case EG_VOILE: pic_voile(20, 24, 200, 88, p, pic_f); break;
+    case EG_GINGHAM: pic_gingham(20, 24, 200, 88, p, pic_f); break;
+    default: pic_drumline(10, 26, 220, 90, p, pic_f); break;
     }
     cv_blit(0, MAIN_Y);
 }
@@ -3320,13 +3369,25 @@ static void draw_sends(void)                         /* the instrument's two sen
     }
     cv_blit(0, MAIN_Y);
 }
+/* an LFO shape at phase ph (0..1), -1..1: 0 sine, 1 saw (falling), 2 exponential, 3 square, 4 blip, 5 ramp (rising) */
+static float lfo_shape_v(int shape, float ph)
+{
+    switch (shape) {
+    case 1: return 1.0f - 2.0f * ph;
+    case 2: return 2.0f * fm_exp2f(-8.0f * ph) - 1.0f;
+    case 3: return ph < 0.5f ? 1.0f : -1.0f;
+    case 4: return ph < 0.08f ? 1.0f : -1.0f;
+    case 5: return 2.0f * ph - 1.0f;
+    default: return fm_sin_turns(ph);
+    }
+}
 static void draw_lfo(void)
 {
     int trk = sel_trk();
     const uint8_t *p = proj.trk[trk].par;
-    int lt = p[TP_LTYPE] % NLT;
+    int lt = p[TP_LTYPE] % NLT, sh = p[TP_LX2];
     uint32_t h = hash_u(hash_u(2166136261u, 0x1Fu), (uint32_t)trk | (uint32_t)lt << 4 | (uint32_t)p[TP_LAMT] << 8 |
-                                          (lt ? ui.frame / 2 : 0u) << 16);
+                                          (uint32_t)sh << 16 | (lt ? ui.frame / 2 : 0u) << 24);
     int32_t x0 = 16, y0 = 12, w = 208, hh = 84, cy = y0 + hh / 2, amp = 6 + p[TP_LAMT] * (hh / 2 - 8) / 127;
     uint32_t r = 12345u;
     if (!begin_main(h))
@@ -3340,8 +3401,9 @@ static void draw_lfo(void)
         (void)r;
         for (int32_t x = 0; lt && x <= w; x++) {
             float u = (float)x + scroll, v;              /* v: -1..1 */
-            if (lt == LT_WAVE || lt == LT_WOBBLE)
-                v = fm_sin_turns(u / 128.0f);
+            if (lt == LT_WAVE || lt == LT_WOBBLE)        /* their shapes (synth.c lfo_wave_value, lfo_wave_trem) */
+                v = lfo_shape_v(lt == LT_WAVE ? (sh & 3) == 1 ? 0 : (sh & 3) == 0 ? 3 : (sh & 3) == 2 ? 5 : 1 : sh,
+                                u / 128.0f - fm_floorf(u / 128.0f));
             else if (lt == LT_DRIFT) {                   /* a held random value every 24 px, slewed between */
                 uint32_t k = (uint32_t)(u / 24.0f), h0 = (k * 2654435761u) >> 8, h1 = ((k + 1u) * 2654435761u) >> 8;
                 float t = (u - (float)k * 24.0f) / 24.0f, s0 = (float)(h0 & 1023u) / 511.5f - 1.0f,

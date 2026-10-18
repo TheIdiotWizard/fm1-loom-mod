@@ -96,8 +96,19 @@ int step_has_lock(const lane_t *L, int trk, int pat, int step)
     if (step < 0 || step >= NSTEP)
         return 0;
     for (k = 0; k < NLANE; k++)
-        if (L[k].used && L[k].trk == trk && L[k].pat == pat && L[k].val[step] != LOCK_NONE)
+        if (L[k].used && L[k].trk == trk && L[k].pat == pat && L[k].param != LANE_TUNE && L[k].val[step] != LOCK_NONE)
             return 1;
+    return 0;
+}
+
+int step_tune(const lane_t *L, int trk, int pat, int step)
+{
+    int k;
+    if (step < 0 || step >= NSTEP)
+        return 0;
+    for (k = 0; k < NLANE; k++)
+        if (L[k].used && L[k].param == LANE_TUNE && L[k].trk == trk && L[k].pat == pat)
+            return L[k].val[step] == LOCK_NONE ? 0 : (int)L[k].val[step] - TUNE_0;
     return 0;
 }
 
@@ -107,7 +118,7 @@ void step_clear_locks(lane_t *L, int trk, int pat, int step)
     if (step < 0 || step >= NSTEP)
         return;
     for (k = 0; k < NLANE; k++)
-        if (L[k].used && L[k].trk == trk && L[k].pat == pat)
+        if (L[k].used && L[k].trk == trk && L[k].pat == pat && L[k].param != LANE_TUNE)
             L[k].val[step] = LOCK_NONE;
 }
 

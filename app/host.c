@@ -148,6 +148,16 @@ static void steps_print(int t, int p)
         printf("  vel %d len %d nudge %d comp %d/%d comp2 %d/%d cond %d\n", st->vel, st->len, st->nudge, st->comp,
                st->cval, st->comp2, st->cval2, st->cond);
     }
+    for (k = 0; k < NLANE; k++) {                   /* the pattern's lock lanes: each locked step and its value */
+        const lane_t *l = &pats.lane[k];
+        if (!l->used || l->trk != t - 1 || l->pat != p - 1)
+            continue;
+        printf("    lane %d param %d:", k, l->param);
+        for (s = 0; s < NSTEP; s++)
+            if (l->val[s] != LOCK_NONE)
+                printf(" %d=%d", s + 1, l->val[s]);
+        printf("\n");
+    }
 }
 
 static int isnum(const char *s);

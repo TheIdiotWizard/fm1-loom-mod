@@ -86,6 +86,11 @@ typedef struct {
 
 /* a parameter lock lane: a value for each step of one track pattern, LOCK_NONE = the knob's own */
 #define LOCK_NONE 0xFFu
+/* a lane that is no parameter: a drum step's note, the semitones its hits play away from the key's pitch (TUNE_0 =
+ * none; held step + KNOB 4). It is not a lock: no knob gets it, no red dot shows it, SAVE's clear leaves it */
+#define LANE_TUNE 0xFEu
+#define TUNE_0 64
+#define TUNE_MAX 24
 typedef struct {
     uint8_t used, gen;                /* gen: bumped when the slot is reused (the interrupt resets its runtime) */
     uint8_t trk, pat, param;          /* the track pattern and the parameter (synth.h TP_*) */
@@ -131,6 +136,7 @@ void lane_clear(lane_t *L, int k);
 int lane_count(const lane_t *L);
 int step_has_lock(const lane_t *L, int trk, int pat, int step);
 void step_clear_locks(lane_t *L, int trk, int pat, int step);
+int step_tune(const lane_t *L, int trk, int pat, int step);       /* a drum step's note: semitones, 0 = none */
 void pattern_clear_locks(lane_t *L, int trk, int pat);
 void cond_ab(int k, int *a, int *b);  /* COND_AB + k -> A:B */
 /* weave two patterns into out (not a or b): WV_BARS alternates their bars (a, b, a, b), WV_STEPS their steps; the

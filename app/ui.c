@@ -612,7 +612,33 @@ static void comp_value(int b)
         say_no("NO TRICK", "white key first");
     mark_dirty();
 }
-static void step_knob(int k, int32_t e)
+/* KNOB 4 on a held step: its pitch. A synth step's notes move together by semitones (a chord keeps its shape, and
+ * stops at the keyboard's ends); a drum step's hits play e semitones further from their keys' pitch (LANE_TUNE: the
+ * step's note, apart from the key's own pitch and its locks) */
+static void step_pitch(int trk, int s, int e)
+{
+    step_t *st = &tpat(trk)->st[s];
+    if (is_drum(trk)) {
+        int pt = cur_pat(trk), ln = lane_find(pats.lane, trk, pt, LANE_TUNE), v;
+        if (ln < 0)
+            ln = lane_alloc(pats.lane, trk, pt, LANE_TUNE);
+        if (ln < 0) {
+            say_no("NO LANE LEFT", "clear locks first");
+            return;
+        }
+        v = pats.lane[ln].val[s] == LOCK_NONE ? TUNE_0 : pats.lane[ln].val[s];
+        v = clampi(v + e, TUNE_0 - TUNE_MAX, TUNE_0 + TUNE_MAX);
+        pats.lane[ln].val[s] = (uint8_t)(v == TUNE_0 ? LOCK_NONE : v);
+        return;
+    }
+    for (int i = 0; i < SN; i++)
+        if (st->note[i] && (st->note[i] + e < 1 || st->note[i] + e > 127))
+            return;
+    for (int i = 0; i < SN; i++)
+        if (st->note[i])
+            st->note[i] = (uint8_t)(st->note[i] + e);
+}
+static void step_knob(int k, int32_t e)          /* k 4: the nudge (OCT-/OCT+) */
 {
     int trk = sel_trk();
     undo_keep();
@@ -635,17 +661,20 @@ static void step_knob(int k, int32_t e)
                 if (c >= COND_AB + COND_NAB)
                     c = COND_AB + COND_NAB - 1;
                 st->cond = (uint8_t)c;
-            } else
+            } else if (k == 3)
+                step_pitch(trk, step_shown(i), (int)e);
+            else
                 st->nudge = (int8_t)clampi(st->nudge + e, -12, 12);
         }
     ui.held_used = 1;
-    touch(k);
+    if (k < 4)
+        touch(k);
     mark_dirty();
 }
 static void step_nudge(int d)                    /* a step held + OCT-/OCT+ */
 {
     char t[8], *e = t;
-    step_knob(3, d);
+    step_knob(4, d);
     {
         const step_t *st = &tpat(sel_trk())->st[step_shown(ui.held_first)];
         if (st->nudge > 0)
@@ -921,6 +950,16 @@ static void keyboard_down(int k)
             for (int i = 0; i < SN && i < ui.nchord; i++)
                 ui.rem[i] = ui.chord[i];
             ui.nrem = (uint8_t)(ui.nchord > SN ? SN : ui.nchord);
+            if (ui.held && ui.page == P_STEPS && (ui.btn >> B_SEQ & 1u) && !srec) {   /* steps held, SEQ held: the keys are their notes now */
+                undo_keep();
+                for (int i = 0; i < 16; i++)
+                    if (ui.held >> i & 1u) {
+                        step_t *st = &tpat(trk)->st[step_shown(i)];
+                        step_set_notes(st, ui.rem, ui.nrem, st->vel ? st->vel : 100);
+                    }
+                ui.held_used = 1;
+                mark_dirty();
+            }
         }
         if (srec && !is_aux(sel_trk()))
             step_rec_key(note);
@@ -1088,6 +1127,7 @@ static void key_down(int k)
     }
     keyboard_down(k);
 }
+#define STEP_TAP_MS 400u                         /* a step's key let go sooner: a tap (toggles the step) */
 static void key_up(int k)
 {
     int trk = sel_trk(), m = ui.kmode[k];
@@ -1110,8 +1150,8 @@ static void key_up(int k)
         int w = ordinal(WHITE_K, 16, k);
         if (w < 0)
             break;
-        if (!ui.held_used)
-            step_toggle(w);
+        if (!ui.held_used && plat_ms() - ui.key_t[k] < STEP_TAP_MS)
+            step_toggle(w);                      /* a tap; a longer hold only looked at the step */
         ui.held &= (uint16_t)~(1u << w);
         if (!ui.held)
             ui.lockpg = 0;

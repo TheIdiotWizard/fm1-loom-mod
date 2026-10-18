@@ -33,6 +33,7 @@
 #define STEAL_RATE (1.0f / (0.015f * SY_SR))  /* the 15 ms steal fade, per sample */
 #define INV_SR (1.0f / SY_SR)
 #define CHUNK_S ((float)SY_CHUNK / SY_SR)     /* a chunk in seconds */
+#define BRIGHT_SLEW 0.13f                    /* a chunk's share of the way: about 10 ms to 1 / e */
 #define LD_PITCH (-2)                         /* the LFO destination "pitch" (no TP_* holds it) */
 #define LD_NONE (-1)
 /* the sample loops must be inlined into their callers (the compiler folds their constant arguments
@@ -65,8 +66,8 @@ static const char *const FTYPE_N[NFT] = {"lp24", "ladder", "lp12", "hp12", "dyna
 static const char *const LTYPE_N[NLT] = {"off", "wave", "wobble", "drift", "pump"};
 static const char *const VSHAPE_N[4] = {"square", "sine", "ramp", "saw"};
 static const char *const TSHAPE_N[5] = {"sine", "saw", "expo", "square", "blip"};
-static const char *const LDEST_N[NLD] = {"synth", "envelope", "filter", "amp", "synth free", "env free", "filter free",
-                                         "amp free"};
+static const char *const LDEST_N[NLD] = {"synth", "envelope", "filter", "voice", "synth free", "env free", "filter free",
+                                         "voice free"};
 static const char *const DUCK_N[11] = {"track 1", "track 2", "track 3", "track 4", "track 5", "track 6", "track 7",
                                        "track 8", "conductor", "throws", "metro"};
 static const char *const PLAYER_N[NPL] = {"off", "arp", "strum", "hold"};
@@ -866,6 +867,18 @@ static void organ_prep(voice_t *v)
     }
     c->stereo = 0;
 }
+void organ_bars(const uint8_t *par, float bars[6])
+{
+    int k = knob8((float)par[TP_E1]) - 1, j;
+    float mx = 0.0f;
+    bars[0] = (float)(knob8((float)par[TP_E2]) - 1) * (1.0f / 7.0f) * 0.8f;
+    for (j = 1; j < 6; j++)
+        bars[j] = ORGAN_SET[k][j - 1];
+    for (j = 0; j < 6; j++)
+        mx = fm_maxf(mx, bars[j]);
+    for (j = 0; j < 6; j++)
+        bars[j] /= mx;
+}
 static void organ_run(voice_t *v, float *xl, float *xr, int m)
 {
     const cfg_t *c = &v->c;
@@ -907,8 +920,11 @@ static void organ_chunk(voice_t *v)              /* the tremolo's phase and the 
 }
 
 /* sync: a saw reset by a master at the note's pitch, reach = the follower's ratio (which harmonics
- * ring), sub = a sine an octave down, hiss = noise, thin = a high-pass before the filter. The
+ * ring), sub = a sine an octave down, hiss = noise, thin = a high-pass before the filter; under it all the
+ * master's own triangle (SYNC_ROOT), so the pitch heard is the note's. The
  * follower's output runs one sample late so both samples around a reset get their PolyBLEP share. */
+#define SYNC_ROOT 0.5f                           /* a triangle at the master's pitch: the note stays the note when
+                                                  * the follower lands near a harmonic (a plain saw up there alone) */
 static void hs_prep(voice_t *v)
 {
     cfg_t *c = &v->c;
@@ -967,7 +983,7 @@ static void hs_run(voice_t *v, float *xl, float *xr, int m)
             h2 = 2.0f * v2 - h2;
             x = x - hk * v1 - v2;
         }
-        xl[i] = x;
+        xl[i] = x + (1.0f - 4.0f * fm_fabsf(mp - 0.5f)) * SYNC_ROOT;   /* the root under it (after thin) */
     }
     v->o[0] = mp;
     v->o[1] = sp;
@@ -2442,9 +2458,14 @@ static void voice_chunk(synth_t *s, voice_t *v)
     v->tsec += CHUNK_S;
     off = t->loff[k] * lenv;
     lg = 1.0f - (1.0f - t->lgain[k]) * lenv;
-    for (i = 0; i < 4; i++) {
-        c->ek[i] = fm_minf(pf(s, trk, TP_E1 + i, dest, off), 127.0f);   /* a foreign lock value stays in range */
-        c->e[i] = c->ek[i] * (1.0f / 127.0f);
+    {
+        float e0 = c->e[0];
+        for (i = 0; i < 4; i++) {
+            c->ek[i] = fm_minf(pf(s, trk, TP_E1 + i, dest, off), 127.0f);   /* a foreign lock value stays in range */
+            c->e[i] = c->ek[i] * (1.0f / 127.0f);
+        }
+        if ((v->engine == EG_ORBIT || v->engine == EG_TINES) && !v->fresh)   /* bright, an FM index: slewed (~10 ms) */
+            c->e[0] = e0 + (c->e[0] - e0) * BRIGHT_SLEW;
     }
     {   /* the envelopes' coefficients cost an exp each: only for a knob that moved */
         static const uint8_t EP[8] = {TP_A, TP_D, TP_S, TP_R, TP_FA, TP_FD, TP_FS, TP_FR};
@@ -3575,7 +3596,7 @@ const preset_t PRESETS[] = {
     PR("wire stab", RL_STAB, EG_SYNC, 57, 20, 0, 0, VM_POLY, 0, 127, 0, 66, 20, 40, 0, 80, 0, 40, 88, 20, 64, 64, FT_LP24, 0, 10, NOLFO, (CT_DRIVE, 60, 110, 127)),
     PR("wire bass", RL_BASS, EG_SYNC, 53, 80, 0, 0, VM_MONO, 0, 109, 10, 60, 120, 85, 0, 62, 0, 30, 76, 50, 90, 40, FT_LP12, 0, 0, NOLFO, (CT_DRIVE, 65, 80, 127)),
     PR("gauge sub", RL_BASS, EG_SYNC, 76, 127, 0, 14, VM_MONO, 0, 127, 30, 80, 120, 85, 0, 60, 0, 40, 36, 20, 64, 30, FT_LADDER, 0, 0, NOLFO, (CT_DRIVE, 20, 0, 127)),
-    PR("zipper", RL_LEAD, EG_SYNC, 70, 0, 0, 20, VM_LEGATO, 15, 97, 40, 80, 127, 36, 0, 80, 30, 40, 96, 10, 88, 64, FT_BP12, 0, 0, (LT_WAVE, 1, 120, LD_SYNTH, 0, 3), (CT_TILT, 30, 110, 127)),
+    PR("zipper", RL_LEAD, EG_SYNC, 70, 0, 0, 20, VM_LEGATO, 15, 97, 40, 80, 127, 36, 0, 80, 30, 40, 96, 10, 88, 64, FT_LP12, 0, 0, (LT_WAVE, 1, 92, LD_SYNTH, 0, 3), (CT_TILT, 30, 110, 127)),
     PR("filament", RL_LEAD, EG_SYNC, 69, 0, 0, 90, VM_LEGATO, 20, 119, 56, 60, 100, 72, 0, 88, 0, 40, 120, 50, 88, 64, FT_LP12, 25, 0, VIB(30), NOCH),
     PR("solder", RL_LEAD, EG_SYNC, 90, 68, 0, 0, VM_LEGATO, 30, 108, 56, 80, 127, 36, 0, 80, 60, 50, 72, 50, 90, 64, FT_LADDER, 0, 0, VIB(40), (CT_DRIVE, 90, 110, 127)),
     PR("staple", RL_PLUCK, EG_SYNC, 90, 62, 60, 16, VM_POLY, 0, 127, 0, 90, 10, 85, 0, 40, 0, 30, 78, 0, 64, 64, FT_LP24, 35, 8, NOLFO, (CT_CRUSH, 60, 50, 127)),
@@ -3585,7 +3606,7 @@ const preset_t PRESETS[] = {
     PR("mesh", RL_STRINGS, EG_SYNC, 28, 27, 0, 61, VM_POLY, 0, 104, 100, 90, 100, 92, 0, 80, 64, 80, 80, 0, 64, 64, FT_LP12, 0, 20, (LT_WAVE, 40, 90, LD_SYNTH + LD_FREE, 0, 1), (CT_TILT, 45, 50, 127)),
     PR("steel pad", RL_PAD, EG_SYNC, 95, 0, 12, 12, VM_POLY, 0, 76, 49, 80, 127, 112, 0, 80, 64, 80, 92, 35, 64, 64, FT_LP12, 0, 60, (LT_WAVE, 28, 86, LD_SYNTH + LD_FREE, 0, 1), (CT_RING, 78, 98, 105)),
     PR("foil", RL_CHORD, EG_SYNC, 36, 0, 7, 0, VM_POLY, 0, 78, 30, 90, 100, 80, 0, 80, 0, 40, 89, 0, 100, 64, FT_LP12, 0, 0, NOLFO, (CT_TILT, 50, 80, 127)),
-    PR("frayed", RL_FX, EG_SYNC, 127, 0, 100, 64, VM_POLY, 0, 118, 80, 72, 50, 100, 0, 56, 0, 50, 83, 35, 88, 64, FT_BP12, 20, 20, (LT_DRIFT, 70, 60, LD_SYNTH, 0, 64), (CT_FOLD, 70, 60, 127)),
+    PR("frayed", RL_FX, EG_SYNC, 127, 0, 100, 64, VM_POLY, 0, 118, 80, 72, 50, 100, 0, 56, 0, 50, 83, 35, 88, 64, FT_LP12, 20, 20, (LT_DRIFT, 70, 60, LD_SYNTH, 0, 64), (CT_FOLD, 70, 60, 127)),
     PR("barbed", RL_FX, EG_SYNC, 54, 0, 106, 127, VM_POLY, 0, 119, 80, 100, 110, 100, 0, 80, 64, 80, 102, 25, 64, 64, FT_LADDER, 30, 20, (LT_DRIFT, 30, 100, LD_FILTER + LD_FREE, 0, 64), NOCH),
     PR("spark", RL_FX, EG_SYNC, 127, 62, 30, 108, VM_POLY, 0, 127, 20, 80, 0, 100, 0, 88, 0, 40, 90, 35, 64, 64, FT_LP24, 40, 0, (LT_WAVE, 5, 127, LD_SYNTH, 0, 3), (CT_TILT, 90, 95, 127)),
     /* swarm: fleece, soft and a little wild; two sines pushed by noise. swarm, ring, tone, spread. mohair soft
