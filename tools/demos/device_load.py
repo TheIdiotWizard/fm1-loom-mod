@@ -3,6 +3,7 @@
 """The six demo songs played on an attached FM-1, their audio load read from the Status page while they play.
 
   tools/demos/device_load.py --devtest PKG [--normal PKG] [--groups A,B] [--no-flash] [--no-keep] [--every S]
+                             [--songs A,B] [--record] [--quiet]
 
 Made for a development build that answers fm1-base's restore question by itself (a TEMPORARY patch in base/: the
 HELLO name says "LOOM-8 DEVTEST"); it refuses to run on any other (the restore would wait for SEL on the FM-1).
@@ -21,6 +22,9 @@ What it does:
      the song, a crash, against the host's model of the same project (manifest.json's project_model); the
      readings to build/demos/device/load_<song>.csv, the table to build/demos/device/device_load.txt;
   6. restores before.loom8, flashes --normal PKG (if given) and starts a NEW PROJECT.
+--record: each song's USB audio recorded (ffmpeg, the FM-1 as a Mac audio input: FM1_AUDIO, default "LOOM-8 FM-1")
+into build/demos/device/rec_<song>.wav and scanned for breaks (tools/demos/glitch_scan.py). --quiet: nothing asked
+while a song plays (the Status page read once it has played), as a player has it.
 Run tools/demos/device_projects.py first (the banks, backups and manifest). Never switch Setup > CORES meanwhile.
 FM1_REMOTE: fm1_remote.py (default base/tools/fm1_remote.py); needs mido + python-rtmidi.
 """
@@ -45,6 +49,7 @@ import loom_samples as ls  # noqa: E402
 import perf_read as pr  # noqa: E402
 
 PY = sys.executable
+REC_DEVICE = os.environ.get("FM1_AUDIO", "LOOM-8 FM-1")   # (--record: the FM-1's name as a Mac audio input)
 TOOLS = ROOT / "base" / "tools"
 d = None
 
@@ -278,18 +283,43 @@ def upload_bank(path):
     connect()
 
 
-def play_song(row, every, overhead_note):
+def record_start(song):
+    """the FM-1's USB audio (its own input device on the Mac) into DEV/rec_<song>.wav, as a player records it"""
+    out = DEV / f"rec_{song}.wav"
+    p = subprocess.Popen(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "avfoundation", "-i",
+                          ":" + REC_DEVICE, "-c:a", "pcm_s24le", str(out)], stdin=subprocess.PIPE)
+    time.sleep(1.5)                          # (the device opened before the song starts)
+    return p, out
+
+
+def record_stop(rec):
+    p, out = rec
+    try:
+        p.communicate(b"q", timeout=10)
+    except subprocess.TimeoutExpired:
+        p.kill()
+    r = subprocess.run([PY, str(Path(__file__).with_name("glitch_scan.py")), str(out)], capture_output=True, text=True)
+    print("  recording " + str(out) + ": " + (r.stdout.strip() or r.stderr.strip()).replace("\n", "\n    "))
+    return r.stdout.strip()
+
+
+def play_song(row, every, overhead_note, record=False, quiet=False):
     slot, song, name = row["slot"], row["song"], row["name"]
-    print(f"== slot {slot}: {song} ({name})")
+    print(f"== slot {slot}: {song} ({name})" + (" (recorded)" if record else "") + (" (quiet)" if quiet else ""))
     log0 = crash_log()[:2]
     stop()
     load_slot(slot, name)
     release_all()
+    rec = record_start(song) if record else None
     run("tap", "PLAY", "wait", 300)
     t0 = time.time()
+    pm = row.get("project_model") or {}
+    if quiet:                                # (no screen reader, no profiler while it plays: as a player hears it)
+        disconnect()
+        time.sleep(max(1.0, (pm.get("seconds") or 60) - 1.0))
+        connect()
     glo("Status")
     where()                                  # (the peak from here on)
-    pm = row.get("project_model") or {}
     limit = (pm.get("seconds") or 90) * 1.6 + 20
     reads, stopped_n, g0, x0 = [], 0, None, None
     p_first = p_prev = prof_snap()
@@ -327,6 +357,7 @@ def play_song(row, every, overhead_note):
         else:
             stopped_n = 0
     secs = round(time.time() - t0, 1)
+    rec_note = record_stop(rec) if rec else None
     playing = [r for r in reads if r["playing"]] or reads
     log = crash_log()
     for _ in range(3):                       # (an FM-1 at full load can miss the request: an empty answer is no answer)
@@ -348,7 +379,7 @@ def play_song(row, every, overhead_note):
            "of_min": min((r["of"] for r in reads), default=16),
            "saws": min((r["saws"] for r in reads), default=9),
            "guard": (reads[-1]["guard"] - g0) if reads else None, "drop": (reads[-1]["drop"] - x0) if reads else None,
-           "ended": stopped_n >= 2, "crash": crashed, "log": log, "model": pm}
+           "ended": stopped_n >= 2, "crash": crashed, "log": log, "model": pm, "recording": rec_note}
     whole = pr.diff(p_first, p_last) if p_first and p_last else None
     if whole:
         res["stages"] = {k: round(v, 2) for k, v in whole["stage"].items()}
@@ -436,6 +467,9 @@ def main():
     ap.add_argument("--no-keep", action="store_true", help="do not back up and put back the FM-1's own projects")
     ap.add_argument("--every", type=float, default=0.5)
     ap.add_argument("--songs", help="only these songs (e.g. hyperpop,house); the others' rows kept from the last run")
+    ap.add_argument("--record", action="store_true", help="record each song's USB audio (ffmpeg) and scan it for breaks")
+    ap.add_argument("--quiet", action="store_true", help="nothing asked while a song plays (the Status page read at its "
+                    "end): the load as a player has it (the reader's polling costs a few %%)")
     a = ap.parse_args()
     man = json.loads((DEV / "manifest.json").read_text())
     if a.no_flash:
@@ -475,7 +509,7 @@ def main():
             restore(grp["backup"])
             time.sleep(1.0)
             for row in rows:
-                res = play_song(row, a.every, overhead)
+                res = play_song(row, a.every, overhead, a.record, a.quiet)
                 results = [r for r in results if r["song"] != res["song"]] + [res]
                 (DEV / "device_load.json").write_text(json.dumps(results, indent=1) + "\n")
                 if res["crash"]:

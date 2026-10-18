@@ -13,6 +13,8 @@
 #define APP_BLOCK 256u                  /* frames a render (5.8 ms): fm1-base's USB audio input takes 256-frame halves
                                          * at most (felucca-bsp usb.c); LOOM-8's own platform had 512-frame halves,
                                          * each rendered as two 256-frame calls, which is what the simulator always did */
+#define FM1B_UAC_DEEP 1                 /* the USB audio input a half deeper: a song's busy blocks take most of their
+                                         * time, which ran fm1-base's ring dry (holds in a recording; base/device/unity.c) */
 #define APP_CANVAS_PX (240u * 120u)     /* the tallest band, the main one, is 240 x 120 */
 #define APP_SYS_TEXT                    /* fm1-base's own screens (crash, update, restore, calibration) in LOOM-8's faces:
                                          * gfx_loom.c app_sys_*; fm1-base's are then not linked (18 KB) */
