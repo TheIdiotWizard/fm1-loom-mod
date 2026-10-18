@@ -247,32 +247,27 @@ tap SEL
 wait 1600
 shot list.png
 tap HOME
-# ---- weave: T2's bass line copied, pattern 2 written, woven by rhythm
+# ---- weave: T2 woven with T1's beat by rhythm (ARP's Weave), then played on the WEAVE track
 turn ALGO 1
-tap SEQ
-wait 60
-tap SEL
-turn SELECT 3
-tap SEL
-wait 60
-turn K1 1
-press SEQ
-key 4 down
-wait 40
-key 4 up
-release SEQ
-tapkey w2
-tapkey w3
-tapkey w7
-tapkey w10
-tap SEL
-turn SELECT 5
-turn ALGO 2
+expect trk 2
+tap ARP
+turn SELECT 2
+tapkey b0
+turn K3 2
 wait 1600
 shot weave.png
-tap SEL
+spin ALGO 9
+expect trk 13
+tap EDIT
+tap PLAY
+wait 400
+key w1 down
 wait 1600
 shot woven.png
+key w1 up
+tap PLAY
+spin ALGO -9
+expect trk 2
 # ---- the sample engine (on track 3)
 spin ALGO 1
 expect trk 3

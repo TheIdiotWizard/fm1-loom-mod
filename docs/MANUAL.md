@@ -96,7 +96,8 @@ knob on it; press **ARP** on T2 and turn **KNOB 1** to arp; press **GLO**, turn 
 - **Player**: what the keys do on a track: arp, strum or hold.
 - **Conductor**: the aux track that moves the other tracks through a key and scale.
 - **Throw**: a momentary effect on the drums or the melodic tracks, from a key on FX's Throws page.
-- **Weave**: a pattern crossed with a copied one: bars or steps in turn, or one's rhythm with the other's notes.
+- **Weave**: a track's pattern crossed with another, live: bars or steps in turn, or one's rhythm with the other's notes.
+  Set up on the track's ARP, played on the WEAVE track.
 - **Groove**: a timing and velocity feel. The project picks the type, each track sets how much.
 - **Pump**: the whole mix ducking on each kick and swelling back (Master out). A track's duck LFO does the same
   to one track.
@@ -126,7 +127,7 @@ press…" means keep **HOME** down while you press the next thing.
 | see the next bar | Press **OCT+** on Steps. |
 | set the track scale | On the Bar page, press a black key: 1, 2, 3, 4, 5, 6, 8, 16 sixteenths a step, or black key 9 for half a sixteenth. |
 | change the pattern | On Steps, turn **KNOB 1**. Playing, it comes at the next bar line: the knob reads NEXT 1>2 and the tag line "next P2" until it does. |
-| weave two patterns | Copy one (**SEL**, COPY PATTERN), go to the other, **SEL**, WEAVE WITH COPIED: **ALGORITHM** picks bars, steps, rhythm or notes. **SEL** does it. |
+| weave two patterns | On the track, **ARP**, its last page Weave: a black key for the track woven in, a white key for its pattern, **KNOB 3** the rule. Then on the WEAVE track (**ALGORITHM**), hold that track's white key. |
 | change the sound | Press **EDIT** and turn **PRESETS**: the engine's own sounds, "BASS 3/16": what the sound is for and where you are. **SEL** changes the engine. |
 | edit a drum sound | On a drum track, press **EDIT** and press the sound's black key. The knobs are the model's own four. Turn **SELECT** for the model, random, pan and volume; its **SEL** list has the play mode. |
 | shape one drum | On a drum track, press **ENV** and press the drum's black key: its own attack, hold, decay and lag. Turn **SELECT** for its filter: **PRESETS** picks low-pass, high-pass or band-pass, the knobs cutoff, resonance, envelope and drive. |
@@ -214,7 +215,7 @@ and says why.
 
 ### The tracks
 
-Turn **ALGORITHM** to pick a track: T1 to T8, then COND (the conductor) and THROW (the throws). On Mix it goes
+Turn **ALGORITHM** to pick a track: T1 to T8, then COND (the conductor), THROW (the throws) and WEAVE. On Mix it goes
 through Mix's strips instead: T1 to T8, then FX I and FX II, the effects' returns. The keys play the
 track you picked on the Engine, Play, Envelope, Filter, LFO and Players pages. On a drum track, the black
 keys are the eleven drum keys, and the white keys play them too. On FX I and FX II, the keys play the
@@ -314,27 +315,45 @@ Turn **SELECT** for the Bar page: quantise for live recording, the note length o
 of a step, the groove amount and the shape. The black keys set the track scale: 1, 2, 3, 4, 5, 6, 8, 16
 sixteenths a step on black keys 1 to 8, half a sixteenth on black key 9. Press **SEL** on either page for the
 actions: clear notes, clear locks, clear both, copy and paste the pattern, rotate it a step forward or back,
-duplicate the bar into the next. Once a pattern is copied, the list also has WEAVE WITH COPIED.
+duplicate the bar into the next.
 
 ### Weave
 
-Weave crosses the pattern you are on with the one you copied. Copy a pattern (**SEL**, COPY PATTERN), go to
-another (**KNOB 1**), press **SEL** and pick WEAVE WITH COPIED. Turn **ALGORITHM** for how, then press
-**SEL**:
+A weave crosses what a track plays with another pattern, live, while the song plays: nothing is written. You set
+a weave up on the track, then play it on the WEAVE track.
 
-| Way | What this pattern becomes |
+**Set it up.** On a track, press **ARP** and turn **SELECT** to its last page, Weave. Press a black key for the
+track to weave in (1 to 8 the tracks, 9 COND, 10 THROW; the same key again: none) and a white key, 1 to 8, for
+its pattern. **KNOB 1** (FROM), **KNOB 2** (WITH) and **KNOB 3** (RULE) say the same. The page draws the first
+bar as it will play, the steps that change bright. The rules:
+
+| Rule | What the track plays |
 | --- | --- |
-| bars | its bars 1 and 3, the copy's bars 2 and 4 |
-| steps | its odd steps, the copy's even steps |
-| rhythm | its rhythm, playing the copy's notes in their order, round and round |
-| notes | the copy's rhythm, playing this pattern's notes |
+| bars | its bars and the other pattern's in turn: its bar, the other's bar ... |
+| steps | its steps and the other's in turn |
+| rhythm | its rhythm, playing the other pattern's notes in their order, round and round |
+| notes | the other pattern's rhythm, playing this track's notes |
 
-With bars and steps the shorter pattern loops to the longer one's length. The pattern keeps its own scale,
-groove and note length, and its locks. Not what you wanted? Hold **HOME** and press **REC** to undo, then try
-another way. Weave a pattern with a copy of itself shifted (copy, ROTATE FORWARD, weave by steps) for
-variations; weave a drum pattern's rhythm with a melody's notes for a riff.
+Each pattern loops by its own length, and the turns count from the start, so a one-bar pattern woven by bars
+plays its own bar, then the other's. A track can weave with any track: a drum track's sounds become notes on a
+melodic track (a ladder from C3: the kick C3, the snare Eb3, the hat F3 ...), and a melody's notes become a kit's
+sounds; the throw track weaves only with throws. The conductor weaves too: a progression with another.
 
-<img src="img/screen-weave.png" width="240" alt="The Steps list with WEAVE WITH COPIED picked, its way set to rhythm" title="Weave"> <img src="img/screen-woven.png" width="240" alt="T3&#x27;s pattern 2 after weaving by rhythm: its steps 3, 4, 8 and 11 now play pattern 1&#x27;s chords in turn, C and Dm" title="Woven">
+**Play it.** Turn **ALGORITHM** to WEAVE. Its white keys 1 to 10 are T1 to T8, COND and THROW: hold one and that
+track weaves while you hold it; the key lights, and so does its box on the screen. **KNOB 1**, latch, makes a tap
+start a weave and the next tap stop it. Hold **REC** while it plays and the weaves you play are written onto the
+WEAVE track, each from the step it started for as long as it lasted, and the song plays them back.
+
+**The WEAVE track's steps.** On **SEQ** its steps show the tracks they weave and, under them, how long. Tap a step
+to put on it the tracks you last wove (again: clear it); hold a step and press black keys 1 to 10 for its tracks
+and a later white key for its end. **KNOB 1** picks its pattern (each scene keeps its own), **KNOB 2** its length
+(16 to 64 sixteenths; with a step held, the step's). **SEL** clears the pattern.
+
+**Keep it.** SEL on the Weave page has KEEP AS PATTERN: the weave written into the track's first empty pattern, to
+edit like any other. A pattern woven with a copy of itself, shifted (copy, ROTATE FORWARD, weave it by steps), makes
+variations; a drum pattern's rhythm with a melody's notes makes a riff.
+
+<img src="img/screen-weave.png" width="240" alt="ARP's Weave page on T2: T2 P1 with T1 P1, by rhythm; the first bar's steps as they play woven" title="A weave set up"> <img src="img/screen-woven.png" width="240" alt="The WEAVE track's page: ten boxes, T1 to T8, COND and THROW; T2's lit while its key is held, its weave T1 P1, rhythm" title="Weaving">
 
 ## Recording
 
@@ -713,6 +732,8 @@ Turn **ALGORITHM** past T8. Each aux track has its own page under **EDIT** and i
   move to it. Its steps hold the chords you played: press **SEQ** and a white key. Set the track scale to 4
   so a step is a beat, or 16 for a bar. Page 2 is the routing: black keys 1 to 8 toggle a track. Its
   **SEL** list sets how each track follows, diatonic or transpose only. Drum tracks never follow.
+- **WEAVE** (the weaves): its white keys 1 to 10 weave T1 to T8, COND and THROW while held (latch: a tap on, a tap
+  off), each as its ARP's Weave page sets it; REC records them onto its steps. See Weave, above.
 - **THROW** (the throws): the keys fire the throws on the drum tracks (lower octave) and the melodic tracks
   (upper octave). Slice tracks count as drums: their fills play the pattern's own slices (the one on the
   downbeat as the kick, the backbeat's as the snare, an off-beat's as the hat), and octave takes them up. The last one you played is the one a step writes. **KNOB 1** is latch: a key then
@@ -841,6 +862,7 @@ On a sound page, hold **SAVE** and press white key 1 to 16 to keep the track's s
 | LFO, SELECT | LFO 2 | the type's fourth and fifth | | | | play |
 | ARP | Players | player | its first | its second | its third | play, through the player |
 | ARP, SELECT | Players 2, Hold | the arp's length, style, glide, stereo; hold | | | | play |
+| ARP, SELECT (last) | Weave | from | with | rule | | black: the track woven in, white: its pattern; SEL: KEEP AS PATTERN |
 | GLO | Mix | FX I | FX II | pan | level | black: a tap mutes, held: solo |
 | GLO, SELECT | Master EQ | low | mid | high | | |
 | GLO, SELECT | Master out | drums | melodic | comp | pump | SEL: pump by, release, accent, level |

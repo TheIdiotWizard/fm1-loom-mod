@@ -323,6 +323,7 @@ static int expect_more(const char *what, const char *a, const char *b, const cha
  *   trick T PAT S NAME VAL[:MODE]  a trick (pulse hold multiply velocity rampup rampdown random porta bend tonality
  *                                jump skiplock skiptrick skip) at its value 1..9 (10 random), the black keys';
  *                                skips' MODE 0 last pass, 1 not the last, 2 only the first. A third replaces the second
+ *   weaveset T FROM PAT RULE     track T's weave (ARP's Weave page): with track FROM's pattern PAT by RULE
  *   weave T DST A B RULE         pattern DST of track T = A woven with B (bars steps rhythm notes: SEL's WEAVE WITH
  *                                COPIED, A the pattern, B the copy)
  *   chance T PAT S PCT|A:B       the step's condition
@@ -750,6 +751,15 @@ static int song_cmd(const char *cmd)
             st->comp2 = (uint8_t)k;
             st->cval2 = (uint8_t)v;
         }
+    } else if (!strcmp(cmd, "weaveset")) {          /* weaveset T FROM PAT RULE: track T weaves with track FROM's PAT */
+        static const char *const RN2[NWV] = {"bars", "steps", "rhythm", "notes"};
+        int t = atoi(w[1]) - 1, r = -1;
+        for (k = 0; k < NWV; k++)
+            if (n > 4 && ieq(w[4], RN2[k]))
+                r = k;
+        if (n < 5 || t < 0 || t >= NSEQT || r < 0)
+            host_die("weaveset T FROM PAT bars|steps|rhythm|notes", "");
+        weave_set(t, atoi(w[2]), atoi(w[3]) - 1, r);
     } else if (!strcmp(cmd, "weave")) {             /* weave T DST A B RULE: pattern DST = A woven with B */
         static const char *const RN[NWV] = {"bars", "steps", "rhythm", "notes"};
         static tpat_t out;
