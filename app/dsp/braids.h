@@ -96,6 +96,7 @@ static const uint16_t DRUM_DS[6] = {65083, 64715, 64715, 64715, 64715, 62312};
 #define PT_C 33
 #define PT_S 44
 #define PT_D 55
+#define PT_K 66                                  /* (the frequency and knobs they were made from: 4) */
 /* the outputs' gains: each model's raw note near LOOM-8's engines' (a cycle peaking near 1) */
 static const float CN_GAIN[NCANE] = {2.6f, 2.7f, 1.45f, 0.8f, 2.0f, 1.2f};
 
@@ -117,7 +118,10 @@ static inline float bd_atan(float x)
     return x < 0.0f ? -r : r;
 }
 #define FL_DCP 0.995f                            /* the flute's DC blocker (Braids' 0.99 at 96 kHz led the pitch) */
-static inline int16_t bd_s16(float x) { return (int16_t)fm_clampf(x, -32767.0f, 32767.0f); }
+/* fm_clampf's value (lo < hi; x not NaN) as the FPU's max and min: two instructions on the FM-1, where the
+ * compares and selects take four */
+static inline float bd_clamp(float x, float lo, float hi) { return fm_minf(fm_maxf(x, lo), hi); }
+static inline int16_t bd_s16(float x) { return (int16_t)bd_clamp(x, -32767.0f, 32767.0f); }
 /* a ring's tap di (+ fr) samples behind p, linearly interpolated (Braids' Mix of the two) */
 SY_INLINE float bd_tap(const int16_t *d, int n, int p, int di, float fr)
 {
@@ -130,6 +134,27 @@ SY_INLINE float bd_tap(const int16_t *d, int n, int p, int di, float fr)
     return (float)d[a] + (float)(d[b] - d[a]) * fr;
 }
 static inline float bd_od(float x) { return fm_tanhf(2.0f * x) * 1.0373147f; }   /* ws_moderate_overdrive */
+/* bd_od for |x| <= 1 (voile's vowel and whisper): below |2x| = 0.5 fm_tanhf's own Taylor branch (the same value),
+ * above it a polynomial in |2x| - 1.25 (within 1.3e-7 of tanh to |2x| = 2: fm_tanhf's exp2 and divide are
+ * costly on the FM-1) */
+static inline float vo_od(float x)
+{
+    float y = 2.0f * x, a = fm_fabsf(y), u, r;
+    if (a < 0.5f)
+        return fm_tanhf(y) * 1.0373147f;
+    u = a - 1.25f;
+    r = 1.690596691e-03f;
+    r = r * u - 1.836245297e-03f;
+    r = r * u - 4.638960119e-03f;
+    r = r * u + 1.562794298e-02f;
+    r = r * u - 1.920663565e-02f;
+    r = r * u - 1.267151069e-02f;
+    r = r * u + 1.083122119e-01f;
+    r = r * u - 2.378656268e-01f;
+    r = r * u + 2.804148197e-01f;
+    r = r * u + 8.482835889e-01f;
+    return (y < 0.0f ? -r : r) * 1.0373147f;
+}
 static inline int cn_model(float k) { int m = (int)(k + 0.5f); return m < 0 ? 0 : m >= NCANE ? NCANE - 1 : m; }
 
 /* o[]: 0 the model the state is for (+1; 0 none), 1 a ring's place, 2 the second ring's, 3 samples since the
@@ -243,6 +268,14 @@ static void cn_prep(voice_t *v)
         bal = bal * bal >> 7;
         if (!pt)
             break;
+        /* the partials only when what makes them moved (the prep comes every fourth chunk even when nothing
+         * did); PT_K holds what they were made from (a cleared slot: 0, never a note's frequency) */
+        if (pt[PT_K] == f && pt[PT_K + 1] == tb && pt[PT_K + 2] == co && pt[PT_K + 3] == dp)
+            np = 0;
+        pt[PT_K] = f;
+        pt[PT_K + 1] = tb;
+        pt[PT_K + 2] = co;
+        pt[PT_K + 3] = dp;
         for (i = 0; i < np; i++) {
             float off = (float)(bell ? BELL_P[i] : DRUM_P[i]), w, dl, ds, d, rate;
             if (bell)
@@ -324,7 +357,7 @@ static void cn_chunk(voice_t *v)
         }
 }
 
-static void cn_pluck(voice_t *v, int16_t *dl, float *xl, int m)
+static void cn_pluck(voice_t *v, int16_t *dl, float *xl, int m, float g)
 {
     const cfg_t *c = &v->c;
     int n = (int)v->o[12], w = (int)v->o[10], ini = (int)v->o[11], i;
@@ -370,7 +403,7 @@ static void cn_pluck(voice_t *v, int16_t *dl, float *xl, int m)
             k = (int)ph;
             out = (float)dl[k] + (float)(dl[k + 1] - dl[k]) * (ph - (float)k);
         }
-        xl[i] = out * (1.0f / 32768.0f);
+        xl[i] = out * (1.0f / 32768.0f) * g;
     }
     v->rng = r;
     v->o[8] = nlp;
@@ -380,7 +413,7 @@ static void cn_pluck(voice_t *v, int16_t *dl, float *xl, int m)
 }
 #define BOW_ATT (0.025f * SY_SR)                 /* the bow's speed: up over 25 ms, back to 80 % over 5 */
 #define BOW_DEC (0.005f * SY_SR)
-static void cn_bow(voice_t *v, int16_t *dl, float *xl, int m)
+static void cn_bow(voice_t *v, int16_t *dl, float *xl, int m, float g)
 {
     const cfg_t *c = &v->c;
     int16_t *dn = dl, *db = dl + CN_NECK;
@@ -407,7 +440,7 @@ static void cn_bow(voice_t *v, int16_t *dl, float *xl, int m)
         if (++pb >= nb)
             pb = 0;
         tmp = bv * 0.19998f + y0 * 1.671405f - y1 * 0.701929f;   /* the body: Braids' at 48 kHz, moved */
-        xl[i] = fm_clampf((tmp - y1) * (1.0f / 32768.0f), -1.0f, 1.0f);
+        xl[i] = bd_clamp((tmp - y1) * (1.0f / 32768.0f), -1.0f, 1.0f) * g;
         y1 = y0;
         y0 = tmp;
     }
@@ -418,7 +451,7 @@ static void cn_bow(voice_t *v, int16_t *dl, float *xl, int m)
     v->o[5] = fm_flush(y0);
     v->o[6] = fm_flush(y1);
 }
-static void cn_reed(voice_t *v, int16_t *dl, float *xl, int m)
+static void cn_reed(voice_t *v, int16_t *dl, float *xl, int m, float g)
 {
     const cfg_t *c = &v->c;
     int p = (int)v->o[1], di = (int)c->ex[0], i;
@@ -430,15 +463,15 @@ static void cn_reed(voice_t *v, int16_t *dl, float *xl, int m)
         pd = dv * 0.5f + lp;                     /* the bore's two-tap average */
         lp = dv * 0.5f;
         pd = pd * rf - br;
-        reed = fm_clampf(pd * -0.30005f + 22938.0f, -32767.0f, 32767.0f);
-        out = fm_clampf(pd * reed * (1.0f / 32768.0f) + br, -32767.0f, 32767.0f);
+        reed = bd_clamp(pd * -0.30005f + 22938.0f, -32767.0f, 32767.0f);
+        out = bd_clamp(pd * reed * (1.0f / 32768.0f) + br, -32767.0f, 32767.0f);
         dl[p] = bd_s16(out);
         if (++p >= CN_LEN)
             p = 0;
         bo += k * (out - bo);                    /* the body */
         dy = bo - dx + 0.9985f * dy;             /* (and its DC) */
         dx = bo;
-        xl[i] = dy * (1.0f / 32768.0f);
+        xl[i] = dy * (1.0f / 32768.0f) * g;
     }
     v->rng = r;
     v->o[1] = (float)p;
@@ -449,7 +482,7 @@ static void cn_reed(voice_t *v, int16_t *dl, float *xl, int m)
 }
 #define FL_ATT (0.005f * SY_SR / 3.0f)           /* the breath: Braids' 1.7 ms up, 3.3 ms to 80 % */
 #define FL_DEC (0.01f * SY_SR / 3.0f)
-static void cn_flute(voice_t *v, int16_t *dl, float *xl, int m)
+static void cn_flute(voice_t *v, int16_t *dl, float *xl, int m, float g)
 {
     const cfg_t *c = &v->c;
     int16_t *db = dl, *dj = dl + CN_BORE;
@@ -470,7 +503,7 @@ static void cn_flute(voice_t *v, int16_t *dl, float *xl, int m)
         rf = dy;
         pd = br - rf * 0.5f;
         dj[pj] = bd_s16(pd * 0.5f);
-        xj = fm_clampf(jv, 0.0f, 65535.0f) * (1.0f / 32768.0f);
+        xj = bd_clamp(jv, 0.0f, 65535.0f) * (1.0f / 32768.0f);
         pd = fm_minf(xj * xj * xj - xj, 1.0f) * 32767.0f + rf * 0.5f;   /* the jet: x^3 - x */
         db[pb] = bd_s16(pd * 0.5f);
         if (++pb >= CN_BORE)
@@ -479,7 +512,7 @@ static void cn_flute(voice_t *v, int16_t *dl, float *xl, int m)
             pj = 0;
         oy = bv - ox + 0.9985f * oy;             /* the output's DC (the breath's) out */
         ox = bv;
-        xl[i] = fm_clampf(oy * (0.5f / 32768.0f), -1.0f, 1.0f);
+        xl[i] = bd_clamp(oy * (0.5f / 32768.0f), -1.0f, 1.0f) * g;
     }
     v->rng = r;
     v->o[14] = ox;
@@ -492,81 +525,104 @@ static void cn_flute(voice_t *v, int16_t *dl, float *xl, int m)
     v->o[6] = fm_flush(dy);
 }
 /* the partials over m samples: each a phasor turning, at its amplitude; the decays a sub-block at a time
- * (PT_D holds the decay of SUB samples: 0.36 ms steps, far under a step's hearing) */
-SY_INLINE void cn_partials(float *pt, int np, float *xl, int m)
+ * (PT_D holds the decay of SUB samples: 0.36 ms steps, far under a step's hearing). Two partials at a time over
+ * the m samples, added into xl in the partials' order (the same sums as a partial after another each sample):
+ * their state stays in registers (the FM-1's floats share its sixteen general registers; eleven at once spilled
+ * nearly all of them every sample) */
+SY_INLINE void cn_part2(float *pt, int j, float *xl, int m, float g, const int two, const int first, const int last)
 {
-    float re[11], im[11], am[11], co[11], sn[11];
-    int i, j;
-    for (j = 0; j < np; j++) {
-        re[j] = pt[PT_RE + j];
-        im[j] = pt[PT_IM + j];
-        am[j] = pt[PT_AMP + j];
-        co[j] = pt[PT_C + j];
-        sn[j] = pt[PT_S + j];
-    }
-    for (i = 0; i < m; i++) {
-        float s = 0.0f;
-        for (j = 0; j < np; j++) {
-            float nr = re[j] * co[j] - im[j] * sn[j];
-            im[j] = re[j] * sn[j] + im[j] * co[j];
-            re[j] = nr;
-            s += im[j] * am[j];
-        }
-        xl[i] = s;
-    }
-    for (j = 0; j < np; j++) {
-        pt[PT_RE + j] = re[j];
-        pt[PT_IM + j] = im[j];
-        pt[PT_AMP + j] = fm_flush(am[j] * (m == SUB ? pt[PT_D + j] : fm_exp2f(fm_log2f(pt[PT_D + j]) * (float)m * (1.0f / SUB))));
-    }
-}
-static void cn_bell(voice_t *v, float *pt, float *xl, int m)
-{
+    float r0 = pt[PT_RE + j], i0 = pt[PT_IM + j], a0 = pt[PT_AMP + j], c0 = pt[PT_C + j], s0 = pt[PT_S + j];
+    float r1 = two ? pt[PT_RE + j + 1] : 0.0f, i1 = two ? pt[PT_IM + j + 1] : 0.0f, a1 = two ? pt[PT_AMP + j + 1] : 0.0f;
+    float c1 = two ? pt[PT_C + j + 1] : 0.0f, s1 = two ? pt[PT_S + j + 1] : 0.0f;
     int i;
-    (void)v;
-    cn_partials(pt, 11, xl, m);
-    for (i = 0; i < m; i++)
-        xl[i] = fm_clampf(xl[i], -1.0f, 1.0f);
-}
-static void cn_drum(voice_t *v, float *pt, float *xl, int m)
-{
-    const cfg_t *c = &v->c;
-    float re[6], im[6], am[6], co6[6], sn6[6], f = c->ex[0], hg = c->ex[1], ng = c->ex[2];
-    float l0 = v->o[8], l1 = v->o[9], l2 = v->o[10];
-    uint32_t r = v->rng;
-    int i, j;
-    for (j = 0; j < 6; j++) {
-        re[j] = pt[PT_RE + j];
-        im[j] = pt[PT_IM + j];
-        am[j] = pt[PT_AMP + j] * 32767.0f;
-        co6[j] = pt[PT_C + j];
-        sn6[j] = pt[PT_S + j];
+    for (i = 0; i < m; i++) {
+        float nr = r0 * c0 - i0 * s0, x;
+        i0 = r0 * s0 + i0 * c0;
+        r0 = nr;
+        x = (first ? 0.0f : xl[i]) + i0 * a0;
+        if (two) {
+            nr = r1 * c1 - i1 * s1;
+            i1 = r1 * s1 + i1 * c1;
+            r1 = nr;
+            x += i1 * a1;
+        }
+        xl[i] = last ? bd_clamp(x, -1.0f, 1.0f) * g : x;
     }
-    for (i = 0; i < m; i++) {                    /* (in Braids' int16 units) */
-        float p[6], h = 0.0f, nz = fm_clampf(frand(&r) * 32768.0f, -16384.0f, 16384.0f), s;
+    pt[PT_RE + j] = r0;
+    pt[PT_IM + j] = i0;
+    if (two) {
+        pt[PT_RE + j + 1] = r1;
+        pt[PT_IM + j + 1] = i1;
+    }
+}
+/* the bell's eleven partials (the last pass clips the sum and gives it the gain g) */
+static void cn_bell(voice_t *v, float *pt, float *xl, int m, float g)
+{
+    int j;
+    (void)v;
+    cn_part2(pt, 0, xl, m, g, 1, 1, 0);
+    for (j = 2; j < 10; j += 2)
+        cn_part2(pt, j, xl, m, g, 1, 0, 0);
+    cn_part2(pt, 10, xl, m, g, 0, 0, 1);
+    for (j = 0; j < 11; j++)
+        pt[PT_AMP + j] = fm_flush(pt[PT_AMP + j] * (m == SUB ? pt[PT_D + j] : fm_exp2f(fm_log2f(pt[PT_D + j]) * (float)m * (1.0f / SUB))));
+}
+/* the drum's partial j over m samples (in Braids' int16 units): its phasor turned, its sample into the partials'
+ * sum hs and the mix t (the noise's share on partials 1 and 3, n2 the noise); the last one makes the output */
+SY_INLINE void cn_dpart(voice_t *v, float *pt, const int j, const float *n2, float *hs, float *t, float *xl, int m,
+                        float g)
+{
+    float re = pt[PT_RE + j], im = pt[PT_IM + j], am = pt[PT_AMP + j] * 32767.0f, co = pt[PT_C + j], sn = pt[PT_S + j];
+    float hg = v->c.ex[1], ng = v->c.ex[2];
+    int i;
+    for (i = 0; i < m; i++) {
+        float nr = re * co - im * sn, p;
+        im = re * sn + im * co;
+        re = nr;
+        p = im * am;
+        if (j == 0) {
+            hs[i] = 0.0f + p;
+            t[i] = p;
+        } else if (j == 5) {
+            float h = hs[i] + p;
+            xl[i] = bd_clamp((t[i] + h * hg) * (1.0f / 32768.0f), -1.0f, 1.0f) * g;
+        } else {
+            hs[i] += p;
+            if (j == 1)
+                t[i] = t[i] + p * n2[i] * (1.0f / 256.0f) * (0.75f - ng);
+            else if (j == 3)
+                t[i] = t[i] + p * n2[i] * (1.0f / 512.0f) * ng;
+        }
+    }
+    pt[PT_RE + j] = re;
+    pt[PT_IM + j] = im;
+    pt[PT_AMP + j] = fm_flush(am * (1.0f / 32767.0f) *
+                              (m == SUB ? pt[PT_D + j] : fm_exp2f(fm_log2f(pt[PT_D + j]) * (float)m * (1.0f / SUB))));
+}
+/* the noise, then the six partials a pass each (their state in registers, not spilled each sample): every sum in
+ * Braids' order (s = p0 + p1 x noise + p3 x noise + their sum x hg), so the same samples as all six each sample */
+static void cn_drum(voice_t *v, float *pt, float *xl, int m, float g)
+{
+    float f = v->c.ex[0], l0 = v->o[8], l1 = v->o[9], l2 = v->o[10], n2[SUB], hs[SUB], t[SUB];
+    uint32_t r = v->rng;
+    int i;
+    for (i = 0; i < m; i++) {
+        float nz = bd_clamp(frand(&r) * 32768.0f, -16384.0f, 16384.0f);
         l0 += (nz - l0) * f;
         l1 += (l0 - l1) * f;
         l2 += (l1 - l2) * f;
-        for (j = 0; j < 6; j++) {
-            float nr = re[j] * co6[j] - im[j] * sn6[j];
-            im[j] = re[j] * sn6[j] + im[j] * co6[j];
-            re[j] = nr;
-            p[j] = im[j] * am[j];
-            h += p[j];
-        }
-        s = p[0] + p[1] * l2 * (1.0f / 256.0f) * (0.75f - ng) + p[3] * l2 * (1.0f / 512.0f) * ng + h * hg;
-        xl[i] = fm_clampf(s * (1.0f / 32768.0f), -1.0f, 1.0f);
-    }
-    for (j = 0; j < 6; j++) {
-        pt[PT_RE + j] = re[j];
-        pt[PT_IM + j] = im[j];
-        pt[PT_AMP + j] = fm_flush(am[j] * (1.0f / 32767.0f) *
-                                  (m == SUB ? pt[PT_D + j] : fm_exp2f(fm_log2f(pt[PT_D + j]) * (float)m * (1.0f / SUB))));
+        n2[i] = l2;
     }
     v->rng = r;
     v->o[8] = fm_flush(l0);
     v->o[9] = fm_flush(l1);
     v->o[10] = fm_flush(l2);
+    cn_dpart(v, pt, 0, n2, hs, t, xl, m, g);
+    cn_dpart(v, pt, 1, n2, hs, t, xl, m, g);
+    cn_dpart(v, pt, 2, n2, hs, t, xl, m, g);
+    cn_dpart(v, pt, 3, n2, hs, t, xl, m, g);
+    cn_dpart(v, pt, 4, n2, hs, t, xl, m, g);
+    cn_dpart(v, pt, 5, n2, hs, t, xl, m, g);
 }
 static void cn_run(voice_t *v, float *xl, float *xr, int m)
 {
@@ -579,15 +635,13 @@ static void cn_run(voice_t *v, float *xl, float *xr, int m)
         return;
     }
     switch (md) {
-    case CN_PLUCK: cn_pluck(v, cn_mem[v->tws].s, xl, m); break;
-    case CN_BOW: cn_bow(v, cn_mem[v->tws].s, xl, m); break;
-    case CN_REED: cn_reed(v, cn_mem[v->tws].s, xl, m); break;
-    case CN_FLUTE: cn_flute(v, cn_mem[v->tws].s, xl, m); break;
-    case CN_BELL: cn_bell(v, cn_mem[v->tws].f, xl, m); break;
-    default: cn_drum(v, cn_mem[v->tws].f, xl, m); break;
+    case CN_PLUCK: cn_pluck(v, cn_mem[v->tws].s, xl, m, g); break;   /* (each model's gain at its last step) */
+    case CN_BOW: cn_bow(v, cn_mem[v->tws].s, xl, m, g); break;
+    case CN_REED: cn_reed(v, cn_mem[v->tws].s, xl, m, g); break;
+    case CN_FLUTE: cn_flute(v, cn_mem[v->tws].s, xl, m, g); break;
+    case CN_BELL: cn_bell(v, cn_mem[v->tws].f, xl, m, g); break;
+    default: cn_drum(v, cn_mem[v->tws].f, xl, m, g); break;
     }
-    for (i = 0; i < m; i++)
-        xl[i] *= g;
 }
 
 /* ------------------------------------------------------------ voile ---- */
@@ -651,9 +705,10 @@ static void vo_consonant(voice_t *v)
     }
     c->ex[13] = k >= 6 ? 0.0312f : 0.0f;         /* the last two: noisy resets (Braids' 4095) */
 }
-/* o[]: 0 the model (+1), 1 the period's phase, 2..4 the formants' phases (vosim, vowel); vosim 4 / 5 its DC
- * blocker; vowel 5 the consonant's samples left, 6 which one, 7 a strike to make, 8 / 9 its DC blocker; choir 2..6 the formants'
- * low-passes, 7..11 their band-passes; whisper 2..5 the two resonators, 6 the buzz's phase */
+/* o[]: 0 the model (+1), 1 the period's phase; vosim 2 / 8 and 3 / 9 the formants' phasors (cos / sin), 4 / 5 its DC
+ * blocker; vowel 2..4 the formants' phases, 5 the consonant's samples left, 6 which one, 7 a strike to make, 8 / 9
+ * its DC blocker; choir 2..6 the formants' low-passes, 7..11 their band-passes, 12 / 13 the timbre and color
+ * ex[1..5] were made from (14: 1 when they were); whisper 2..5 the two resonators, 6 the buzz's phase */
 static void vo_init(voice_t *v)
 {
     int i;
@@ -674,13 +729,19 @@ static void vo_prep(voice_t *v)
         vo_init(v);
         v->o[0] = (float)(m + 1);
         v->o[7] = s7;
+        if (m == VO_VOSIM)
+            v->o[2] = v->o[3] = 1.0f;            /* (its formants: phasors at 1 + 0i) */
     }
     c->ex[0] = fm_minf(f * INV_SR, 0.45f);
     c->ex[18] = b;
     switch (m) {
-    case VO_VOSIM:
+    case VO_VOSIM:                               /* the formants' turns a sample, as rotations */
         c->ex[1] = fm_minf(bd_mtof(tb * 127.99f) * INV_SR, 0.49f);
         c->ex[2] = fm_minf(bd_mtof(co * 127.99f) * INV_SR, 0.49f);
+        c->ex[3] = fm_cosf(FM_TWO_PI * c->ex[1]);
+        c->ex[4] = fm_sinf(FM_TWO_PI * c->ex[1]);
+        c->ex[5] = fm_cosf(FM_TWO_PI * c->ex[2]);
+        c->ex[6] = fm_sinf(FM_TWO_PI * c->ex[2]);
         break;
     case VO_VOWEL: {
         int p0 = (int)(tb * 32767.0f), vi = p0 >> 12;
@@ -697,6 +758,11 @@ static void vo_prep(voice_t *v)
     case VO_CHOIR: {
         float x = co * 4.0f, y = tb * 4.0f, xf, yf;
         int xi = (int)x, yi = (int)y;
+        if (v->o[14] > 0.5f && v->o[12] == tb && v->o[13] == co)
+            break;                               /* the formants as they are (the note does not move them) */
+        v->o[12] = tb;
+        v->o[13] = co;
+        v->o[14] = 1.0f;
         if (xi > 3)
             xi = 3;
         if (yi > 3)
@@ -740,43 +806,48 @@ static void vo_chunk(voice_t *v)
     }
     v->o[7] = 0.0f;
 }
-static void vo_vosim(voice_t *v, float *xl, int m)
+/* the two formants as rotating phasors (o[2] / o[8] and o[3] / o[9]: cos / sin), back to 1 + 0i each period
+ * (Braids' phases reset); a rotation is four multiplies where a sine is a polynomial */
+static void vo_vosim(voice_t *v, float *xl, int m, float g)
 {
     const cfg_t *c = &v->c;
-    float p = v->o[1], a = v->o[2], b = v->o[3], dx = v->o[4], dy = v->o[5];
-    float d = c->ex[0], da = c->ex[1], db = c->ex[2], br = c->ex[18];
+    float p = v->o[1], ar = v->o[2], ai = v->o[8], br_ = v->o[3], bi = v->o[9], dx = v->o[4], dy = v->o[5];
+    float d = c->ex[0], ca = c->ex[3], sa = c->ex[4], cb = c->ex[5], sb = c->ex[6], br = c->ex[18];
     uint32_t r = v->rng;
     int i;
     for (i = 0; i < m; i++) {
-        float s, w;
+        float s, w, t;
         p += d;
-        a += da;
-        b += db;
-        if (a >= 1.0f)
-            a -= 1.0f;
-        if (b >= 1.0f)
-            b -= 1.0f;
+        t = ar * ca - ai * sa;
+        ai = ar * sa + ai * ca;
+        ar = t;
+        t = br_ * cb - bi * sb;
+        bi = br_ * sb + bi * cb;
+        br_ = t;
         if (p >= 1.0f) {                         /* a period: the formants start again */
             p -= 1.0f;
-            a = b = 0.0f;
+            ar = br_ = 1.0f;
+            ai = bi = 0.0f;
             s = 0.0f;
         } else {
             w = vo_bell(p);
-            s = (0.75f + 0.5f * fm_sin_turns(a) + 0.25f * fm_sin_turns(b)) * w;
+            s = (0.75f + 0.5f * ai + 0.25f * bi) * w;
             s = s + (frand(&r) * w - s) * br;    /* breath: noise under the window */
         }
         dy = (s - 0.75f) - dx + 0.9985f * dy;
         dx = s - 0.75f;
-        xl[i] = dy;
+        xl[i] = dy * g;
     }
     v->rng = r;
     v->o[1] = p;
-    v->o[2] = a;
-    v->o[3] = b;
+    v->o[2] = ar;
+    v->o[8] = ai;
+    v->o[3] = br_;
+    v->o[9] = bi;
     v->o[4] = dx;
     v->o[5] = fm_flush(dy);
 }
-static void vo_vowel(voice_t *v, float *xl, int m)
+static void vo_vowel(voice_t *v, float *xl, int m, float g)
 {
     const cfg_t *c = &v->c;
     float p = v->o[1], f1 = v->o[2], f2 = v->o[3], f3 = v->o[4], left = v->o[5], d = c->ex[0], dx = v->o[8], dy = v->o[9];
@@ -802,10 +873,10 @@ static void vo_vowel(voice_t *v, float *xl, int m)
             f1 = f2 = f3 = 0.0f;
             x = 0.0f;
         }
-        x = bd_od(x * (1.0f / 32768.0f));
+        x = vo_od(x * (1.0f / 32768.0f));
         dy = x - dx + 0.995f * dy;              /* its DC out (the window's ramp makes it one-sided) */
         dx = x;
-        xl[i] = dy;
+        xl[i] = dy * g;
     }
     if (cons) {
         left -= (float)m;
@@ -821,38 +892,58 @@ static void vo_vowel(voice_t *v, float *xl, int m)
     v->o[8] = dx;
     v->o[9] = fm_flush(dy);
 }
-static void vo_choir(voice_t *v, float *xl, int m)
+/* Braids' SVF (Q 64): its band-pass */
+SY_INLINE float vo_svf(float *lp, float *bp, float k, float in)
+{
+    float h;
+    *lp = bd_clamp(*lp + k * *bp, -32767.0f, 32767.0f);
+    h = in - *bp * (1.0f / 64.0f) - *lp;
+    *bp = bd_clamp(*bp + k * h, -32767.0f, 32767.0f);
+    return *bp;
+}
+/* the choir's formants j and j + 1 over the m samples into acc (the last pair: the output, at gain g). Two at a
+ * time keep their state in registers (the FM-1's floats share its sixteen general registers: five at once
+ * spilled most of them every sample); the sum in the order of five at once, so the same samples */
+SY_INLINE void vo_fof2(voice_t *v, int j, const float *ins, float *acc, float *xl, int m, float g, const int last)
+{
+    float l0 = v->o[2 + j], b0 = v->o[7 + j], k0 = v->c.ex[1 + j], l1 = v->o[3 + j], b1 = v->o[8 + j], k1 = v->c.ex[2 + j];
+    int i;
+    for (i = 0; i < m; i++) {
+        float in = ins[i], s = acc[i] + vo_svf(&l0, &b0, k0, in);
+        s += vo_svf(&l1, &b1, k1, in);
+        if (last)
+            xl[i] = bd_clamp(s * (1.0f / (8.0f * 32768.0f)), -1.0f, 1.0f) * g;
+        else
+            acc[i] = s;
+    }
+    v->o[2 + j] = fm_flush(l0);
+    v->o[7 + j] = fm_flush(b0);
+    v->o[3 + j] = fm_flush(l1);
+    v->o[8 + j] = fm_flush(b1);
+}
+static void vo_choir(voice_t *v, float *xl, int m, float g)
 {
     const cfg_t *c = &v->c;
-    float p = v->o[1], d = c->ex[0], id = 1.0f / d, br = c->ex[18], lp[5], bp[5];
+    float p = v->o[1], d = c->ex[0], id = 1.0f / d, br = c->ex[18], lp = v->o[2], bp = v->o[7], k = c->ex[1];
+    float ins[SUB], acc[SUB];
     uint32_t r = v->rng;
-    int i, j;
-    for (j = 0; j < 5; j++) {
-        lp[j] = v->o[2 + j];
-        bp[j] = v->o[7 + j];
-    }
-    for (i = 0; i < m; i++) {
-        float in, out = 0.0f;
+    int i;
+    for (i = 0; i < m; i++) {                    /* the saw (and the breath), and the first formant */
+        float in;
         p = step1(p, d);
         in = (2.0f * p - 1.0f - blep(p, d, id)) * 16384.0f;
         in += (frand(&r) * 16384.0f - in) * br;  /* breath */
-        for (j = 0; j < 5; j++) {                /* Braids' five SVFs, Q 64, all at one gain */
-            float h;
-            lp[j] = fm_clampf(lp[j] + c->ex[1 + j] * bp[j], -32767.0f, 32767.0f);
-            h = in - bp[j] * (1.0f / 64.0f) - lp[j];
-            bp[j] = fm_clampf(bp[j] + c->ex[1 + j] * h, -32767.0f, 32767.0f);
-            out += bp[j];
-        }
-        xl[i] = fm_clampf(out * (1.0f / (8.0f * 32768.0f)), -1.0f, 1.0f);
+        ins[i] = in;
+        acc[i] = 0.0f + vo_svf(&lp, &bp, k, in);
     }
     v->rng = r;
     v->o[1] = p;
-    for (j = 0; j < 5; j++) {
-        v->o[2 + j] = fm_flush(lp[j]);
-        v->o[7 + j] = fm_flush(bp[j]);
-    }
+    v->o[2] = fm_flush(lp);
+    v->o[7] = fm_flush(bp);
+    vo_fof2(v, 1, ins, acc, xl, m, g, 0);
+    vo_fof2(v, 3, ins, acc, xl, m, g, 1);
 }
-static void vo_whisper(voice_t *v, float *xl, int m)
+static void vo_whisper(voice_t *v, float *xl, int m, float g)
 {
     const cfg_t *c = &v->c;
     float y11 = v->o[2], y12 = v->o[3], y21 = v->o[4], y22 = v->o[5], ph = v->o[6], d = c->ex[0], id = 1.0f / d;
@@ -870,7 +961,7 @@ static void vo_whisper(voice_t *v, float *xl, int m)
         y11 = a;
         y22 = y21;
         y21 = b;
-        xl[i] = bd_od(fm_clampf((a + b) * 0.1f * mk, -1.0f, 1.0f));
+        xl[i] = vo_od(bd_clamp((a + b) * 0.1f * mk, -1.0f, 1.0f)) * g;
     }
     v->rng = r;
     v->o[2] = fm_flush(y11);
@@ -879,19 +970,17 @@ static void vo_whisper(voice_t *v, float *xl, int m)
     v->o[5] = fm_flush(y22);
     v->o[6] = ph;
 }
-static void vo_run(voice_t *v, float *xl, float *xr, int m)
+static void vo_run(voice_t *v, float *xl, float *xr, int m)   /* (each model's gain at its last step) */
 {
-    int md = (int)v->c.ex[19], i;
+    int md = (int)v->c.ex[19];
     float g = VO_GAIN[md];
     (void)xr;
     switch (md) {
-    case VO_VOSIM: vo_vosim(v, xl, m); break;
-    case VO_VOWEL: vo_vowel(v, xl, m); break;
-    case VO_CHOIR: vo_choir(v, xl, m); break;
-    default: vo_whisper(v, xl, m); break;
+    case VO_VOSIM: vo_vosim(v, xl, m, g); break;
+    case VO_VOWEL: vo_vowel(v, xl, m, g); break;
+    case VO_CHOIR: vo_choir(v, xl, m, g); break;
+    default: vo_whisper(v, xl, m, g); break;
     }
-    for (i = 0; i < m; i++)
-        xl[i] *= g;
 }
 
 /* ---------------------------------------------------------- gingham ---- */
