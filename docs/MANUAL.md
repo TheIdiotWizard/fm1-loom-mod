@@ -91,7 +91,7 @@ knob on it; press **ARP** on T2 and turn **KNOB 1** to arp; press **GLO**, turn 
 - **Scene** (S1 to S16): which pattern each track plays, plus the mutes and the conductor's key.
 - **Song**: a chain of scenes, each played for a number of bars.
 - **Engine**: the way a track makes its sound. Eight synths and the kit, a drum synth.
-- **Preset**: a sound to load. 64 come with LOOM-8, and 16 are yours.
+- **Preset**: a sound to load. 224 come with LOOM-8, sixteen for each engine, and 16 are yours.
 - **Player**: what the keys do on a track: arp, strum or hold.
 - **Conductor**: the aux track that moves the other tracks through a key and scale.
 - **Throw**: a momentary effect on the drums or the melodic tracks, from a key while you hold HOME.
@@ -125,7 +125,7 @@ press…" means keep **HOME** down while you press the next thing.
 | set the track scale | On the Bar page, press a black key: 1, 2, 3, 4, 5, 6, 8, 16 sixteenths a step, or black key 9 for half a sixteenth. |
 | change the pattern | On Steps, turn **KNOB 1**. Playing, it comes at the next bar line: the knob reads NEXT 1>2 and the tag line "next P2" until it does. |
 | weave two patterns | Copy one (**SEL**, COPY PATTERN), go to the other, **SEL**, WEAVE WITH COPIED: **ALGORITHM** picks bars, steps, rhythm or notes. **SEL** does it. |
-| change the sound | Press **EDIT** and turn **PRESETS**: the engine's own sounds, "PRESET 3/8". **SEL** changes the engine. |
+| change the sound | Press **EDIT** and turn **PRESETS**: the engine's own sounds, "BASS 3/16": what the sound is for and where you are. **SEL** changes the engine. |
 | edit a drum sound | On a drum track, press **EDIT** and press the sound's black key. The knobs are the model's own four. Turn **SELECT** for the model, random, pan and volume; its **SEL** list has the play mode. |
 | shape one drum | On a drum track, press **ENV** and press the drum's black key: its own attack, hold, decay and lag. Turn **SELECT** for its filter: **PRESETS** picks low-pass, high-pass or band-pass, the knobs cutoff, resonance, envelope and drive. |
 | play a sample | On a drum track, turn a key's model to sample. On a synth track, **SEL** and ENGINE: sample. The sample knob picks it. |
@@ -359,8 +359,11 @@ redo it. One stage, the selected track's pattern; locks stay as they are.
 
 Press **EDIT**. The Engine page shows the track's engine, a picture of it that moves with the knobs, and its
 four knobs with their values from 00 to 99. Turn **PRESETS** for the engine's next
-sound: its factory presets, then the user presets saved from it; the message says where you are, as in
-"PRESET 3/8". Press **SEL** for the list: ENGINE changes the engine and loads its first sound, then a preset,
+sound: its sixteen factory presets, then the user presets saved from it. The message says what the sound is
+for and where you are, as in "PAD 3/16". The roles are bass, lead, keys, pluck, bell, stab, brass, strings, pad,
+voice, chord, fx, drum and loop; a user preset says "PRESET". Each engine's sixteen run from basses and leads
+through keys, plucks and bells to pads, and end with the ones that move. Most are dry. Pads, strings, voices and
+bells send to the reverb, and some plucks and leads to the delay. Press **SEL** for the list: ENGINE changes the engine and loads its first sound, then a preset,
 SCRAMBLE for a random sound, SAVE AS PRESET, RESET SOUND, and whether the track FOLLOWS CONDUCTOR.
 
 <img src="img/screen-engine.png" width="240" alt="Engine on T2: stack, its picture, the preset name, and its four knobs shape, ratio, detune, stereo from 00 to 99" title="The Engine page"> <img src="img/screen-play.png" width="240" alt="Play: voice mode, portamento, bend range and volume" title="The Play page">
@@ -519,8 +522,12 @@ an octave up twice as fast. Its knobs:
 | mode | one-shot (once, then the note ends), loop (round and round; a sample with its own loop loops that), reverse (once, backwards), ping-pong (forth and back) |
 
 The picture shows the sample's waveform, the part that plays bright, a dot where it starts and the loop's ends
-marked. Then the track's envelopes, filter, character and LFO shape it like any engine. Its eight presets:
-jute keys, jute choir, hessian, hemp bass, sisal sweep, raffia, coir and flax bell.
+marked. Then the track's envelopes, filter, character and LFO shape it like any engine. Its sixteen presets:
+jute keys (the piano), hemp bass and kenaf (the kick as a short bass and as a long boom), hessian (a sung lead),
+abaca, coir and nettle (the hat, snare and clap as pitched percussion), flax bell (the piano rung), roselle (a
+short, thin piano stab), raffia (the piano backwards), urena (the piano's middle looped, a held chord), jute choir
+and jute pad (the ah looped, open and dark), henequen (the break as a pitched one-shot), sisal sweep and istle (the
+sweep, ping-ponged and backwards).
 
 <img src="img/screen-sample-engine.png" width="240" alt="Engine on T3 sample: the piano&#x27;s waveform, its root C4, all of it playing once; knobs sample, start, length, mode" title="The sample engine">
 
@@ -552,9 +559,12 @@ turns it back on).
 
 The picture shows the loop's waveform cut at the slices, each slice's gated part drawn and what the gate leaves
 out faint, the slice playing lit with a line where it is, a dot on slice 1. Above: the loop's name and bars,
-the count or the slice playing. Its eight presets: loom break (eight slices, straight), chop (sixteen, mono),
-shuttle (thirty-two, driven), heddle (four, an octave down, heavy), treadle (up a fifth, clipped), bobbin
-(short plucked chops), selvedge (thin, high-passed) and warp beam (legato, down, a filter moving with the beat).
+the count or the slice playing. Its sixteen presets: loom break (eight slices, straight), chop (sixteen, mono),
+shuttle (thirty-two, driven), heddle (four, an octave down, heavy), treadle (up a fifth, clipped), batten (boom bap:
+down a fourth, dark, driven), pirn (jungle: up, sixteen, mono, bright), sley (lo-fi: crushed), bobbin (short
+plucked chops), selvedge (thin, high-passed: the hats), picker (a stutter: sixteen, short), shed (the kicks
+alone), warp beam (legato, down, a filter moving with the beat), harness (ring-modulated), lease (dub: band-passed
+into the delay) and ratchet (a tape stop: the pitch falling across a held note, legato).
 
 <img src="img/screen-slice-engine.png" width="240" alt="Engine on T3 slice: the break&#x27;s waveform cut in eight, slice 5 playing; knobs sample break, slices 8, pitch 0 st, gate 100 %" title="The slice engine">
 

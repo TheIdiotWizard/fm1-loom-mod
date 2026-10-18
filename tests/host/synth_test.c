@@ -1443,7 +1443,7 @@ int main(void)
     tp_text(TP_PORTA, 50, 0, num, unit);
     check("portamento shows 0..127", !strcmp(num, "50") && !unit[0]);
 
-    check("112 presets, 8 an engine", NPRESETS == 112);
+    check("224 presets, 16 an engine", NPRESETS == 224);
     {   /* names: lower case words, at most 11 characters, each its own; stack's first is a bass */
         int ok = 1, j;
         for (k = 0; k < NPRESETS && ok; k++) {
@@ -1469,12 +1469,27 @@ int main(void)
         int n = 0;
         for (k = 0; k < NPRESETS; k++)
             n += PRESETS[k].par[TP_ENGINE] == e;
-        if (n != 8) {
+        if (n != 16) {
             printf("    engine %s has %d presets\n", EG_NAME[e], n);
-            check("8 presets an engine", 0);
+            check("16 presets an engine", 0);
         }
         if (preset_first(e) < 0 || PRESETS[preset_first(e)].par[TP_ENGINE] != e)
             check("preset_first", 0);
+        for (k = preset_first(e); k >= 0 && k < preset_first(e) + n; k++)   /* together: PRESETS steps through them */
+            if (k >= NPRESETS || PRESETS[k].par[TP_ENGINE] != e) {
+                printf("    engine %s's presets are not together\n", EG_NAME[e]);
+                check("an engine's presets together", 0);
+                break;
+            }
+    }
+    {
+        int ok = 1;
+        for (k = 0; k < NPRESETS; k++)
+            if (PRESETS[k].role >= NRL) {
+                printf("    preset %s: role %d\n", PRESETS[k].name, PRESETS[k].role);
+                ok = 0;
+            }
+        check("every preset has a role", ok);
     }
     {
         int ok = 1;
@@ -2044,7 +2059,7 @@ int main(void)
         int same = 1, i;
         reset();
         for (t = 0; t < NTRK; t++) {
-            load_preset(t, t * 8 + 3);
+            load_preset(t, preset_first(t) + 3);
             par[t][TP_LTYPE] = (uint8_t)(t & 1 ? LT_WOBBLE : LT_WAVE);
             par[t][TP_LDEST] = (uint8_t)(t & 1 ? 100 : LD_FILTER);
             par[t][TP_LAMT] = 100;

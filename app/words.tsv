@@ -106,6 +106,20 @@ hicut	high cut
 keytrk	key tracking
 fdbk	feedback
 PRESET #/#	preset # of #
+BASS #/#	bass # of #
+LEAD #/#	lead # of #
+PAD #/#	pad # of #
+KEYS #/#	keys # of #
+PLUCK #/#	pluck # of #
+BELL #/#	bell # of #
+STAB #/#	stab # of #
+STRINGS #/#	strings # of #
+BRASS #/#	brass # of #
+VOICE #/#	voice # of #
+CHORD #/#	chord # of #
+FX #/#	effect # of #
+DRUM #/#	drum # of #
+LOOP #/#	loop # of #
 REST #	rest, step #
 BACK #	back to step #
 lp24	low pass 24
@@ -122,3 +136,47 @@ oct	octave
 maj7	major 7
 min7	minor 7
 sus4	sus 4
+faille	file
+sley	slay
+pirn	purn
+kinkhab	kin kab
+zari	zah ree
+tussah	tuss uh
+pongee	pon jee
+lampas	lam pus
+samite	say mite
+kenaf	kuh naff
+abaca	ah bah kah
+urena	you ree nuh
+istle	ist lee
+henequen	hen uh ken
+ninon	nee non
+lisse	leess
+tarlatan	tar luh tun
+batiste	ba teest
+mousseline	moose leen
+kooboo	koo boo
+malacca	muh lack uh
+osier	oh zher
+baize	bays
+loden	low den
+chamois	sham ee
+cambric	kame brick
+toile	twahl
+ramie	ram ee
+hawser	haw zer
+skein	skane
+chambray	sham bray
+madras	mad rass
+vicuna	vi koo nya
+worsted	wuss tid
+jacquard	jack ard
+baldachin	bal duh kin
+georgette	jor jet
+crepe	krayp
+buckram	buck rum
+noil	noyl
+shantung	shan tung
+organdy	or gun dee
+seersucker	seer sucker
+deckchair	deck chair

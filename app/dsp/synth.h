@@ -156,10 +156,15 @@ void sound_default(uint8_t *par, int engine);       /* par[NTP] for a fresh trac
 float char_picture(const uint8_t *par, float u);
 static inline int tp_bend_semi(int v) { return v >= 8 ? 12 : v; }   /* TP_BEND as semitones */
 
-/* factory presets: the sound part of par[] */
+/* factory presets: the sound part of par[], and its role (what it is for: the PRESETS message says it, "PAD 3/16",
+ * and tools/render_presets.sh --roles plays each as it is used). Sixteen an engine, in their engine's order */
+enum { RL_BASS, RL_LEAD, RL_PAD, RL_KEYS, RL_PLUCK, RL_BELL, RL_STAB, RL_STRINGS, RL_BRASS, RL_VOICE, RL_CHORD, RL_FX,
+       RL_DRUM, RL_LOOP, NRL };
+extern const char *const RL_NAME[NRL];            /* "bass", "lead", ... */
 typedef struct {
     const char *name;
     uint8_t par[NTP_SOUND];
+    uint8_t role;                                 /* RL_* */
 } preset_t;
 extern const preset_t PRESETS[];
 extern const int NPRESETS;
