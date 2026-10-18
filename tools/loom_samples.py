@@ -185,6 +185,9 @@ class Link:
         self.mido = mido
         outs = [n for n in mido.get_output_names() if "LOOM" in n]
         ins = [n for n in mido.get_input_names() if "LOOM" in n]
+        if not outs or not ins:                     # (macOS may keep an earlier firmware's name for the port)
+            outs = [n for n in mido.get_output_names() if "FM-1" in n]
+            ins = [n for n in mido.get_input_names() if "FM-1" in n]
         if not outs or not ins:
             sys.exit("no MIDI port named LOOM: connect the FM-1 (running LOOM-8) by USB")
         self.o = mido.open_output(outs[0])
