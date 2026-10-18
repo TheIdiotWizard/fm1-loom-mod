@@ -15,8 +15,7 @@
 #                              engine looping (its one-shot piano would end)
 #   kit playing                a beat written on T1's empty pattern 1 (kick, snare, hats), playing
 #   kit + weft x6              the beat and six weft voices
-#   kit + weft x3, tape ...    the beat and three weft voices, the master tape's knobs at 0 / colour 24 (a new
-#                              project's) / all four at 64
+#   kit + weft x3              the beat and three weft voices
 #   kit + brocade 9 xN         the beat and brocade at nine saws (its cap is 4): does the guard thin its saws?
 # Each case waits for the load's average to settle, then reads it four times: the load is their median, the peak
 # the highest the page showed meanwhile, the voices the most, the saws the fewest; a case that holds fewer voices
@@ -207,21 +206,21 @@ def mode_poly():
     run("turn", "SELECT", -1, "wait", 350)
 
 
-GLO = ["Mix", "Master EQ", "Master tape", "Master out", "Setup", "Status"]
+GLO = ["Mix", "Master EQ", "Master out", "Setup", "Status"]
 
 
 def glo(page):
-    """GLO's page PAGE ("Mix", "Master tape", "Setup", "Status" ...)"""
+    """GLO's page PAGE ("Mix", "Master EQ", "Setup", "Status" ...)"""
     s = where()
     for _ in range(3):                       # (a tap can be missed)
-        if " of 6." in s:
+        if " of 5." in s:
             break
         run("tap", "HOME" if " list." in s else "GLO", "wait", 400)
         s = where()
     for _ in range(8):
         if s.startswith(page + ","):
             return s
-        m = re.search(r"page (\d) of 6", s)
+        m = re.search(r"page (\d) of 5", s)
         cur = int(m.group(1)) if m else 1
         run("turn", "SELECT", 1 if cur < GLO.index(page) + 1 else -1, "wait", 300)
         s = where()
@@ -363,22 +362,9 @@ if only in (None, "kit"):
         time.sleep(2.0)
         track(3)
         hold(CHORD[:3])
-        glo("Master tape")
-        for k, nm in (("K1", "drive"), ("K2", "color"), ("K3", "wobble"), ("K4", "noise")):
-            set_knob(k, nm, 0)
-        read_status("kit + weft x3, tape off")
-        glo("Master tape")
-        set_knob("K2", "color", 24)
-        read_status("kit + weft x3, tape new")
-        glo("Master tape")
-        for k, nm in (("K1", "drive"), ("K2", "color"), ("K3", "wobble"), ("K4", "noise")):
-            set_knob(k, nm, 64)
-        read_status("kit + weft x3, tape full")
-        glo("Master tape")
-        for k, nm, v in (("K1", "drive", 0), ("K2", "color", 24), ("K3", "wobble", 0), ("K4", "noise", 0)):
-            set_knob(k, nm, v)
+        read_status("kit + weft x3")
         release_all()
-        log_ok("tape")
+        log_ok("kit + weft")
         time.sleep(2.0)
         track(3)
         engine("brocade")

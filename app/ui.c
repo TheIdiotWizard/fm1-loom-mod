@@ -1372,7 +1372,7 @@ static void bar_knob(int k, int32_t e)
 }
 static void master_knob(int k, int32_t e)
 {
-    int m = (ui.page - P_MASTER) * 4 + k;
+    int m = mst_base(ui.page) + k;
     proj.master[m] = (uint8_t)clampi(proj.master[m] + e, 0, 127);
     engine_master(m, proj.master[m]);
     mark_dirty();
@@ -1440,7 +1440,7 @@ static void knob(int k, int32_t e)
     case P_SONG: song_knob(k, e); return;
     case P_STEPS: steps_knob(k, e); return;
     case P_BAR: bar_knob(k, e); return;
-    case P_MASTER: case P_MASTER2: case P_MASTER3: master_knob(k, e); return;
+    case P_MASTER: case P_MASTER3: master_knob(k, e); return;
     case P_SETUP: setup_knob(k, e); return;
     case P_STATUS: return;
     default: break;
@@ -2496,10 +2496,6 @@ static void sp_main(void)
         if (eng_voices_max < NVOICE) {           /* the rest of the page: the guard's limits, the peak since last said */
             sp_cat(" of ");
             sp_int(eng_voices_max);
-        }
-        if (eng_saws_max < 9) {
-            sp_cat(", saws ");
-            sp_int(eng_saws_max);
         }
         sp_cat(", peak ");
         sp_int((int)status_peak);

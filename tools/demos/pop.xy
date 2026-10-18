@@ -127,7 +127,7 @@ knob 12 engine plate
 knob 12 e1 76
 knob 12 e3 70
 knob 12 e4 44
-# the master: no tape; air on top, the low end firm, the compressor gluing, loud
+# the master: air on top, the low end firm, the compressor gluing, loud
 mst blend 127
 mst hi 78
 mst lo 70
@@ -210,10 +210,10 @@ notes 2 2 63 1 90 G2
 
 # ---- T3 the piano: C | G/B | Am | F
 pat 3 1 64
-notes 3 1 1 16 90 C4 E4 G4 C5
-notes 3 1 17 16 90 B3 D4 G4 B4
-notes 3 1 33 16 90 C4 E4 A4 C5
-notes 3 1 49 16 90 C4 F4 A4 C5
+notes 3 1 1 16 90 C4 E4 G4
+notes 3 1 17 16 90 B3 D4 G4
+notes 3 1 33 16 90 C4 E4 A4
+notes 3 1 49 16 90 C4 F4 A4
 pat 3 2 64 1 40
 notes 3 2 1 1 100 E4 G4 C5
 notes 3 2 3 1 80 E4 G4 C5

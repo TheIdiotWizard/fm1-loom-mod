@@ -9,7 +9,7 @@
 #   tools/demos/render.sh [OUT] [SONG ...]     (OUT default build/demos/out; songs default all six)
 #
 # STEMS=1: also, per song, into build/demos/run_<song>/stems/: each track alone with its FX returns (T1.wav ..), the
-# tracks without the FX (dry.wav), and the mix taken before the master's stages (raw: the groups summed; eq; tape;
+# tracks without the FX (dry.wav), and the mix taken before the master's stages (raw: the groups summed; eq;
 # comp: no limiter) (app/host.c LOOM_SOLO, LOOM_MST), as the host writes them: 6 dB under the codec's full scale and
 # unlimited, so they add up to raw.wav.
 # BREAKS: the breakbeat samples' folder (default ../../schwung-breakbeat/samples from fm1-xy, as fm1-parent has
@@ -68,7 +68,7 @@ for s in $SONGS; do
         }
         for t in 1 2 3 4 5 6 7 8; do stem "T$t" LOOM_MST=raw LOOM_SOLO="$t,fx1,fx2" & done
         stem dry LOOM_MST=raw LOOM_SOLO=1,2,3,4,5,6,7,8 &
-        for m in raw eq tape comp; do stem "$m" LOOM_MST=$m & done
+        for m in raw eq comp; do stem "$m" LOOM_MST=$m & done
         wait
         echo "   stems: $d/stems/"
     fi

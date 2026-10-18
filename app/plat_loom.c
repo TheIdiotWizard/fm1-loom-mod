@@ -79,9 +79,9 @@ static uint32_t render_pct(uint32_t t0, uint32_t n)   /* the block's share of it
     return pct;
 }
 
-/* the profiler's clock: the CPU's cycle counter when it runs, else the 24 MHz timer (X0X) */
-static int perf_cyc_ok;
-uint32_t plat_cycles(void) { return perf_cyc_ok ? fm1_perf_cycles() : fm1_ticks(); }
+/* the profiler's clock: the 24 MHz timer, which both cores read alike (the CPU's cycle counter is the first core's:
+ * the second core's job is timed too, engine.c core2_job) */
+uint32_t plat_cycles(void) { return fm1_ticks(); }
 
 /* the supplies as fm1-base set them at start (the Status page), the last crash */
 static uint8_t vdc14_level, sysvdd_level;
@@ -118,7 +118,6 @@ int loom_store_save(uint32_t obj, const void *src, uint32_t len) { return plat_s
 /* boot (app_init): the profiler's clock, the supplies, the bar */
 static void plat_loom_init(void)
 {
-    perf_cyc_ok = fm1_perf_cycles_run();
     vdc14_level = (uint8_t)fm1_vdc14();
     sysvdd_level = (uint8_t)fm1_sysvdd();
     cpu2_bar_build();

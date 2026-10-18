@@ -4,9 +4,8 @@
  * on the beat at 120 BPM (time 1/4 = 0.5 s, dotted 1/8 = 0.375 s) and ping-pongs; the delay and the reverb
  * return only the wet (plain send / return); the delay's tone brightens its repeats, the plate's damp darkens
  * its tail; the reverbs decay (the SPU modes too, each, and grow with size); the lofi's width spreads the
- * sides; the master is bit-transparent with the EQ's blend and the tape's four knobs at 0 (apart from the
- * limiter's 64-sample lookahead), near unity at the new project's tape, its tape's drive saturates, wobble
- * moves the pitch, noise adds hiss, its limiter never passes 1.0, its compressor pulls loud input down, its
+ * sides; the master is bit-transparent with the EQ's blend at 0 (apart from the
+ * limiter's 64-sample lookahead), its limiter never passes 1.0, its compressor pulls loud input down, its
  * EQ moves the bands; its PUMP ducks by its depth on its source's hits and swells back with the release (at 0
  * it changes nothing, sample for sample; accented hits deeper); and the cost of each in instructions a sample (macOS: proc_pid_rusage). Each effect's
  * burst at its defaults is written to build/host/fx_<name>.wav for inspection (nothing here plays audio).
@@ -41,12 +40,11 @@ static void check(const char *what, int ok)
 }
 
 static int16_t dly_l[FX_DLY_LEN], dly_r[FX_DLY_LEN], rv[FX_RV_LEN];
-static float mtl[MST_TAPE_DLY], mtr[MST_TAPE_DLY];
 static uint8_t fxb[FXSLOT_BYTES] __attribute__((aligned(8)));
 static uint8_t msb[MASTER_BYTES] __attribute__((aligned(8)));
 static fxslot_t *fx = (fxslot_t *)fxb;
 static master_t *ms = (master_t *)msb;
-#define MS_INIT() master_init(ms, mtl, mtr)
+#define MS_INIT() master_init(ms)
 
 static uint32_t rng = 12345;
 static float noise(void)
@@ -175,68 +173,6 @@ static float bright(const float *y, int from, int to)
 }
 static float imp_l[3 * SR], imp_r[3 * SR];
 
-/* the master on a stereo signal of n blocks, mel only (perc silent): fills ol / or (the whole run) */
-static float m_out_l[SR * 4], m_out_r[SR * 4];
-typedef float (*gen_t)(int t, int side);
-static void master_run(gen_t g, int n)
-{
-    static float pl[BLK], pr[BLK], mll[BLK], mlr[BLK];
-    int b, i;
-    memset(m_out_l, 0, sizeof m_out_l);
-    memset(m_out_r, 0, sizeof m_out_r);
-    for (b = 0; b < (n + BLK - 1) / BLK; b++) {
-        for (i = 0; i < BLK; i++) {
-            pl[i] = pr[i] = 0.0f;
-            mll[i] = g(b * BLK + i, 0);
-            mlr[i] = g(b * BLK + i, 1);
-        }
-        master_process(ms, pl, pr, mll, mlr, m_out_l + b * BLK, m_out_r + b * BLK, BLK);
-    }
-}
-static float g_sine01(int t, int s) { (void)s; return 0.1f * fm_sin_turns((float)t * (1000.0f / SR)); }
-static float g_sine50(int t, int s) { (void)s; return 0.25f * fm_sin_turns((float)t * (50.0f / SR)); }
-static float g_sine1k(int t, int s) { (void)s; return 0.25f * fm_sin_turns((float)t * (1000.0f / SR)); }
-static float g_zero(int t, int s) { (void)t; (void)s; return 0.0f; }
-static float rms_of(const float *x, int from, int to)
-{
-    float e = 0.0f;
-    int i;
-    for (i = from; i < to; i++)
-        e += x[i] * x[i];
-    return fm_sqrtf(e / (float)(to - from));
-}
-/* the frequency of a sine in windows of 1024 (zero crossings, upward, interpolated): the spread, Hz */
-static float freq_spread(const float *x, int from, int to)
-{
-    float lo = 1e9f, hi = 0.0f;
-    int w;
-    for (w = from; w + 1024 <= to; w += 1024) {
-        float first = -1.0f, last = -1.0f;
-        int n = 0, i;
-        for (i = w + 1; i < w + 1024; i++)
-            if (x[i - 1] < 0.0f && x[i] >= 0.0f) {
-                float at = (float)(i - 1) + x[i - 1] / (x[i - 1] - x[i]);
-                if (first < 0.0f)
-                    first = at;
-                last = at;
-                n++;
-            }
-        if (n > 2) {
-            float f = (float)(n - 1) * SR / (last - first);
-            lo = fm_minf(lo, f);
-            hi = fm_maxf(hi, f);
-        }
-    }
-    return hi - lo;
-}
-static float crest(const float *x, int from, int to)
-{
-    float pk = 0.0f;
-    int i;
-    for (i = from; i < to; i++)
-        pk = fm_maxf(pk, fm_fabsf(x[i]));
-    return pk / (rms_of(x, from, to) + 1e-12f);
-}
 /* the SPU mode's impulse response: its energy's centre in time (s) over 4 s */
 static float centre_time(int pick, const uint8_t kn[4])
 {
@@ -265,7 +201,7 @@ static float centre_time(int pick, const uint8_t kn[4])
     return et / (e + 1e-20f);
 }
 
-/* the master's PUMP on a steady 0.1 (DC on the melodic group: below the limiter, the EQ and the tape out, so the
+/* the master's PUMP on a steady 0.1 (DC on the melodic group: below the limiter, the EQ out, so the
  * output is 0.1 x the gain, 64 samples late): g[b] = the block's lowest gain in dB, keyed (src, vel) at block k0
  * (and again at k1 if >= 0) */
 static void pump_trace(float *g, int nb, int k0, int k1, int src, int vel)
@@ -339,9 +275,6 @@ int main(void)
             for (k = 0; k < 4; k++)
                 ok &= FXT_DEFAULT[t][k] == want[t][k];
         check("FXT_DEFAULT: chorus 50 86 20 127, delay 72 64 56 64, ... plate 100 40 44 72", ok);
-        ok = !strcmp(MS_NAME[MS_TP_DRIVE], "drive") && !strcmp(MS_NAME[MS_TP_COLOR], "color") &&
-             !strcmp(MS_NAME[MS_TP_WOBBLE], "wobble") && !strcmp(MS_NAME[MS_TP_NOISE], "noise");
-        check("the master's tape knobs: drive color wobble noise", ok);
         ok = 1;
         for (t = 0; t < NFXPICK; t++) {
             ok &= !strcmp(fx_pick_name(t), picks[t]);
@@ -578,7 +511,7 @@ int main(void)
             }
             n += BLK;
         }
-        check("EQ blend and the tape at 0: bit-transparent (perc + mel, 64 samples late)", ok);
+        check("EQ blend at 0: bit-transparent (perc + mel, 64 samples late)", ok);
         /* an EQ set but blend 0: still transparent; blend 127: the bands move */
         master_set(ms, MS_EQ_LO, 127);
         master_set(ms, MS_EQ_HI, 0);
@@ -631,10 +564,6 @@ int main(void)
         MS_INIT();
         {   /* the limiter: a signal at 4x full scale never passes 1.0 */
             float pk = 0.0f;
-            master_set(ms, MS_TP_DRIVE, 127);
-            master_set(ms, MS_TP_COLOR, 127);
-            master_set(ms, MS_TP_WOBBLE, 127);
-            master_set(ms, MS_TP_NOISE, 127);
             master_set(ms, MS_LEVEL, 127);
             for (b = 0; b < 400; b++) {
                 for (i = 0; i < BLK; i++) {
@@ -647,7 +576,7 @@ int main(void)
                     pk = fm_maxf(pk, fm_maxf(fm_fabsf(ol2[i]), fm_fabsf(or2[i])));
                 }
             }
-            snprintf(name, sizeof name, "limiter + the tape (all four at 127) on a 4x signal: peak %.3f, no NaN", (double)pk);
+            snprintf(name, sizeof name, "limiter on a 4x signal: peak %.3f, no NaN", (double)pk);
             check(name, ok && pk <= 1.0f);
         }
         MS_INIT();
@@ -803,76 +732,6 @@ int main(void)
         }
     }
 
-    printf("-- the master's tape (TapeScam-lite)\n");
-    {
-        float a0, a1, c0, c1, s0, s1, n0, n1;
-        int ok;
-        MS_INIT();                                            /* the tape out (all four at 0) */
-        master_run(g_sine01, SR);
-        a0 = rms_of(m_out_l, SR / 2, SR);
-        master_set(ms, MS_TP_COLOR, 24);                      /* a little colour (a new project's until the demos' mix) */
-        master_run(g_sine01, SR);
-        a1 = rms_of(m_out_l, SR / 2, SR);
-        snprintf(name, sizeof name, "  the tape at colour 24 on a -23 dB sine: %+.2f dB", (double)db(a1 / a0));
-        check(name, a1 > a0 * 0.79f && a1 < a0 * 1.26f);
-        MS_INIT();
-        master_run(g_sine1k, SR);
-        c0 = crest(m_out_l, SR / 2, SR);
-        master_set(ms, MS_TP_DRIVE, 127);
-        master_run(g_sine1k, SR);
-        c1 = crest(m_out_l, SR / 2, SR);
-        snprintf(name, sizeof name, "  drive 127 squares a 1 kHz sine: crest %.2f -> %.2f", (double)c0, (double)c1);
-        check(name, c0 > 1.38f && c1 < 1.36f);   /* (a square through the half-bands: their phase lifts its peaks) */
-        MS_INIT();
-        master_run(g_sine50, SR);
-        c0 = rms_of(m_out_l, SR / 2, SR);
-        master_set(ms, MS_TP_DRIVE, 64);
-        master_run(g_sine50, SR);
-        c1 = rms_of(m_out_l, SR / 2, SR);
-        snprintf(name, sizeof name, "  drive 64 keeps the lows (they go around the clipper): a 50 Hz sine %+.1f dB", (double)db(c1 / c0));
-        check(name, c1 > c0 * 0.6f && c1 < c0 * 2.5f);   /* (without the lows kept: -15 dB) */
-        MS_INIT();
-        master_set(ms, MS_TP_COLOR, 1);                       /* the tape in, at its least */
-        master_run(g_sine1k, 3 * SR);
-        s0 = freq_spread(m_out_l, SR / 2, 3 * SR);
-        master_set(ms, MS_TP_WOBBLE, 127);
-        master_run(g_sine1k, 4 * SR);
-        s1 = freq_spread(m_out_l, SR / 2, 4 * SR);
-        snprintf(name, sizeof name, "  wobble 127 moves the pitch of a 1 kHz sine: spread %.2f -> %.1f Hz", (double)s0, (double)s1);
-        check(name, s0 < 0.5f && s1 > 8.0f);
-        MS_INIT();
-        master_set(ms, MS_TP_NOISE, 0);
-        master_run(g_zero, SR / 2);
-        n0 = rms_of(m_out_l, 0, SR / 2);
-        master_set(ms, MS_TP_NOISE, 64);
-        master_run(g_zero, SR);
-        n1 = rms_of(m_out_l, SR / 2, SR);
-        master_set(ms, MS_TP_NOISE, 127);
-        master_run(g_zero, SR);
-        a1 = rms_of(m_out_l, SR / 2, SR);
-        snprintf(name, sizeof name, "  noise adds hiss to silence: 0 -> %.1f dB (64) -> %.1f dB (127)", (double)db(n1), (double)db(a1));
-        check(name, n0 == 0.0f && n1 > 1e-4f && a1 > n1 * 4.0f && a1 < 0.5f);
-        {   /* every knob at its end, a loud noise: finite, bounded (before the limiter: the out stage's tanh) */
-            static float pl[BLK], pr[BLK], mll[BLK], mlr[BLK], o1[BLK], o2[BLK];
-            int k;
-            ok = 1;
-            MS_INIT();
-            for (k = MS_TP_DRIVE; k <= MS_TP_NOISE; k++)
-                master_set(ms, k, 127);
-            for (b = 0; b < 3 * SR / BLK; b++) {
-                for (i = 0; i < BLK; i++) {
-                    pl[i] = pr[i] = 0.0f;
-                    mll[i] = 1.5f * noise();
-                    mlr[i] = 1.5f * noise();
-                }
-                master_process(ms, pl, pr, mll, mlr, o1, o2, BLK);
-                for (i = 0; i < BLK; i++)
-                    ok &= o1[i] == o1[i] && o2[i] == o2[i] && fm_fabsf(o1[i]) <= 1.0f && fm_fabsf(mll[i]) <= 1.0f;
-            }
-            check("  every tape knob at 127 on loud noise: no NaN, bounded", ok);
-        }
-    }
-
     printf("-- the reverb's SPU modes\n");
     {
         int ok = 1;
@@ -982,23 +841,6 @@ int main(void)
             master_process(ms, p1, p2, m1, m2, a, c, 256);
         di = instr_now() - i0;
         printf("  master off  %5.0f  (levels and the limiter)\n", (double)di / (20.0 * 256.0));
-        master_set(ms, MS_TP_COLOR, 24);
-        for (b = 0; b < 10; b++)
-            master_process(ms, p1, p2, m1, m2, a, c, 256);
-        i0 = instr_now();
-        for (b = 0; b < 20; b++)
-            master_process(ms, p1, p2, m1, m2, a, c, 256);
-        di = instr_now() - i0;
-        printf("  master col  %5.0f  (the tape at colour 24)\n", (double)di / (20.0 * 256.0));
-        master_set(ms, MS_TP_DRIVE, 64); master_set(ms, MS_TP_COLOR, 64);
-        master_set(ms, MS_TP_WOBBLE, 64); master_set(ms, MS_TP_NOISE, 64);
-        for (b = 0; b < 10; b++)
-            master_process(ms, p1, p2, m1, m2, a, c, 256);
-        i0 = instr_now();
-        for (b = 0; b < 20; b++)
-            master_process(ms, p1, p2, m1, m2, a, c, 256);
-        di = instr_now() - i0;
-        printf("  master tape %5.0f  (the tape's four at 64, the limiter)\n", (double)di / (20.0 * 256.0));
         master_set(ms, MS_EQ_LO, 80); master_set(ms, MS_EQ_BLEND, 127);
         master_set(ms, MS_COMP, 80);
         for (b = 0; b < 10; b++)
@@ -1007,7 +849,7 @@ int main(void)
         for (b = 0; b < 20; b++)
             master_process(ms, p1, p2, m1, m2, a, c, 256);
         di = instr_now() - i0;
-        printf("  master all  %5.0f  (EQ, the tape at 64, compressor, limiter)\n", (double)di / (20.0 * 256.0));
+        printf("  master all  %5.0f  (EQ, compressor, limiter)\n", (double)di / (20.0 * 256.0));
         master_set(ms, MS_PUMP, 64);
         for (b = 0; b < 10; b++)
             master_process(ms, p1, p2, m1, m2, a, c, 256);
@@ -1019,6 +861,42 @@ int main(void)
         }
         di = instr_now() - i0;
         printf("  master pump %5.0f  (all, and the pump pumping)\n", (double)di / (20.0 * 256.0));
+    }
+    {   /* the engine runs the chorus, the delay and the plate a block behind (fx_process_lag): their output must be
+         * where it was, but for the lines' rounding (a noise burst, then its tail; the send a block late) */
+        static float xa[SR * 3], ya_l[SR * 3], ya_r[SR * 3], yb_l[SR * 3], yb_r[SR * 3];
+        static const int picks[3] = {FXT_CHORUS, FXT_DELAY, FXT_REVERB};
+        static const uint8_t kn[3][4] = {{50, 86, 90, 127}, {40, 64, 110, 100}, {100, 40, 44, 72}};
+        const int L = 256, n = SR * 3;
+        printf("-- a block behind (fx_process_lag, 256 samples): the same output, but for the lines' rounding\n");
+        for (i = 0; i < n; i++)               /* (never silent: a sleeping line would skip a block in one run only) */
+            xa[i] = (i < SR / 3 ? 0.4f : 0.001f) * noise();
+        for (t = 0; t < 3; t++) {
+            float pk = 0.0f, err = 0.0f;
+            for (b = 0; b < 2; b++) {
+                float *yl = b ? yb_l : ya_l, *yr = b ? yb_r : ya_r;
+                fx_init(fx, dly_l, dly_r, rv);
+                fx_set(fx, picks[t], kn[t]);
+                fx_tempo(fx, 120.0f);
+                for (i = 0; i < n; i++)
+                    yl[i] = yr[i] = 0.0f;
+                for (i = 0; i + L <= n; i += L) {
+                    static float blk[256];
+                    int j;
+                    for (j = 0; j < L; j++)
+                        blk[j] = b ? (i + j >= L ? xa[i + j - L] : 1e-30f) : xa[i + j];   /* (not 0: awake) */
+                    fx_process_lag(fx, blk, yl + i, yr + i, (uint32_t)L, b ? L : 0);
+                }
+            }
+            for (i = 0; i < n; i++) {
+                pk = fm_maxf(pk, fm_maxf(fm_fabsf(ya_l[i]), fm_fabsf(ya_r[i])));
+                err = fm_maxf(err, fm_maxf(fm_fabsf(ya_l[i] - yb_l[i]), fm_fabsf(ya_r[i] - yb_r[i])));
+            }
+            snprintf(name, sizeof name, "  %-8s peak %6.1f dB, the largest difference %6.1f dB under it", FXT_NAME[picks[t]],
+                     (double)db(pk), (double)(db(pk) - db(err)));
+            check(name, pk > 0.01f && db(pk) - db(err) > (picks[t] == FXT_REVERB ? 45.0f : 60.0f));   /* (the plate's
+                                                   * 12-bit combs: its own rounding, recirculated, is of that size) */
+        }
     }
     printf("%s\n", bad ? "FX TESTS FAILED" : "fx tests passed");
     return bad != 0;

@@ -106,9 +106,6 @@ wait 40
 shot master.png
 turn SELECT 1
 wait 40
-shot master2.png
-turn SELECT 1
-wait 40
 shot master3.png
 turn SELECT 1
 expect page Setup

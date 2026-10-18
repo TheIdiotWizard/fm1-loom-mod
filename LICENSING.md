@@ -40,7 +40,6 @@ Where LOOM-8's own parts come from:
 | The idea of a browser emulator for FM-1 firmware (`app/web/emu/`) | [Groove OS](https://www.groove-os.com/) by Peter Gombos, whose site runs its firmware in the browser; no code from it | credit only |
 | brocade, the supersaw engine in `app/dsp/synth.c` (its saw bank: the detune offsets and curve, the mix and its normalisation, the pans, the keytracked high-pass) | after [NuSaw](https://github.com/charlesvestal/nusaw-plugin) (the plugin's `dsp/nusaw_engine.cpp`, through its FM-1 port fm1-nusaw), Copyright (c) 2026 Charles Vestal | MIT (below) |
 | `app/dsp/braids.h` (the engines cane, voile and gingham: their models) | ported from [Mutable Instruments Braids](https://github.com/pichenettes/eurorack/tree/master/braids) (`digital_oscillator.cc`, `macro_oscillator.cc`, the tables of `resources/`), Copyright 2012 Emilie Gillet | MIT (below) |
-| `app/dsp/tapescam.h` (the master's tape, TapeScam-lite) | after [schwung-tapescam](https://github.com/charlesvestal/move-everything-tapescam), Copyright (c) 2025 Charles Vestal | MIT (below) |
 | `app/dsp/psxrev.h` (the reverb's PlayStation modes) | ported from [schwung-psxverb](https://github.com/charlesvestal/move-everything-psxverb), Copyright (c) 2025 Charles Vestal; the register sets and the resampling filter are psx-spx's documentation of the PlayStation's SPU | MIT (below) |
 | Everything else in `app/`, `tools/`, `tests/` | LOOM-8 | GPL-3.0-only |
 
@@ -51,7 +50,7 @@ Where LOOM-8's own parts come from:
   `base/assets/fonts/Terminus-LICENSE.txt`).
 - The package tool (fm1-base's `tools/fm1pkg_make.py`) uses three files of JieLi's AC79 SDK (Apache-2.0), which
   are not part of this tree: see `BUILDING.md`. LOOM-8 links nothing of JieLi's (no Bluetooth, no WiFi).
-- The master's tape and the reverb's PlayStation modes come from schwung-tapescam and schwung-psxverb, and
+- The reverb's PlayStation modes come from schwung-psxverb, and
   brocade's saw bank from NuSaw (Copyright (c) 2026 Charles Vestal), under the MIT License:
 
 ```

@@ -24,4 +24,4 @@ gen = ["../tools/gen_font.py {gen}/loom_font.h", "../tools/gen_wavetables.py {ge
 tagline = "a pocket groovebox"
 repo = "https://github.com/charlesvestal/fm1-loom"
 licence = "GPL-3.0-only"
-credits = "Built on fm1-base and felucca-bsp, from Felucca by Leo Kuroshita (Hügelton Instruments). Supersaw (brocade): after NuSaw (MIT). Cane, voile and gingham: Mutable Instruments Braids by Emilie Gillet (MIT). Tape: after TapeScam (MIT). Reverb: PSXVerb (MIT). Fonts: Barlow, Terminus (SIL OFL 1.1)."
+credits = "Built on fm1-base and felucca-bsp, from Felucca by Leo Kuroshita (Hügelton Instruments). Supersaw (brocade): after NuSaw (MIT). Cane, voile and gingham: Mutable Instruments Braids by Emilie Gillet (MIT). Reverb: PSXVerb (MIT). Fonts: Barlow, Terminus (SIL OFL 1.1)."

@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* Fingerprints of the DSP's output, for refactors that must not change a sample: every synth engine through
  * every filter type and character type, every factory preset, every drum model through every key filter and
- * the dynamic filter, every send effect and reverb mode, the master at its tape's and EQ / compressor's
+ * the dynamic filter, every send effect and reverb mode, the master at its EQ / compressor's
  * settings. One line per case: its name and a 64-bit FNV-1a of the output's float bits. Run it before and
  * after a change and compare (tests/host/dsp_hash.sh does both: `dsp_hash.sh save`, then `dsp_hash.sh`).
  * Nothing here plays audio. */
@@ -167,7 +167,6 @@ static void drum_cases(void)
 
 /* ---- the effects and the master ---- */
 static int16_t dly_l[FX_DLY_LEN], dly_r[FX_DLY_LEN], rv[FX_RV_LEN];
-static float mtl[MST_TAPE_DLY], mtr[MST_TAPE_DLY];
 static uint8_t fxb[FXSLOT_BYTES] __attribute__((aligned(8)));
 static uint8_t msb[MASTER_BYTES] __attribute__((aligned(8)));
 static fxslot_t *fx = (fxslot_t *)fxb;
@@ -202,7 +201,7 @@ static void fx_cases(void)
 static void master_case(const char *name, const int *set)
 {
     int b, i;
-    master_init(ms, mtl, mtr);
+    master_init(ms);
     for (i = 0; set[i] >= 0; i += 2)
         master_set(ms, set[i], set[i + 1]);
     rng = 99;
@@ -220,28 +219,13 @@ static void master_case(const char *name, const int *set)
 }
 static void master_cases(void)
 {
-    static const int off[] = {-1}, def[] = {MS_TP_COLOR, 24, -1};
-    static const int drv[] = {MS_TP_DRIVE, 64, -1}, drv2[] = {MS_TP_DRIVE, 127, -1}, drv3[] = {MS_TP_DRIVE, 10, -1};
-    static const int col[] = {MS_TP_COLOR, 127, -1}, wob[] = {MS_TP_WOBBLE, 64, -1}, wob2[] = {MS_TP_WOBBLE, 127, -1};
-    static const int noi[] = {MS_TP_NOISE, 64, -1}, noi2[] = {MS_TP_NOISE, 127, -1};
-    static const int all[] = {MS_TP_DRIVE, 64, MS_TP_COLOR, 64, MS_TP_WOBBLE, 64, MS_TP_NOISE, 64, -1};
-    static const int full[] = {MS_TP_DRIVE, 127, MS_TP_COLOR, 127, MS_TP_WOBBLE, 127, MS_TP_NOISE, 127,
-                               MS_EQ_LO, 100, MS_EQ_MID, 20, MS_EQ_HI, 90, MS_EQ_BLEND, 127, MS_COMP, 127,
+    static const int off[] = {-1};
+    static const int full[] = {MS_EQ_LO, 100, MS_EQ_MID, 20, MS_EQ_HI, 90, MS_EQ_BLEND, 127, MS_COMP, 127,
                                MS_PERC, 80, MS_MEL, 120, MS_LEVEL, 110, -1};
     static const int eq[] = {MS_EQ_LO, 80, MS_EQ_BLEND, 127, MS_COMP, 80, -1};
     static const int lev[] = {MS_PERC, 30, MS_MEL, 127, MS_LEVEL, 127, MS_COMP, 40, -1};
     master_case("master off", off);
-    master_case("master color 24", def);
-    master_case("master drive 64", drv);
-    master_case("master drive 127", drv2);
-    master_case("master drive 10", drv3);
-    master_case("master color 127", col);
-    master_case("master wobble 64", wob);
-    master_case("master wobble 127", wob2);
-    master_case("master noise 64", noi);
-    master_case("master noise 127", noi2);
-    master_case("master tape 64", all);
-    master_case("master all 127", full);
+    master_case("master eq comp levels 127", full);
     master_case("master eq comp", eq);
     master_case("master levels comp", lev);
 }

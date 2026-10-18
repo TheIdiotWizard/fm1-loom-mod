@@ -3,8 +3,8 @@
 LOOM-8 turns the M-VAVE FM-1 into a pocket groovebox: eight threads of sound on a 64-step loom. Eight tracks
 with synth engines and a drum synth, a 64-step sequencer with fourteen step tricks and parameter locks,
 players, twelve throws (momentary effects) per octave, a conductor that moves the song through a progression,
-two send effects (the reverb with the PlayStation's own reverbs among its modes), a mixer and a master section
-with a tape, sixteen scenes and a song. Weave two patterns into a
+two send effects (the reverb with the PlayStation's own reverbs among its modes), a mixer and a master section,
+sixteen scenes and a song. Weave two patterns into a
 third, bar by bar, step by step, or one's rhythm with the other's notes.
 
 The loop LOOM-8 is made for: write a short pattern, add a few tricks, weave it with another, let the conductor
@@ -74,8 +74,8 @@ to 16 from the left, black keys 1 to 11.
 8. **Save.** Press **SAVE**.
 
 From here: hold a step to see its velocity, length, chance and nudge; hold a step and press **EDIT** to lock a
-knob on it; press **ARP** on T2 and turn **KNOB 1** to arp; press **GLO**, turn **SELECT** to Master tape and turn
-**KNOB 3** while it plays. Hold any button for a second and a card explains it.
+knob on it; press **ARP** on T2 and turn **KNOB 1** to arp; press **GLO**, turn **SELECT** to Master out and turn
+**KNOB 4** (the pump) while it plays. Hold any button for a second and a card explains it.
 
 ## Cheat sheet
 
@@ -166,7 +166,7 @@ press…" means keep **HOME** down while you press the next thing.
 | **FX** | Opens Character, the track's own effect. Then Sends, the track's sends to FX I and FX II. Then FX I and FX II, the two effects. |
 | **LFO** | Opens LFO. Its page 2 has the type's fourth and fifth knobs. |
 | **ARP** | Opens Players. With the arp, page 2 is its second set of knobs and page 3 is hold. |
-| **GLO** | Opens Mix. Turn **SELECT** for Master EQ, Master tape, Master out, Setup and Status. |
+| **GLO** | Opens Mix. Turn **SELECT** for Master EQ, Master out, Setup and Status. |
 | **SAVE** | Saves. Hold it and press a white key to save to a slot, or to keep a sound. With a step held, clears its locks. |
 | **OCT−** / **OCT+** | Move the keys an octave. On Steps, show the bar before or after; with a step held, nudge it. In step record, move the cursor. |
 | **SELECT** | Turns to a button's next page. In a list, it moves up and down. |
@@ -385,16 +385,14 @@ SCRAMBLE for a random sound, SAVE AS PRESET, RESET SOUND, and whether the track 
 
 ### Brocade
 
-Brocade is the supersaw: up to nine saws a voice, detuned against each other, the big trance sound. Its saws
-are NuSaw's. **saws** sets how many, from one to nine: a centre saw and pairs either side. **detune** spreads
+Brocade is the supersaw: up to seven saws a voice, detuned against each other, the big trance sound. Its saws
+are NuSaw's. **saws** sets how many, from one to seven: a centre saw and pairs either side. **detune** spreads
 their pitches, fine at first and wide at the end. **mix** sets the side saws against the centre one: low, one
 saw with a shimmer; high, a wall. **spread** opens the pairs across the stereo field. The filter, the envelopes
 and the LFO work on it as on any engine; an LFO on detune makes it swirl.
 
-Nine saws cost about two ordinary voices. So brocade plays at most six voices, five with seven or eight saws, and
-four with nine; a new note past that takes its oldest. When the FM-1 runs short of time, brocade thins first: its
-voices lose their outer saws, two at a time, fading out so you hear no click. The saws come back when it is
-calm again. Status shows it beside the voices, as "saws 7".
+Seven saws cost about two and a half ordinary voices. So brocade plays at most six voices, five with seven saws;
+a new note past that takes its oldest. Its saws stay as you set them, however busy the FM-1 is.
 
 ### Cane, voile and gingham
 
@@ -739,19 +737,11 @@ Turn **ALGORITHM** past T8. Each aux track has its own page under **EDIT** and i
 
 Press **GLO**. The Mix page shows a meter for each track; the black keys pick one, and hold one to solo it.
 Hold **HOME** and press a black key to mute. The knobs are the sends to FX I and FX II, the pan and the
-level. Turn **SELECT** for Master EQ (low, mid, high and a blend from flat to the EQ), Master tape, and
+level. Turn **SELECT** for Master EQ (low, mid, high and a blend from flat to the EQ) and
 Master out (the drums' level, the melodic tracks' level, the compressor and the pump; its **SEL** list has
 what the pump follows, its release and accent, and the output level). Setup has the lights, MIDI clock and notes out, and one or two cores; its **SEL** list loads
 a project, starts a new one, and sets the USB audio level, the count-in and the theme (tape deck or blueprint). Status shows the audio load, the
 voices and the second core.
-
-Master tape puts the whole mix through a tape (TapeScam-lite, after the TapeScam plugin): **drive** pushes
-it into the tape's preamp, harder and denser (the low end goes around it, so the kick stays); **color** is the
-tape's saturation, rounder and a little darker as it goes up; **wobble** is wow and flutter, the pitch
-wavering on both sides together, as on one tape (so the mix holds up on the FM-1's one speaker); **noise** is
-the hiss. Even pushed hard it stays smooth rather than gritty in the highs. With all four at 0 the tape is out
-of the path, and a new project starts that way: turn it on where a song wants the grit. The tape keeps the
-level about where it was: turning drive or color changes the sound, not how loud it is.
 
 **Pump** (Master out's fourth knob) lowers the whole mix each time the kick plays, by up to 24 dB, and lets it
 swell back up: the big-beat breathing of house and French touch. Accented kicks pump harder. It works even with
@@ -770,7 +760,7 @@ the mix breathes to a beat nobody hears. At 0 (a new project's) it is off. Its *
 The pump is the whole mix's; a track's own duck LFO (above) still ducks just that track, for a bass that gets
 out of the kick's way while the rest plays on.
 
-<img src="img/screen-mix.png" width="240" alt="Mix: a meter for each track while playing; knobs fx I, fx II, pan and level" title="The mixer"> <img src="img/screen-sends.png" width="240" alt="FX&#x27;s Sends page: the track&#x27;s sends to FX I (delay) and FX II (reverb plate), its pan and level" title="The sends"> <img src="img/screen-master.png" width="240" alt="Master EQ: low, mid, high and the blend from flat to the EQ" title="Master EQ"> <img src="img/screen-master-tape.png" width="240" alt="Master tape: drive, color, wobble and noise, a sine drawn through the tape" title="Master tape"> <img src="img/screen-master-out.png" width="240" alt="Master out: bars for drums, melodic, comp and pump; knobs perc 100, mel 100, comp 30, pump 4.0 dB" title="Master out"> <img src="img/screen-status.png" width="240" alt="Status: audio load, peak, voices, the second core, guard trips and dropouts" title="Status">
+<img src="img/screen-mix.png" width="240" alt="Mix: a meter for each track while playing; knobs fx I, fx II, pan and level" title="The mixer"> <img src="img/screen-sends.png" width="240" alt="FX&#x27;s Sends page: the track&#x27;s sends to FX I (delay) and FX II (reverb plate), its pan and level" title="The sends"> <img src="img/screen-master.png" width="240" alt="Master EQ: low, mid, high and the blend from flat to the EQ" title="Master EQ"> <img src="img/screen-master-out.png" width="240" alt="Master out: bars for drums, melodic, comp and pump; knobs perc 100, mel 100, comp 30, pump 4.0 dB" title="Master out"> <img src="img/screen-status.png" width="240" alt="Status: audio load, peak, voices, the second core, guard trips and dropouts" title="Status">
 
 ## Saving
 
@@ -816,7 +806,6 @@ On a sound page, hold **SAVE** and press white key 1 to 16 to keep the track's s
 | ARP, SELECT | Players 2, Hold | the arp's length, style, glide, stereo; hold | | | | play |
 | GLO | Mix | FX I | FX II | pan | level | black: the track, held: solo |
 | GLO, SELECT | Master EQ | low | mid | high | blend | |
-| GLO, SELECT | Master tape | drive | color | wobble | noise | |
 | GLO, SELECT | Master out | perc | mel | comp | pump | SEL: pump by, release, accent, level |
 | GLO, SELECT | Setup | lights | clock | notes | cores | |
 | GLO, SELECT | Status | | | | | |
