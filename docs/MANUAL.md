@@ -366,6 +366,9 @@ SCRAMBLE for a random sound, SAVE AS PRESET, RESET SOUND, and whether the track 
 | sync | freq, sub, noise, lowcut |
 | swarm | swarm, am, fm, detune |
 | brocade | saws, detune, mix, spread |
+| cane | model, timbre, color, damp |
+| voile | model, timbre, color, breath |
+| gingham | model, timbre, color, arp |
 | kit | the shown key's model knobs |
 | sample | sample, start, length, mode |
 | slice | sample, slices, pitch, gate |
@@ -382,6 +385,57 @@ Nine saws cost about two ordinary voices. So brocade plays at most six voices, f
 four with nine; a new note past that takes its oldest. When the FM-1 runs short of time, brocade thins first: its
 voices lose their outer saws, two at a time, fading out so you hear no click. The saws come back when it is
 calm again. Status shows it beside the voices, as "saws 7".
+
+### Cane, voile and gingham
+
+Three engines from Mutable Instruments' Braids, Émilie Gillet's macro oscillator, each a family of its models.
+**model** picks one; **timbre** and **color** are Braids' own two knobs, and what they do depends on the model;
+the fourth knob is LOOM-8's.
+
+**Cane** is the physical models: instruments built from their parts, a string, a tube, a bell.
+
+| Model | timbre | color |
+| --- | --- | --- |
+| pluck | how long the string rings | how wide the pluck: hollow to full |
+| bow | how hard the bow presses | where it crosses the string |
+| reed | how steady the breath (less noise) | the body's tone |
+| flute | how breathy, high is clean | how hard it is blown |
+| bell | how long it rings; at the top it never stops | the partials pulled apart |
+| drum | how long it rings | from tone to rattle |
+
+**damp** darkens it: a softer pluck, a duller bridge or bore, the bell's and the drum's upper partials dying
+first. A pluck or a strike plays at each note; the bow and the breath start again on each note, and in legato
+they carry on while the pitch moves. Cane plays at most four voices at once (each keeps its strings and tubes in
+memory of its own); a new note past that takes its oldest. Very low notes the bow or the flute cannot reach
+sound an octave up.
+
+**Voile** is the voices.
+
+| Model | timbre | color |
+| --- | --- | --- |
+| vosim | the first formant | the second formant |
+| vowel | the vowel, through nine | the formants' shift |
+| choir | the vowel: a, e, i, o, u | the singer: bass to soprano |
+| whisper | how sharp the two peaks | how far the second is from the note |
+
+**breath** is the noise in the voice: on vosim and choir the air through it, on vowel the consonant at the
+start of each note (none to long), on whisper the share of noise against a buzz (all the way up, a whisper).
+
+**Gingham** is the toys and the chips.
+
+| Model | timbre | color |
+| --- | --- | --- |
+| toy | the sample rate, from crushed to clean | the bits flipped |
+| chord | the second note's interval | the third note's interval |
+| ring | the second sine's pitch | the third sine's pitch |
+| peak | the resonance's pitch | its shape: saw, square, triangle |
+| band | the same, hollower | the same |
+| noise | the noise's loop, white to pitched | its steps, from one bit to smooth |
+
+**arp** runs the note through a chord fifty times a second, the way chip music does: oct, fifth, power, major,
+minor, maj7, min7, sus4, or off. On chord, the whole chord arpeggiates.
+
+Most of these models cost about as much as any voice; cane's bell, with its eleven partials, about two.
 
 ### Kit
 

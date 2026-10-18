@@ -716,8 +716,8 @@ static void core2_job(uint32_t arg)
 /* where the pool splits between the cores: the second renders voices [0, k), the first [k, NVOICE) and
  * the drum tracks, so k evens the two out. A free voice is the lowest one (synth.c find_voice): with a
  * fixed half, eight voices or fewer all landed on the second core while the first waited (and the
- * overload guard's eight did too). The cost in rough units: a synth voice 4 (brocade's more, by its saws:
- * synth_voice_cost), a drum voice 2, a drum track's own filter and mix 1 (tests/host: ~180, ~95 and ~50
+ * overload guard's eight did too). The cost in rough units: a synth voice 4 (brocade's more, by its saws,
+ * and cane's bell about two: synth_voice_cost), a drum voice 2, a drum track's own filter and mix 1 (tests/host: ~180, ~95 and ~50
  * instructions a sample). Of the k that
  * do best, the one nearest the middle (the old fixed split). The same k with one core or two: the
  * samples stay the same either way (only the order of the halves' sum depends on k). */

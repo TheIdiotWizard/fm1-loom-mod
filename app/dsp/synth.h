@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* LOOM-8 synth: a pool of voices playing eleven engines (weft, stack, wavetable, orbit, tines, organ,
- * sync, swarm, sample, slice and brocade), each voice with two ADSRs, a state-variable filter, a character stage, an LFO
+/* LOOM-8 synth: a pool of voices playing fourteen engines (weft, stack, wavetable, orbit, tines, organ,
+ * sync, swarm, sample, slice, brocade, cane, voile and gingham), each voice with two ADSRs, a state-variable filter, a character stage, an LFO
  * and sends. (The kit, EG_DRUMLINE, is dsp/drumline.c's.)
  *
  * A track's sound is a flat byte array par[NTP] (four modules, four knobs each: engine, envelope, filter,
@@ -27,7 +27,17 @@
  * slice = (note - root) mod slices. A sample that states its bars (sample.h smp_t.bars) plays at the
  * tempo (its bars last as many bars of the song), the pitch knob on top; one that does not, at its own rate */
 enum { EG_WEFT, EG_STACK, EG_WAVETABLE, EG_ORBIT, EG_TINES, EG_ORGAN, EG_SYNC, EG_SWARM, EG_DRUMLINE, EG_SAMPLE,
-       EG_SLICE, EG_BROCADE, NENGINE };   /* (saved by number: a new engine goes at the end) */
+       EG_SLICE, EG_BROCADE, EG_CANE, EG_VOILE, EG_GINGHAM, NENGINE };   /* (saved by number: a new engine goes at the end) */
+/* the Braids engines (dsp/braids.h, after Mutable Instruments Braids, MIT): E1 the model, E2 Braids' timbre, E3 its
+ * color, E4 cane's damp, voile's breath, gingham's arp (NARP chords, 0 off). cane: pluck, bow, reed, flute, bell,
+ * drum, at most CN_SLOTS of its voices (each a slot of CN_LEN int16 for its lines); voile: vosim, vowel, choir,
+ * whisper; gingham: toy, chord, ring, peak, band, noise */
+#define NCANE 6
+#define NVOILE 4
+#define NGINGHAM 6
+#define NARP 9
+#define CN_SLOTS 4
+#define CN_LEN 1536
 static inline int eg_synth(int e) { return e >= 0 && e < NENGINE && e != EG_DRUMLINE; }   /* a voice engine */
 enum { SM_ONESHOT, SM_LOOP, SM_REVERSE, SM_PINGPONG, NSM };   /* the sample engine's modes (TP_E4) */
 #define SL_NCOUNT 4                                  /* the slice engine's counts: 4 << TP_E2 */
@@ -207,6 +217,7 @@ void synth_limit(synth_t *s, int max_voices);                  /* the overload g
  * the outer ones fade out over 12 ms each, the rest made up to the same power) */
 void synth_saws(synth_t *s, int max_saws);
 /* what voice vi costs to render, in rough units for the cores' split (engine.c split_at): 0 silent, 4 an
- * ordinary voice, brocade (7 + its saws sounding) / 2: 8 at nine saws */
+ * ordinary voice, brocade (7 + its saws sounding) / 2: 8 at nine saws; the Braids engines by their model (cane's
+ * bell 8, the most) */
 int synth_voice_cost(const synth_t *s, int vi);
 extern volatile uint16_t synth_peak[NTRK];                     /* per track meters, Q15, decaying (UI) */
