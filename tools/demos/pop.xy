@@ -85,9 +85,7 @@ knob 7 send2 50
 
 preset 8 doo_wop voile
 knob 8 brain no
-knob 8 ftype hp12
-knob 8 cut 36
-knob 8 level 104
+knob 8 level 47
 knob 8 send1 40
 knob 8 send2 40
 

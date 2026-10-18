@@ -56,7 +56,7 @@
  *     run their partials as rotating phasors (no sine table), at the full rate, partials above 0.45 x the rate
  *     silent; their decays per sample;
  *   - vowel: the three formants' sum is clamped before the window (Braids' int16 wraps at the loudest corner);
- *   - DC blockers after vosim and reed (their output carries the window's / the breath's DC);
+ *   - DC blockers after vosim, vowel and reed (their output carries the window's / the breath's DC);
  *   - in tune at 44.1 kHz (tests/host/braids_test measures it): pluck reads its line (N - p / 2) / N slower, p
  *     the averaging's chance (each pass of the averaging moves the wave half an entry on: +13 cents at C6
  *     otherwise); the bow's loop 0.9 samples and the reed's half loop 0.5 short of the period (the bridge's
@@ -651,7 +651,7 @@ static void vo_consonant(voice_t *v)
     c->ex[13] = k >= 6 ? 0.0312f : 0.0f;         /* the last two: noisy resets (Braids' 4095) */
 }
 /* o[]: 0 the model (+1), 1 the period's phase, 2..4 the formants' phases (vosim, vowel); vosim 4 / 5 its DC
- * blocker; vowel 5 the consonant's samples left, 6 which one, 7 a strike to make; choir 2..6 the formants'
+ * blocker; vowel 5 the consonant's samples left, 6 which one, 7 a strike to make, 8 / 9 its DC blocker; choir 2..6 the formants'
  * low-passes, 7..11 their band-passes; whisper 2..5 the two resonators, 6 the buzz's phase */
 static void vo_init(voice_t *v)
 {
@@ -778,7 +778,7 @@ static void vo_vosim(voice_t *v, float *xl, int m)
 static void vo_vowel(voice_t *v, float *xl, int m)
 {
     const cfg_t *c = &v->c;
-    float p = v->o[1], f1 = v->o[2], f2 = v->o[3], f3 = v->o[4], left = v->o[5], d = c->ex[0];
+    float p = v->o[1], f1 = v->o[2], f2 = v->o[3], f3 = v->o[4], left = v->o[5], d = c->ex[0], dx = v->o[8], dy = v->o[9];
     int cons = left > 0.0f, i;
     const float *inc = cons ? c->ex + 7 : c->ex + 1, *amp = cons ? c->ex + 10 : c->ex + 4;
     int a1 = (int)amp[0], a2 = (int)amp[1], a3 = (int)amp[2];
@@ -801,7 +801,10 @@ static void vo_vowel(voice_t *v, float *xl, int m)
             f1 = f2 = f3 = 0.0f;
             x = 0.0f;
         }
-        xl[i] = bd_od(x * (1.0f / 32768.0f));
+        x = bd_od(x * (1.0f / 32768.0f));
+        dy = x - dx + 0.995f * dy;              /* its DC out (the window's ramp makes it one-sided) */
+        dx = x;
+        xl[i] = dy;
     }
     if (cons) {
         left -= (float)m;
@@ -814,6 +817,8 @@ static void vo_vowel(voice_t *v, float *xl, int m)
     v->o[3] = f2;
     v->o[4] = f3;
     v->o[5] = left;
+    v->o[8] = dx;
+    v->o[9] = fm_flush(dy);
 }
 static void vo_choir(voice_t *v, float *xl, int m)
 {
