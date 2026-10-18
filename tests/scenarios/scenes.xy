@@ -75,7 +75,7 @@ tap PLAY
 # Mix: a black key held solos, a tap mutes
 tap GLO
 key b2 down
-wait 500
+wait 900
 expect mute 1019
 shot mix_solo.png
 key b2 up

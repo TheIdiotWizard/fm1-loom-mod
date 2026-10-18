@@ -478,6 +478,15 @@ static void step_say(int s, int on)
         sp_said = 1;
     }
 }
+/* a drum step holds SN sounds: one more is refused, aloud (taking one off is always fine) */
+static int step_full(const step_t *st, int sound)
+{
+    for (int i = 0; i < SN; i++)
+        if (!st->note[i] || st->note[i] == sound)
+            return 0;
+    say_no("STEP FULL", "4 sounds a step");
+    return 1;
+}
 static void step_toggle(int i)
 {
     int trk = sel_trk(), s = step_shown(i);
@@ -487,6 +496,8 @@ static void step_toggle(int i)
     undo_keep();
     if (is_drum(trk)) {
         int on = 0;
+        if (step_full(st, ui.dsound + 1))
+            return;
         step_toggle_note(st, ui.dsound + 1);
         for (int k = 0; k < SN; k++)
             on |= st->note[k] == ui.dsound + 1;
@@ -991,6 +1002,10 @@ static void key_down(int k)
         if (b >= 0 && ui.held && is_drum(trk)) {
             int s = step_shown(ui.held_first), on = 0;
             step_t *st = &tpat(trk)->st[s];
+            ui.kmode[k] = KM_STEPSOUND;
+            ui.held_used = 1;
+            if (step_full(st, b + 1))
+                return;
             undo_keep();
             step_toggle_note(st, b + 1);
             for (int i = 0; i < SN; i++)
@@ -1041,7 +1056,7 @@ static void key_down(int k)
     }
     keyboard_down(k);
 }
-#define STEP_TAP_MS 400u                         /* a step's key let go sooner: a tap (toggles the step) */
+#define STEP_TAP_MS 700u                         /* a step's key let go sooner: a tap (toggles the step) */
 static void key_up(int k)
 {
     int trk = sel_trk(), m = ui.kmode[k];
@@ -2711,7 +2726,7 @@ static void speak_dump(void)
     static const char *const MSG[][2] = {
         {"SAVED", 0}, {"NOT SAVED", "flash error"}, {"UNDO", "T1 P1"}, {"REDO", "T1 P1"}, {"NOTHING TO UNDO", 0},
         {"NOTHING TO REDO", 0}, {"COUNT-IN", "then recording"}, {"RECORDING", "latched"}, {"RECORDING", "play to start"},
-        {"RECORD OFF", 0}, {"STEP RECORD", "keys write steps"},
+        {"RECORD OFF", 0}, {"STEP RECORD", "keys write steps"}, {"STEP FULL", "4 sounds a step"},
         {"LENGTH", "to step 4"}, {"NUDGE", "+2"},
         {"NO LANE LEFT", "clear locks first"}, {"LOCKS CLEARED", 0}, {"NEW", "S3"}, {"MUTED", "T1"}, {"UNMUTED", "T1"},
         {"INSERTED", "S2"}, {"T3", 0}, {"SOUND", "snare"}, {"KEY", "snare"}, {"SCALE", "1/2"}, {"BAR", "2"}, {"CURSOR", "5"},
