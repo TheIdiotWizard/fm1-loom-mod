@@ -167,8 +167,8 @@ static struct {
     uint8_t last_inst;                               /* the instrument track selected last (the FX pages audition it) */
     uint8_t solo;                                    /* a black key held on Mix: track + 1 soloed */
     uint16_t solo_mute;                              /* the mutes before the solo */
-    uint8_t preset_i;
-    uint8_t pick_engine, pick_preset, pick_slot, pick_fx, pick_weave;
+    uint16_t preset_i, pick_preset;               /* (more than 255 presets and user slots) */
+    uint8_t pick_engine, pick_slot, pick_fx, pick_weave;
     uint8_t name_slot;
     uint8_t playing;
     uint8_t scene_seen;

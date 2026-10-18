@@ -270,7 +270,7 @@ static int name_is(const char *a, const char *b) /* two preset names (NAME_LEN, 
 }
 static int preset_apply(int trk, int i);
 /* PRESETS: the next sound of the track's own engine (its factory presets, then the user presets saved from it);
- * the message says where: "PRESET 3/8 WIDE PAD" */
+ * the message says what it is for and where: "PAD 3/16 MUSLIN PAD" (a user preset: "PRESET 17/18") */
 static void preset_step(int trk, int d)
 {
     int eng = proj.trk[trk].par[TP_ENGINE], n = 0, at = -1, i, to, all;
@@ -291,9 +291,9 @@ static void preset_step(int trk, int d)
         if (preset_engine(i) == eng && n++ == to)
             break;
     preset_apply(trk, i);
-    ui.preset_i = (uint8_t)i;
-    ui.pick_preset = (uint8_t)(i < NPRESETS ? i : 0);
-    num_s((uint32_t)all, s_cat(num_s((uint32_t)to + 1u, s_cat(a, "PRESET ")), "/"));
+    ui.preset_i = (uint16_t)i;
+    ui.pick_preset = (uint16_t)(i < NPRESETS ? i : 0);
+    num_s((uint32_t)all, s_cat(num_s((uint32_t)to + 1u, s_cat(s_cat(a, i < NPRESETS ? RL_NAME[PRESETS[i].role % NRL] : "PRESET"), " ")), "/"));
     say(a, preset_name(i, b));
 }
 static int preset_apply(int trk, int i)
@@ -1636,7 +1636,7 @@ static void list_change(int32_t e)
                 ui.pick_fx = (uint8_t)t;
             break;
         }
-        case A_PRESET: ui.pick_preset = (uint8_t)((ui.pick_preset + d + NPRESETS) % (NPRESETS ? NPRESETS : 1)); break;
+        case A_PRESET: ui.pick_preset = (uint16_t)((ui.pick_preset + d + NPRESETS) % (NPRESETS ? NPRESETS : 1)); break;
         case A_SAVE_PRESET: ui.pick_slot = (uint8_t)((ui.pick_slot + d + NUSER_PRESETS) % NUSER_PRESETS); break;
         case A_LOAD_PROJ: ui.pick_slot = (uint8_t)((ui.pick_slot + d + NPROJ) % NPROJ); break;
         case A_USB_AUDIO:
@@ -1963,7 +1963,7 @@ static void action_run(int a)
         set_tp(sel_trk(), TP_ENGINE, ui.pick_engine);
         if (f >= 0) {
             preset_apply(sel_trk(), f);
-            ui.preset_i = (uint8_t)f;
+            ui.preset_i = (uint16_t)f;
         }
         if (ui.pick_engine == EG_SLICE)          /* its notes pick slices: the conductor's chords would move them */
             set_tp(sel_trk(), TP_BRAIN, 0);

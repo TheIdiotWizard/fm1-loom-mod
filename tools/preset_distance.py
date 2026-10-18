@@ -65,7 +65,7 @@ def main():
         del args[i:i + 2]
     d = Path(args[0])
     words = args[1:]
-    names = sorted(p.stem for p in d.glob("[0-9][0-9]-*.wav"))
+    names = sorted(p.stem for p in d.glob("[0-9]*-*.wav"))
     feats = {n: features(d / (n + ".wav")) for n in names}
     show = [n for n in names if not words or any(w in n for w in words)]
     out = {}
