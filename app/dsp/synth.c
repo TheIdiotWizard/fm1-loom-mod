@@ -243,7 +243,7 @@ static inline float step1(float p, float d)      /* a phase accumulator: p + d w
 }
 static inline float soft3(float x)               /* a cubic soft clip: linear near 0, flat at +-1.5 */
 {
-    x = fm_clampf(x, -1.5f, 1.5f);
+    x = fm_minf(fm_maxf(x, -1.5f), 1.5f);        /* (the FPU's max and min: two instructions; fm_clampf takes four) */
     return x - x * x * x * (4.0f / 27.0f);
 }
 static float env_seconds(float p) { return p < 0.001f ? 0.001f : 0.001f * fm_exp2f(p * 13.2877124f); }  /* 1 ms .. 10 s */
@@ -2176,7 +2176,7 @@ void synth_prepare(synth_t *s, uint32_t n)
  * amount, and the note's frequency (ring). The state (cz) starts from 0 when the type changes. */
 static inline float sat_c(float x)               /* a soft saturation (tanh-like, cubic): flat at +-1 from |x| = 1.5 */
 {
-    x = fm_clampf(x, -1.5f, 1.5f);
+    x = fm_minf(fm_maxf(x, -1.5f), 1.5f);
     return x - x * x * x * (4.0f / 27.0f);
 }
 static inline float sin_q(float ph)              /* a quick sine of a phase in turns (any), within 0.1 %: the folder's */
@@ -2684,6 +2684,56 @@ SY_INLINE void sample_loop(voice_t *v, float *xl, float *xr, float *l, float *r,
     }
 }
 
+/* a stereo voice's filter, one channel at a time (ch 0: f[0..3], 1: f[4..7]), its output back into x: the same
+ * arithmetic as sample_loop's, with half the state live at once (a fused stereo loop held both channels' states,
+ * the coefficients and the ramps, more than the FM-1's registers: it spilled) */
+SY_INLINE void flt_loop(voice_t *v, float *x, int k, const int ftype, const int ch)
+{
+    const float a1 = v->a1, a2 = v->a2, a3 = v->a3, b1 = v->b1, b2 = v->b2, b3 = v->b3, kq = v->c.kq;
+    const float lcomp = 1.0f + b2 * 0.25f;
+    float *f = v->f + 4 * ch;
+    float f0 = f[0], f1 = f[1], f2 = f[2], f3 = f[3];
+    int j;
+    for (j = 0; j < k; j++) {
+        float y;
+        if (ftype == FT_LADDER) {
+            float u = x[j] - b2 * soft3(f3);
+            f0 += b1 * (u - f0);
+            f1 += b1 * (f0 - f1);
+            f2 += b1 * (f1 - f2);
+            f3 += b1 * (f2 - f3);
+            y = f3 * lcomp;
+        } else {
+            float t3 = x[j] - f1, t1 = a1 * f0 + a2 * t3, t2 = f1 + a2 * f0 + a3 * t3;
+            f0 = 2.0f * t1 - f0;
+            f1 = 2.0f * t2 - f1;
+            y = ftype == FT_HP12 ? x[j] - kq * t1 - t2 : ftype == FT_BP12 ? kq * t1 : t2;
+            if (ftype == FT_LP24) {
+                float w3 = y - f3, w1 = b1 * f2 + b2 * w3, w2 = f3 + b2 * f2 + b3 * w3;
+                f2 = 2.0f * w1 - f2;
+                f3 = 2.0f * w2 - f3;
+                y = w2;
+            }
+        }
+        x[j] = y;
+    }
+    f[0] = fm_flush(f0);
+    f[1] = fm_flush(f1);
+    f[2] = fm_flush(f2);
+    f[3] = fm_flush(f3);
+}
+static void flt_channel(voice_t *v, float *x, int k, int ch)
+{
+    switch (v->c.ftype) {
+    case FT_LP24: flt_loop(v, x, k, FT_LP24, ch); break;
+    case FT_LADDER: flt_loop(v, x, k, FT_LADDER, ch); break;
+    case FT_LP12: flt_loop(v, x, k, FT_LP12, ch); break;
+    case FT_HP12: flt_loop(v, x, k, FT_HP12, ch); break;
+    case FT_BP12: flt_loop(v, x, k, FT_BP12, ch); break;
+    default: break;                              /* (dynamic: a bypass) */
+    }
+}
+
 /* after the character stage: the ramps and the outputs (sample_loop's second half) */
 SY_INLINE void out_loop(voice_t *v, const float *xl, const float *xr, float *l, float *r, float *s1, float *s2,
                         int k, const int stereo)
@@ -2744,41 +2794,33 @@ static void voice_samples(synth_t *s, voice_t *v, float *l, float *r, float *s1,
         if ((v->pos & (SUB - 1)) == 0 || v->fresh)
             voice_subblock(s, v, (v->pos & (SUB - 1)) == 0);
         eng_run(v, xl, xr, k);
-#define SL(ft, st_, ch) sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, k, ft, st_, ch)
-        if (v->c.ctype == CT_OFF) {
-            switch (v->c.ftype * 2 + (v->c.stereo != 0)) {
-            case FT_LP24 * 2: SL(FT_LP24, 0, 0); break;
-            case FT_LP24 * 2 + 1: SL(FT_LP24, 1, 0); break;
-            case FT_LADDER * 2: SL(FT_LADDER, 0, 0); break;
-            case FT_LADDER * 2 + 1: SL(FT_LADDER, 1, 0); break;
-            case FT_LP12 * 2: SL(FT_LP12, 0, 0); break;
-            case FT_LP12 * 2 + 1: SL(FT_LP12, 1, 0); break;
-            case FT_HP12 * 2: SL(FT_HP12, 0, 0); break;
-            case FT_HP12 * 2 + 1: SL(FT_HP12, 1, 0); break;
-            case FT_BP12 * 2: SL(FT_BP12, 0, 0); break;
-            case FT_BP12 * 2 + 1: SL(FT_BP12, 1, 0); break;
-            case FT_DYNAMIC * 2: SL(FT_DYNAMIC, 0, 0); break;
-            default: SL(FT_DYNAMIC, 1, 0); break;
+#define SL(ft, ch) sample_loop(v, xl, xr, l + i, r + i, s1 + i, s2 + i, k, ft, 0, ch)
+        if (v->c.stereo) {                       /* the filter a channel at a time, the character, the outputs */
+            flt_channel(v, xl, k, 0);
+            flt_channel(v, xr, k, 1);
+            if (v->c.ctype != CT_OFF)
+                char_run(v, xl, xr, k);
+            out_stereo(v, xl, xr, l + i, r + i, s1 + i, s2 + i, k);
+        } else if (v->c.ctype == CT_OFF) {
+            switch (v->c.ftype) {
+            case FT_LP24: SL(FT_LP24, 0); break;
+            case FT_LADDER: SL(FT_LADDER, 0); break;
+            case FT_LP12: SL(FT_LP12, 0); break;
+            case FT_HP12: SL(FT_HP12, 0); break;
+            case FT_BP12: SL(FT_BP12, 0); break;
+            default: SL(FT_DYNAMIC, 0); break;
             }
         } else {                                 /* the filter, the character stage, then the outputs */
-            switch (v->c.ftype * 2 + (v->c.stereo != 0)) {
-            case FT_LP24 * 2: SL(FT_LP24, 0, 1); break;
-            case FT_LP24 * 2 + 1: SL(FT_LP24, 1, 1); break;
-            case FT_LADDER * 2: SL(FT_LADDER, 0, 1); break;
-            case FT_LADDER * 2 + 1: SL(FT_LADDER, 1, 1); break;
-            case FT_LP12 * 2: SL(FT_LP12, 0, 1); break;
-            case FT_LP12 * 2 + 1: SL(FT_LP12, 1, 1); break;
-            case FT_HP12 * 2: SL(FT_HP12, 0, 1); break;
-            case FT_HP12 * 2 + 1: SL(FT_HP12, 1, 1); break;
-            case FT_BP12 * 2: SL(FT_BP12, 0, 1); break;
-            case FT_BP12 * 2 + 1: SL(FT_BP12, 1, 1); break;
+            switch (v->c.ftype) {
+            case FT_LP24: SL(FT_LP24, 1); break;
+            case FT_LADDER: SL(FT_LADDER, 1); break;
+            case FT_LP12: SL(FT_LP12, 1); break;
+            case FT_HP12: SL(FT_HP12, 1); break;
+            case FT_BP12: SL(FT_BP12, 1); break;
             default: break;                      /* (dynamic: a bypass, xl / xr as they are) */
             }
             char_run(v, xl, xr, k);
-            if (v->c.stereo)
-                out_stereo(v, xl, xr, l + i, r + i, s1 + i, s2 + i, k);
-            else
-                out_mono(v, xl, l + i, r + i, s1 + i, s2 + i, k);
+            out_mono(v, xl, l + i, r + i, s1 + i, s2 + i, k);
         }
 #undef SL
         i += k;
