@@ -7,7 +7,8 @@
  * sides; the master is bit-transparent with the EQ's blend and the tape's four knobs at 0 (apart from the
  * limiter's 64-sample lookahead), near unity at the new project's tape, its tape's drive saturates, wobble
  * moves the pitch, noise adds hiss, its limiter never passes 1.0, its compressor pulls loud input down, its
- * EQ moves the bands; and the cost of each in instructions a sample (macOS: proc_pid_rusage). Each effect's
+ * EQ moves the bands; its PUMP ducks by its depth on its source's hits and swells back with the release (at 0
+ * it changes nothing, sample for sample; accented hits deeper); and the cost of each in instructions a sample (macOS: proc_pid_rusage). Each effect's
  * burst at its defaults is written to build/host/fx_<name>.wav for inspection (nothing here plays audio).
  *   tests/host/fx_test.sh */
 #include <stdio.h>
@@ -262,6 +263,35 @@ static float centre_time(int pick, const uint8_t kn[4])
         }
     }
     return et / (e + 1e-20f);
+}
+
+/* the master's PUMP on a steady 0.1 (DC on the melodic group: below the limiter, the EQ and the tape out, so the
+ * output is 0.1 x the gain, 64 samples late): g[b] = the block's lowest gain in dB, keyed (src, vel) at block k0
+ * (and again at k1 if >= 0) */
+static void pump_trace(float *g, int nb, int k0, int k1, int src, int vel)
+{
+    static float z[BLK], dc[BLK], ol[BLK], orr[BLK];
+    int b, i;
+    for (i = 0; i < BLK; i++)
+        z[i] = 0.0f;
+    for (b = 0; b < nb; b++) {
+        float lo = 1e9f;
+        if (b == k0 || b == k1)
+            master_key(ms, src, vel);
+        for (i = 0; i < BLK; i++)
+            dc[i] = 0.1f;
+        master_process(ms, z, z, dc, dc, ol, orr, BLK);
+        for (i = 0; i < BLK; i++)
+            lo = fm_minf(lo, ol[i]);
+        g[b] = 20.0f * 0.30103f * fm_log2f(fm_maxf(lo, 1e-9f) * 10.0f);
+    }
+}
+static float trace_min(const float *g, int a, int b)
+{
+    float m = 1e9f;
+    for (; a < b; a++)
+        m = fm_minf(m, g[a]);
+    return m;
 }
 
 int main(void)
@@ -677,6 +707,100 @@ int main(void)
             }
             check("perc level 0 silences the percussion group (after its glide)", e == 0.0f);
         }
+        {   /* PUMP (X0X's): a kick ducks the mix by the depth and swells back over the release */
+            static float g[700], g2[700];
+            static float ref_l[200 * BLK], ref_r[200 * BLK];
+            int same = 1;
+            float d, d2, at;
+            /* depth 0 (a new project's): a hit changes nothing, sample for sample, at the compressor's 30 too */
+            for (int c = 0; c < 2; c++) {
+                MS_INIT();
+                master_set(ms, MS_COMP, 30);
+                rng = 777;
+                for (b = 0; b < 200; b++) {
+                    if (c && b % 20 == 3)
+                        for (int s2 = 0; s2 < NPB; s2++)
+                            master_key(ms, s2, 127);
+                    for (i = 0; i < BLK; i++) {
+                        pl[i] = 0.3f * noise(); pr[i] = 0.3f * noise(); mll[i] = 0.3f * noise(); mlr[i] = 0.3f * noise();
+                    }
+                    master_process(ms, pl, pr, mll, mlr, ol2, or2, BLK);
+                    for (i = 0; i < BLK; i++) {
+                        if (!c) {
+                            ref_l[b * BLK + i] = ol2[i];
+                            ref_r[b * BLK + i] = or2[i];
+                        } else
+                            same &= ol2[i] == ref_l[b * BLK + i] && or2[i] == ref_r[b * BLK + i];
+                    }
+                }
+            }
+            check("pump 0: hits change nothing (bit-identical, compressor at 30)", same);
+            /* 24 dB (127), accent off, by the kick, the compressor off: down 24 dB within ~30 ms, back with the
+             * release (107 ms: a third of the dip left after one time constant), whole after ~0.7 s */
+            MS_INIT();
+            master_set(ms, MS_PUMP, 127);
+            master_set(ms, MS_PUMP_ACC, 0);
+            pump_trace(g, 700, 20, -1, PB_KICK, 64);
+            d = trace_min(g, 20, 60);
+            for (b = 20; b < 700 && g[b] > -21.6f; b++)    /* (block 0 is the limiter's lookahead: silence) */
+                ;
+            at = (float)(b - 20) * (float)BLK * 1000.0f / SR;
+            snprintf(name, sizeof name, "pump 24 dB: a kick ducks %.1f dB, 90 %% of it in %.0f ms", (double)-d, (double)at);
+            check(name, d < -23.0f && d > -24.5f && at < 45.0f && trace_min(g, 2, 20) > -0.01f);
+            for (b = 20; b < 700 && g[b] > d + 0.01f; b++)
+                ;
+            {
+                int tb = b + (int)(master_pump_ms(MS_PUMP_REL_DEF) * 0.001f * SR / BLK + 0.5f);
+                snprintf(name, sizeof name, "  release 107 ms: %.1f dB of the dip left one time constant on", (double)-g[tb]);
+                check(name, g[tb] < -6.5f && g[tb] > -11.0f);
+                snprintf(name, sizeof name, "  swelled back: %.2f dB after 0.8 s", (double)-g[20 + (int)(0.8f * SR / BLK)]);
+                check(name, g[20 + (int)(0.8f * SR / BLK)] > -0.1f);
+            }
+            /* a longer release swells back slower */
+            MS_INIT();
+            master_set(ms, MS_PUMP, 127);
+            master_set(ms, MS_PUMP_ACC, 0);
+            master_set(ms, MS_PUMP_REL, 100);
+            pump_trace(g2, 700, 20, -1, PB_KICK, 64);
+            snprintf(name, sizeof name, "  release %.0f ms: %.1f dB left at 300 ms (107 ms: %.1f)", (double)master_pump_ms(100),
+                     (double)-g2[20 + (int)(0.3f * SR / BLK)], (double)-g[20 + (int)(0.3f * SR / BLK)]);
+            check(name, g2[20 + (int)(0.3f * SR / BLK)] < g[20 + (int)(0.3f * SR / BLK)] - 3.0f);
+            /* accent on: a soft hit pumps less than a full one (0.5 .. 1 of the depth) */
+            MS_INIT();
+            master_set(ms, MS_PUMP, 127);
+            pump_trace(g, 100, 10, -1, PB_KICK, 127);
+            MS_INIT();
+            master_set(ms, MS_PUMP, 127);
+            pump_trace(g2, 100, 10, -1, PB_KICK, 40);
+            d = trace_min(g, 10, 60);
+            d2 = trace_min(g2, 10, 60);
+            snprintf(name, sizeof name, "  accent: velocity 127 ducks %.1f dB, 40 ducks %.1f dB", (double)-d, (double)-d2);
+            check(name, d < -23.0f && d2 > -17.5f && d2 < -15.0f);
+            /* 12 dB (64) by track 3: the kick and track 2 leave it, track 3 ducks it 12 dB, the metronome not */
+            MS_INIT();
+            master_set(ms, MS_PUMP, 64);
+            master_set(ms, MS_PUMP_BY, PB_T1 + 2);
+            pump_trace(g, 60, 10, 30, PB_KICK, 127);
+            d = trace_min(g, 2, 60);
+            pump_trace(g, 60, 10, 30, PB_T1 + 1, 127);
+            d = fm_minf(d, trace_min(g, 2, 60));
+            pump_trace(g, 60, 10, 30, PB_METRO, 127);
+            d = fm_minf(d, trace_min(g, 2, 60));
+            pump_trace(g2, 60, 10, -1, PB_T1 + 2, 127);
+            d2 = trace_min(g2, 10, 60);
+            snprintf(name, sizeof name, "  pump by T3: others %.2f dB, T3 %.1f dB (12.1)", (double)d, (double)d2);
+            check(name, d > -0.01f && d2 < -11.5f && d2 > -12.5f);
+            check("  the duck shown (master_pump_db)", master_pump_db(ms) > 1.0f);
+            /* with the compressor: the pump adds to its reduction */
+            MS_INIT();
+            master_set(ms, MS_COMP, 60);
+            pump_trace(g, 60, -1, -1, PB_KICK, 127);
+            master_set(ms, MS_PUMP, 127);
+            pump_trace(g2, 60, 10, -1, PB_KICK, 127);
+            snprintf(name, sizeof name, "  under the compressor: %.1f dB, with a kick %.1f dB", (double)g[59],
+                     (double)trace_min(g2, 10, 60));
+            check(name, trace_min(g2, 10, 60) < g[59] - 18.0f);
+        }
     }
 
     printf("-- the master's tape (TapeScam-lite)\n");
@@ -884,6 +1008,17 @@ int main(void)
             master_process(ms, p1, p2, m1, m2, a, c, 256);
         di = instr_now() - i0;
         printf("  master all  %5.0f  (EQ, the tape at 64, compressor, limiter)\n", (double)di / (20.0 * 256.0));
+        master_set(ms, MS_PUMP, 64);
+        for (b = 0; b < 10; b++)
+            master_process(ms, p1, p2, m1, m2, a, c, 256);
+        i0 = instr_now();
+        for (b = 0; b < 20; b++) {
+            if (!(b & 3))
+                master_key(ms, PB_KICK, 127);
+            master_process(ms, p1, p2, m1, m2, a, c, 256);
+        }
+        di = instr_now() - i0;
+        printf("  master pump %5.0f  (all, and the pump pumping)\n", (double)di / (20.0 * 256.0));
     }
     printf("%s\n", bad ? "FX TESTS FAILED" : "fx tests passed");
     return bad != 0;

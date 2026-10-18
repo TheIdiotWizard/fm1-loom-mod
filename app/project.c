@@ -183,6 +183,10 @@ void project_defaults(void)
     proj.master[MS_PERC] = 100;
     proj.master[MS_MEL] = 100;
     proj.master[MS_COMP] = 30;
+    proj.master[MS_PUMP] = 0;                             /* the pump off; when on: by the kick, X0X's release, */
+    proj.master[MS_PUMP_BY] = PB_KICK;                    /* accented hits deeper */
+    proj.master[MS_PUMP_REL] = MS_PUMP_REL_DEF;
+    proj.master[MS_PUMP_ACC] = 1;
     proj.master[MS_LEVEL] = 100;
     patterns_init(&pats);
 }
@@ -191,9 +195,28 @@ void project_defaults(void)
 
 /* the settings came whole (CRC): what the engine indexes with is checked, a knob out of its range
  * (a build whose ranges moved) is clamped, not a reason to lose the project */
+/* format 4 (before the pump): its twelve master bytes ended where the sixteen end now (rsv[] gave four), so
+ * they sit in master[4..15]: back to their places, the level from its old knob (11, the pump's now) to its own */
+static void settings_from_4(settings_t *s)
+{
+    uint8_t old[12];
+    int k;
+    for (k = 0; k < 12; k++)
+        old[k] = s->master[4 + k];
+    for (k = 0; k <= MS_COMP; k++)
+        s->master[k] = old[k];
+    s->master[MS_LEVEL] = old[11];
+    s->master[MS_PUMP] = 0;
+    s->master[MS_PUMP_BY] = PB_KICK;
+    s->master[MS_PUMP_REL] = MS_PUMP_REL_DEF;
+    s->master[MS_PUMP_ACC] = 1;
+    s->format = PROJ_FORMAT;
+}
 static int settings_valid(settings_t *s)
 {
     int t, k;
+    if (s->magic == PROJ_MAGIC && s->format == 4u)
+        settings_from_4(s);
     if (s->magic != PROJ_MAGIC || s->format != PROJ_FORMAT)
         return 0;
     if (s->tempo_x10 < 400u || s->tempo_x10 > 3000u || s->scene >= NSCENE || s->trk_sel >= NALLTRK)
@@ -216,8 +239,8 @@ static int settings_valid(settings_t *s)
             }
     }
     for (k = 0; k < NMS; k++)
-        if (s->master[k] > 127)
-            s->master[k] = 127;
+        if (s->master[k] > master_max(k))
+            s->master[k] = (uint8_t)master_max(k);
     return 1;
 }
 
@@ -536,7 +559,7 @@ int project_exists(int slot)
     if (slot < 0 || slot >= NPROJ)
         return 0;
     n = plat_store_load(OBJ_PROJ(slot, 0), io_buf, 8);
-    return n >= 8 && get32(io_buf) == PROJ_MAGIC && get32(io_buf + 4) == PROJ_FORMAT;
+    return n >= 8 && get32(io_buf) == PROJ_MAGIC && (get32(io_buf + 4) == PROJ_FORMAT || get32(io_buf + 4) == 4u);
 }
 
 void project_name_of(int slot, char *name)

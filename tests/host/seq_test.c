@@ -7,7 +7,7 @@
 #include <string.h>
 #include "seq.h"
 
-enum { E_ON, E_OFF, E_DRUM, E_LOCK, E_BEND, E_PUNCH, E_MIDI, E_STEP, E_SCENE, E_METRO, E_PAN, E_DOFF };
+enum { E_ON, E_OFF, E_DRUM, E_LOCK, E_BEND, E_PUNCH, E_MIDI, E_STEP, E_SCENE, E_METRO, E_PAN, E_DOFF, E_GHOST };
 typedef struct {
     int kind;
     uint32_t t;
@@ -52,8 +52,9 @@ static void s_scene(void *x, int sc) { (void)x; log_ev(E_SCENE, -1, sc, 0, 0, 0)
 static void s_metro(void *x, int acc) { (void)x; log_ev(E_METRO, -1, acc, 0, 0, 0); }
 static void s_pan(void *x, int trk, int pan) { (void)x; log_ev(E_PAN, trk, pan, 0, 0, 0); }
 static void s_drum_off(void *x, int trk, int sound) { (void)x; log_ev(E_DOFF, trk, sound, 0, 0, 0); }
+static void s_ghost(void *x, int trk, int sound, int vel) { (void)x; log_ev(E_GHOST, trk, sound, vel, 0, 0); }
 static const seq_sink_t sink = {s_on, s_off, s_drum, s_lock, s_bend, s_punch, s_midi, s_step,
-                                s_scene, s_metro, s_pan, s_drum_off, 0};
+                                s_scene, s_metro, s_pan, s_drum_off, s_ghost, 0};
 
 static void fail(const char *what)
 {
@@ -1604,6 +1605,45 @@ static void t_pitch_short_long(void)
 }
 
 /* sequenced punch-ins, and recording held punch keys into the PUNCH track */
+/* a muted track's steps: nothing plays, each would-be hit goes to the sink's ghost (the master's pump) at the
+ * step's velocity; a playing track sends none */
+static void t_ghost(void)
+{
+    cur = "ghost";
+    reset();
+    par[0][TP_ENGINE] = EG_DRUMLINE;
+    note(0, 0, 1, 120);                           /* the kick (sound 0) */
+    note(0, 4, 2, 90);                            /* snare and kick */
+    st(0, 4)->note[1] = 1;
+    note(1, 0, 60, 70);                           /* a melodic chord on track 2 */
+    st(1, 0)->note[1] = 64;
+    S.mute = 3;
+    start();
+    run(6 * L16);
+    CHECK(count(E_DRUM, 0) == 0 && count(E_ON, 1) == 0);
+    CHECK(count(E_GHOST, 0) == 3 && nth(E_GHOST, 0, 0)->a == 0 && nth(E_GHOST, 0, 0)->b == 120);
+    CHECK(nth(E_GHOST, 0, 1)->a == 1 && nth(E_GHOST, 0, 2)->a == 0 && nth(E_GHOST, 0, 2)->b == 90);
+    CHECK(near(nth(E_GHOST, 0, 1)->t, 4 * L16 + 2, 3));
+    CHECK(count(E_GHOST, 1) == 1 && nth(E_GHOST, 1, 0)->a == -1 && nth(E_GHOST, 1, 0)->b == 70);
+    stop();
+    S.mute = 0;
+    nev = 0;
+    start();
+    run(6 * L16);
+    CHECK(count(E_GHOST, -1) == 0 && count(E_DRUM, 0) == 3 && count(E_ON, 1) == 2);
+    /* a mute throw (the punch track's) ghosts too */
+    reset();
+    note(0, 0, 60, 100);
+    note(0, 1, 60, 100);
+    P.pat[AUX_PUNCH][0].st[1].note[0] = 1 + PX_MEL + PX_MUTE;
+    P.pat[AUX_PUNCH][0].st[1].vel = 100;
+    P.pat[AUX_PUNCH][0].st[1].len = 4;
+    start();
+    run(2 * L16 + 100);
+    CHECK(count(E_ON, 0) == 1 && count(E_GHOST, 0) == 1);
+    printf("ok %s\n", cur);
+}
+
 static void t_punch_seq(void)
 {
     cur = "punch-seq";
@@ -1999,6 +2039,7 @@ int main(void)
     t_cond();
     t_locks();
     t_scene();
+    t_ghost();
     t_song();
     t_song_bars();
     t_brain();

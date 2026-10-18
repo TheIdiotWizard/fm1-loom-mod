@@ -20,7 +20,8 @@
  *   expect WHAT VALUE            besides fm1-base's: playing, scene, voices, guard, cores, dirty, mem (the last save's
  *                                share of a project slot, %), tempo, trk, user / userbytes / rateN (the user bank's
  *                                samples, its data's bytes, user N's rate), punch_drum / punch_mel (the masks in effect,
- *                                PX_* bits), parT.P; and with more words: step T VALUE, page NAME, comp T S VALUE (prints
+ *                                PX_* bits), parT.P, mst.NAME (a master value, the mst command's names), pump (the
+ *                                pump's duck now, tenths of a dB); and with more words: step T VALUE, page NAME, comp T S VALUE (prints
  *                                both components; checks the first), note T PAT S VALUE
  * The demos' stems and taps (tools/demos/render.sh --stems), from the environment:
  *   LOOM_SOLO=1,3,fx1,fx2        only these tracks (dry and their sends) and FX returns sound
@@ -141,6 +142,9 @@ static void steps_print(int t, int p)
 }
 
 static int isnum(const char *s);
+static int ieq(const char *a, const char *b);
+static const char *const MN[NMS] = {"lo", "mid", "hi", "blend", "drive", "color", "wobble", "noise", "perc", "mel",
+                                    "comp", "pump", "pumpby", "release", "accent", "level"};
 /* fm1-base's expect, for LOOM-8's own state with one value */
 int app_expect(const char *what, int *got)
 {
@@ -174,6 +178,16 @@ int app_expect(const char *what, int *got)
         *got = (int)eng_punch_drum;
     else if (!strcmp(what, "punch_mel"))
         *got = (int)eng_punch_mel;
+    else if (!strcmp(what, "pump"))                 /* the pump's duck now, tenths of a dB */
+        *got = (int)(eng_pump_db * 10.0f + 0.5f);
+    else if (!strncmp(what, "mst.", 4)) {           /* mst.NAME: a master value */
+        int k;
+        for (k = 0; k < NMS && !ieq(what + 4, MN[k]); k++)
+            ;
+        if (k == NMS)
+            return 0;
+        *got = proj.master[k];
+    }
     else if (!strncmp(what, "par", 3) && strchr(what, '.')) {   /* parT.P: parameter P of track T */
         int t = atoi(what + 3) - 1, p = atoi(strchr(what, '.') + 1);
         if (t < 0 || t >= NALLTRK || p < 0 || p >= NTP)
@@ -274,7 +288,10 @@ static int expect_more(const char *what, const char *a, const char *b, const cha
  *   scenemute N MASK             scene N's mutes: a character a track 1-8, COND, THROW: x muted, . not
  *   song S:R [S:R ...]           the song: scene S (1-based) for R bars (16 sixteenths each)
  *   songloop 0|1
- *   mst NAME VALUE               a master knob (lo mid hi blend drive color wobble noise perc mel comp level)
+ *   format4 [SLOT]               the slot's saved settings rewritten as format 4 had them (before the pump), so a
+ *                                reboot or a load reads an old project
+ *   mst NAME VALUE               a master knob (lo mid hi blend drive color wobble noise perc mel comp pump) or the
+ *                                out page's list (pumpby kick|t1..t8|metro, release, accent on|off, level)
  *   groove NAME                  the project's groove type (swing lilt weave ...)
  *   play T NOTE on|off [VEL]     a key on track T (through its player and the conductor), at any octave
  *   throw NAME on|off perc|mel [T]   a throw (mute stutter repeat echo build floor jumble warble pan octave chop
@@ -452,8 +469,23 @@ static void stats_print(void)
            (unsigned)(eng_guard_count - st_guard0), st_load, st_ms ? st_load_sum / (float)st_ms : 0.0f, st_hi_ms);
 }
 
-static const char *const MN[NMS] = {"lo", "mid", "hi", "blend", "drive", "color", "wobble", "noise", "perc", "mel",
-                                    "comp", "level"};
+/* a master value as a script writes it: a number, or for pumpby kick / t1..t8 / metro, for accent on / off */
+static int mst_value(int k, const char *v)
+{
+    if (k == MS_PUMP_BY) {
+        if (ieq(v, "kick"))
+            return PB_KICK;
+        if (ieq(v, "metro") || ieq(v, "metronome"))
+            return PB_METRO;
+        if ((v[0] == 't' || v[0] == 'T') && v[1] >= '1' && v[1] <= '8' && !v[2])
+            return PB_T1 + v[1] - '1';
+    }
+    if (k == MS_PUMP_ACC && (ieq(v, "on") || ieq(v, "off")))
+        return ieq(v, "on");
+    if (!(v[0] >= '0' && v[0] <= '9'))
+        host_die("not a master value", v);
+    return clampi(atoi(v), 0, master_max(k));
+}
 static void host_env(void)                          /* LOOM_SOLO, LOOM_MST (once) */
 {
     static int done;
@@ -491,7 +523,7 @@ static void mst_override(void)                      /* LOOM_MSTSET: knobs held w
         for (k = 0; k < NMS && !ieq(p, MN[k]); k++)
             ;
         if (k < NMS) {
-            proj.master[k] = (uint8_t)clampi(atoi(eq + 1), 0, 127);
+            proj.master[k] = (uint8_t)mst_value(k, eq + 1);
             engine_master(k, proj.master[k]);
         }
     }
@@ -678,14 +710,30 @@ static int song_cmd(const char *cmd)
             pats.song.slot[pats.song.len].scene = (uint8_t)sc;
             pats.song.slot[pats.song.len++].rep = (uint8_t)r;
         }
+    } else if (!strcmp(cmd, "format4")) {           /* format4 SLOT: the slot's stored settings made as format 4 (before
+                                                     * the pump) had them, to load back (project.c settings_from_4) */
+        static settings_t o;
+        uint8_t m[NMS];
+        int slot = n > 1 ? atoi(w[1]) - 1 : 0;
+        if (plat_store_load(OBJ_PROJ(slot, 0), &o, sizeof o) != (int)sizeof o)
+            host_die("format4: nothing saved in slot", w[1]);
+        memcpy(m, o.master, NMS);
+        for (k = 0; k < 4; k++)
+            o.master[k] = 0;                        /* (format 4's rsv[10..13]) */
+        for (k = 0; k <= MS_COMP; k++)
+            o.master[4 + k] = m[k];
+        o.master[4 + 11] = m[MS_LEVEL];
+        o.format = 4u;
+        plat_store_save(OBJ_PROJ(slot, 0), &o, sizeof o);
     } else if (!strcmp(cmd, "songloop"))
         pats.song.loop = (uint8_t)(atoi(w[1]) != 0);
-    else if (!strcmp(cmd, "mst")) {                 /* mst NAME VALUE */
+    else if (!strcmp(cmd, "mst")) {                 /* mst NAME VALUE (MN: the knobs, then pumpby, release, accent,
+                                                     * level: the out page's list) */
         for (k = 0; k < NMS && !ieq(w[1], MN[k]); k++)
             ;
         if (k == NMS || n < 3)
             host_die("no master knob", w[1]);
-        proj.master[k] = (uint8_t)clampi(atoi(w[2]), 0, 127);
+        proj.master[k] = (uint8_t)mst_value(k, w[2]);
         engine_master(k, proj.master[k]);
         mst_override();
         run_ms(1);

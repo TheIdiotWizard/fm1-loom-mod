@@ -37,6 +37,7 @@ volatile uint8_t eng_drum_hit[NDRUM];
 volatile uint8_t eng_voices, eng_voices_max = NVOICE;
 volatile uint32_t eng_guard_count;
 volatile uint32_t eng_punch_drum, eng_punch_mel;
+volatile float eng_pump_db;
 volatile uint8_t eng_scene_now, eng_scene_cue = 0xFF;
 int16_t eng_scope[SCOPE_N];
 volatile uint32_t eng_scope_w;
@@ -445,12 +446,31 @@ static void apply_all(int trk)                             /* ISR: C_ALL (a load
 }
 
 /* ------------------------------------------------------- sequencer sink --- */
+/* the master's PUMP keys: a kit's hit (a kick: its first key, or a key on the kick model) and any note of a
+ * track; the master takes the one it follows (fx.h PB_*). Also from a muted track's steps (s_ghost) */
+static void pump_drum(int trk, int sound, int vel)
+{
+    if (sound == 0 || epar[trk][TP_DRUM(sound, DP_MODEL)] == DM_KICK)
+        master_key(MST, PB_KICK, vel);
+    master_key(MST, PB_T1 + trk, vel);
+}
 static void s_note_on(void *x, int trk, int note, int vel, int glide_ms, uint32_t tag)
 {
     (void)x;
     if (trk < 0 || trk >= NTRK || eng_drum[trk])
         return;
     synth_note_on(SY, trk, note, vel, glide_ms, tag);
+    master_key(MST, PB_T1 + trk, vel);
+}
+static void s_ghost(void *x, int trk, int sound, int vel)   /* a muted track's step: it keys the pump, silently */
+{
+    (void)x;
+    if (trk < 0 || trk >= NTRK)
+        return;
+    if (eng_drum[trk] && sound >= 0 && sound < NDRUM)
+        pump_drum(trk, sound, vel);
+    else if (!eng_drum[trk])
+        master_key(MST, PB_T1 + trk, vel);
 }
 static void s_note_off(void *x, int trk, uint32_t tag)
 {
@@ -465,6 +485,7 @@ static void s_drum(void *x, int trk, int sound, int vel, int pitch_semi, int sho
         return;
     drumline_hit(DL(trk), sound, vel, pitch_semi, short_gate, long_tail || perf_tail[trk]);
     synth_duck_trigger(SY, trk);                       /* duck LFOs listening to this track drop */
+    pump_drum(trk, sound, vel);
     if (trk == proj.trk_sel)
         eng_drum_hit[sound] = (uint8_t)(vel >= 127 ? 255 : vel * 2);
 }
@@ -546,12 +567,13 @@ static void s_metro(void *x, int accent)
     metro_ph = 0.0f;
     metro_inc = (accent ? 1760.0f : 1320.0f) / 44100.0f;
     synth_duck_trigger(SY, DUCK_METRO);
+    master_key(MST, PB_METRO, accent ? 127 : 100);
 }
 /* named members: the sequencer may grow its sink at the end without this changing */
 static const seq_sink_t SINK = {
     .note_on = s_note_on, .note_off = s_note_off, .drum = s_drum, .lock = s_lock, .bend = s_bend, .punch = s_punch,
     .midi = s_midi, .step = s_step, .scene = s_scene, .metro = s_metro, .pan = s_pan, .drum_off = s_drum_off,
-    .ctx = 0};
+    .ghost = s_ghost, .ctx = 0};
 
 /* the performance state of every instrument track from the punch masks and the bends: once a stretch */
 #define PUNCH_VIB_DRUM 30.0f                               /* cents, the wobble under the drums' filter */
@@ -900,6 +922,7 @@ void engine_render(int32_t *out_lr, uint32_t n, uint32_t gain_q12)
         done += k;
     }
     eng_scene_cue = seq.cue;
+    eng_pump_db = master_pump_db(MST);
     for (i = 0; i < n; i++) {                            /* Felucca's -6 dBFS ceiling of the 24-bit codec (2^22) */
         float l = mix_l[i] * vol, r = mix_r[i] * vol;
         l = l > 2.0f ? 2.0f : l < -2.0f ? -2.0f : l;

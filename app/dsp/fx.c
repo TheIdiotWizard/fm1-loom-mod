@@ -28,8 +28,10 @@
  *
  * Master: the two groups' levels, a 3-band EQ (RBJ shelves and a peak, their gains scaled by blend
  * so blend 0 is a true bypass), the tape (TapeScam-lite, tapescam.h, after schwung-tapescam: MIT; all four
- * knobs at 0 a true bypass), X0X's bus compressor behind its one-knob macro, the master level and
- * X0X's lookahead limiter.
+ * knobs at 0 a true bypass), X0X's bus compressor behind its one-knob macro with X0X's PUMP in its gain
+ * (a hit of the pump's source ducks the whole mix: the sequencer keys it, so it needs no detector and a
+ * muted track keys it too; at 0 the stage is as before, sample for sample), the master level and X0X's
+ * lookahead limiter.
  *
  * Everything here runs in the audio interrupt; fx_set / master_set write plain words from the main
  * loop. Float, fastmath.h; stack locals stay small (a 32-sample block). */
@@ -653,9 +655,9 @@ void fx_process(fxslot_t *f, const float *in, float *out_l, float *out_r, uint32
 
 /* ================================================================ master === */
 /* the master's knob names, short enough for the knob strip: percussion, melodic, compressor
- * and master level are perc, mel, comp, level */
+ * and pump are perc, mel, comp, pump; then the out page's list */
 const char *const MS_NAME[NMS] = {"low", "mid", "high", "blend", "drive", "color", "wobble", "noise",
-                                  "perc", "mel", "comp", "level"};
+                                  "perc", "mel", "comp", "pump", "pump by", "release", "accent", "level"};
 
 #include "tapescam.h"
 
@@ -675,6 +677,9 @@ struct master {
     /* compressor (X0X's master.c) */
     float thr_db, slope, knee, a_att, a_rel, makeup, gr, ms, a_det, want, g_lin, g_step, gr_view;
     uint8_t cr;
+    /* PUMP (X0X's): its depth (dB), its envelope (dB) and the target it rises to; the rise and the release
+     * as coefficients of MST_CR samples (it moves where the gain is computed) */
+    float pump_db, pump, pump_tgt, a_up, a_down, pump_view;
 #define MST_CR 4
     /* limiter (X0X's) */
 #define MST_LA 64
@@ -690,6 +695,11 @@ static float level_lin(int v)                 /* 0 .. 100 .. 127: silence, unity
     return x <= 100.0f ? x * x * 0.0001f : 1.0f + (x - 100.0f) * (1.0f / 27.0f);
 }
 static float coef_ms(float t) { return fm_expf(-1000.0f / (t * SR)); }
+float master_pump_ms(int v) { return 10.0f * fm_exp2f((float)v * (7.229f / 127.0f)); }   /* X0X's release: 10 .. 1500 */
+int master_max(int p) { return p == MS_PUMP_BY ? NPB - 1 : p == MS_PUMP_ACC ? 1 : 127; }
+/* PUMP's duck rises over this (X0X's MASTER_PUMP_RISE_MS): 12 ms lets the kick's attack through and then ducks;
+ * at 3 ms X0X heard a click on every kick */
+#define MST_PUMP_RISE_MS 12.0f
 
 /* RBJ: a low shelf, a peak, a high shelf, gain in dB */
 static void biq_shelf(biq_t *q, float hz, float db, int high)
@@ -749,8 +759,13 @@ static void comp_coefs(master_t *m)
     m->a_att = coef_ms(2.6f);
     m->a_rel = coef_ms(106.0f);
     m->a_det = coef_ms(8.0f);
-    m->makeup = fm_db2lin(mk);
-    m->comp_on = ri != 0;
+    m->makeup = ri ? fm_db2lin(mk) : 1.0f;              /* (the pump alone: unity under it) */
+    m->pump_db = 24.0f * (float)m->pot[MS_PUMP] * (1.0f / 127.0f);
+    m->a_up = coef_ms(MST_PUMP_RISE_MS / (float)MST_CR);
+    m->a_down = coef_ms(master_pump_ms(m->pot[MS_PUMP_REL]) / (float)MST_CR);
+    if (!m->pot[MS_PUMP])
+        m->pump = m->pump_tgt = 0.0f;
+    m->comp_on = ri != 0 || m->pot[MS_PUMP] != 0;   /* (the pump needs the stage, the compressor or not) */
     if (m->comp_on && !was) {
         m->g_lin = m->makeup;
         m->g_step = 0.0f;
@@ -760,7 +775,7 @@ static void comp_coefs(master_t *m)
 
 void master_init(master_t *m, float *tape_l, float *tape_r)
 {
-    static const uint8_t DEF[NMS] = {64, 64, 64, 0, 0, 0, 0, 0, 100, 100, 0, 100};
+    static const uint8_t DEF[NMS] = {64, 64, 64, 0, 0, 0, 0, 0, 100, 100, 0, 0, PB_KICK, MS_PUMP_REL_DEF, 1, 100};
     uint32_t i;
     uint8_t *z = (uint8_t *)m;
     for (i = 0; i < sizeof *m; i++)
@@ -779,7 +794,7 @@ void master_set(master_t *m, int p, int v)
 {
     if (p < 0 || p >= NMS)
         return;
-    m->pot[p] = (uint8_t)(v < 0 ? 0 : v > 127 ? 127 : v);
+    m->pot[p] = (uint8_t)(v < 0 ? 0 : v > master_max(p) ? master_max(p) : v);
     if (p <= MS_EQ_BLEND)
         eq_coefs(m);
     else if (p <= MS_TP_NOISE)
@@ -788,13 +803,25 @@ void master_set(master_t *m, int p, int v)
         m->gp = level_lin(v);
     else if (p == MS_MEL)
         m->gm = level_lin(v);
-    else if (p == MS_COMP)
-        comp_coefs(m);
-    else
+    else if (p == MS_LEVEL)
         m->glev = level_lin(v);
+    else
+        comp_coefs(m);                                    /* comp, the pump's depth, source, release, accent */
 }
 
 float master_gr_db(const master_t *m) { return m->gr_view; }
+float master_pump_db(const master_t *m) { return m->pump_view; }
+
+void master_key(master_t *m, int src, int vel)
+{
+    float t;
+    if (!m->pot[MS_PUMP] || src != m->pot[MS_PUMP_BY])
+        return;
+    t = m->pot[MS_PUMP_ACC] ? m->pump_db * (0.5f + 0.5f * (float)(vel < 0 ? 0 : vel > 127 ? 127 : vel) * (1.0f / 127.0f))
+                            : m->pump_db;                   /* an accented hit pumps deeper (X0X: 0.5 .. 1) */
+    if (t > m->pump_tgt)
+        m->pump_tgt = t;
+}
 
 static inline float biq(const biq_t *q, biqs_t *s, float x)
 {
@@ -840,7 +867,7 @@ void master_process(master_t *m, float *perc_l, float *perc_r, float *mel_l, flo
                     float *out_r, uint32_t n)
 {
     uint32_t i;
-    float gp = m->gp_c, gm = m->gm_c, lev = m->lev_c, grmax = 0.0f;
+    float gp = m->gp_c, gm = m->gm_c, lev = m->lev_c, grmax = 0.0f, pmax = 0.0f;
     const int eq_on = m->eq_on, comp_on = m->comp_on;
     /* the groups, the EQ and the tape into the bus (the tape a block of 32 at a time, in place in mel) */
     for (i = 0; i < n; i++) {
@@ -889,7 +916,17 @@ void master_process(master_t *m, float *perc_l, float *perc_r, float *mel_l, flo
             if (m->gr > grmax)
                 grmax = m->gr;
             if (m->cr == 0) {
-                m->g_step = (m->makeup * fm_db2lin(-m->gr) - m->g_lin) * (1.0f / MST_CR);
+                if (m->pump_tgt > m->pump) {          /* PUMP (X0X's): rise to the hit's depth ... */
+                    m->pump = m->a_up * m->pump + (1.0f - m->a_up) * m->pump_tgt;
+                    if (m->pump_tgt - m->pump < 0.05f)
+                        m->pump_tgt = 0.0f;           /* ... then let go: the release swells back */
+                } else {
+                    m->pump = fm_flush(m->a_down * m->pump);
+                }
+                if (m->pump > pmax)
+                    pmax = m->pump;
+                /* (the pump at 0: + 0.0f, the compressor's gain exactly as before) */
+                m->g_step = (m->makeup * fm_db2lin(-(m->gr + m->pump)) - m->g_lin) * (1.0f / MST_CR);
                 m->cr = MST_CR;
             }
             m->cr--;
@@ -935,4 +972,5 @@ void master_process(master_t *m, float *perc_l, float *perc_r, float *mel_l, flo
     m->gm_c = gm;
     m->lev_c = lev;
     m->gr_view = grmax > m->gr_view ? grmax : m->gr_view * 0.93f;
+    m->pump_view = pmax > m->pump_view ? pmax : m->pump_view * 0.93f;
 }

@@ -651,6 +651,20 @@ static void fire_notes(seq_t *s, int t, const step_t *st, int p, uint32_t L, int
     tr->last_glide = (uint8_t)(glide > 255 ? 255 : glide);
 }
 
+/* a muted track's step: what it would have hit, to the sink's ghost (the master's pump), nothing sounding */
+static void ghost_notes(seq_t *s, int t, const step_t *st, const seq_sink_t *o)
+{
+    int vel = st->vel ? st->vel : 100, i;   /* (the step's own: a groove's random velocity would draw from the
+                                             * track's generator and change what it plays when unmuted) */
+    if (!is_drum(s, t)) {
+        o->ghost(o->ctx, t, -1, vel);
+        return;
+    }
+    for (i = 0; i < SN; i++)
+        if (st->note[i] >= 1 && st->note[i] <= NDRUM)
+            o->ghost(o->ctx, t, st->note[i] - 1, vel);
+}
+
 /* the aux tracks' steps: brain chords, punch-in bits */
 static void fire_aux(seq_t *s, int t, const step_t *st, int p, uint32_t L, const seq_sink_t *o)
 {
@@ -1231,8 +1245,12 @@ static void fire_step(seq_t *s, int t, const seq_sink_t *o)
             fire_notes(s, t, st, p, L, 0, o);
         else
             fire_aux(s, t, st, p, L, o);
-    } else
+    } else {
         tr->ramp_deg = 0;
+        if (happens && t < NTRK && o->ghost && !tr->fill_on && !step_empty(st) &&
+            ((s->mute >> t & 1u) || punch_muted(s, t)))
+            ghost_notes(s, t, st, o);
+    }
     tr->skip_note = 0;
     if (!tr->stall)
         tr->stall_kind = 0;

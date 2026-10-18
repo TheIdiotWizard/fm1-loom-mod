@@ -98,6 +98,11 @@ typedef struct {
                                                                     * -64..63 for its next notes (0 = centre) */
     void (*drum_off)(void *ctx, int trk, int sound);               /* a drum's key / step ends (gated and loop play
                                                                     * modes stop; the engine's drumline_release) */
+    void (*ghost)(void *ctx, int trk, int sound, int vel);         /* a muted track's step that would have played (the
+                                                                    * scene's mute or a mute throw): each drum sound of it
+                                                                    * (sound 0..), or once for a melodic track (sound -1),
+                                                                    * at the step's velocity. Nothing sounds: it keys the
+                                                                    * master's pump (a silent kick can drive it) */
     void *ctx;
 } seq_sink_t;
 

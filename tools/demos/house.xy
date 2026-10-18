@@ -19,7 +19,7 @@ knob 9 e3 1
 # ---- the sounds (deep house: warm and round, the air from the hats alone. A round kick with a short tail, the
 # open hat on every offbeat, a clap on 2 and 4 and a 16th shaker; the bass round and up in the mix, ducked by the
 # kick; minor-ninth stabs into a dotted echo, a pumped pad, a long dark hall kept off the low end; the master
-# warm: no top lift, a little low end, no tape)
+# warm: no top lift, a little low end, no tape, the whole mix pumped by the kick)
 # T1 the kit: the kick round (its tone down, a soft punch), a dry clap, a short open hat, a soft shaker
 knob 1 d1.k1 76
 knob 1 d1.k2 64
@@ -100,11 +100,16 @@ knob 11 e4 50
 knob 12 engine hall
 knob 12 e2 76
 knob 12 e3 56
-# the master: warm, the low end a little up, no top lift, a gentle compressor
+# the master: warm, the low end a little up, no top lift, a gentle compressor; the whole mix breathing with the kick
+# (the master's pump: 4 dB by the kick, swelling back over ~170 ms, most of a beat; the bass's and the pad's own
+# pumps stay: theirs is the parts' room around the kick)
 mst blend 127
 mst lo 72
 mst hi 64
 mst comp 56
+mst pump 21
+mst pumpby kick
+mst release 75
 mst level 110
 
 # ---- T1 the kit: kick 1, snare 2, hat 3, open 4, clap 5, conga 8, shaker 9

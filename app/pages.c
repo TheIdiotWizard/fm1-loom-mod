@@ -180,13 +180,14 @@ enum { LK_KNOB, LK_MORE, LK_ACTION, LK_PICK };
 enum { A_CLEAR_NOTES, A_CLEAR_LOCKS, A_CLEAR_BOTH, A_COPY_PAT, A_PASTE_PAT, A_ROT_FWD, A_ROT_BACK, A_DUP_BAR,
        A_ENGINE, A_PRESET, A_SCRAMBLE, A_SAVE_PRESET, A_INIT, A_FOLLOW, A_INSERT_SLOT, A_DELETE_SLOT, A_CLEAR_SONG,
        A_PLAY_SONG, A_LOAD_PROJ, A_NEW_PROJ, A_USB_AUDIO, A_CLEAR_SCENE, A_PANIC, A_EFFECT, A_REMOVE_NOTE,
-       A_COUNT_IN, A_PLAYMODE, A_FTYPE, A_FX_HP, A_FX_LP, A_FX_SEND, A_WEAVE, A_THEME, NACTIONS };
+       A_COUNT_IN, A_PLAYMODE, A_FTYPE, A_FX_HP, A_FX_LP, A_FX_SEND, A_WEAVE, A_THEME, A_PUMP_BY, A_PUMP_REL,
+       A_PUMP_ACC, A_LEVEL, NACTIONS };
 static const char *const ACTION_NAME[NACTIONS] = {
     "CLEAR NOTES", "CLEAR LOCKS", "CLEAR NOTES AND LOCKS", "COPY PATTERN", "PASTE PATTERN", "ROTATE FORWARD",
     "ROTATE BACK", "DUPLICATE BAR", "ENGINE", "PRESET", "SCRAMBLE", "SAVE AS PRESET", "RESET SOUND", "FOLLOWS CONDUCTOR",
     "INSERT SCENE", "DELETE SLOT", "CLEAR SONG", "PLAY SONG", "LOAD PROJECT", "NEW PROJECT", "USB AUDIO", "CLEAR SCENE",
     "ALL NOTES OFF", "EFFECT", "REMOVE", "COUNT-IN", "PLAY MODE", "FILTER TYPE", "HIGH-PASS", "LOW-PASS",
-    "TO FX II", "WEAVE WITH COPIED", "THEME"};
+    "TO FX II", "WEAVE WITH COPIED", "THEME", "PUMP BY", "RELEASE", "ACCENT", "LEVEL"};
 /* the weave's ways (pattern.h WV_*): what this pattern keeps of itself */
 static const char *const WEAVE_NAME[NWV] = {"bars", "steps", "rhythm", "notes"};
 #define LIST_ROWS 28
@@ -675,6 +676,24 @@ static void kn(knob_t *k, const char *name, int32_t v, int32_t max)
     k->num = v;
     k->max = max;
 }
+/* the master's pump: its depth (0 .. 24 dB), its source, its release */
+static void pump_text(int v, char *t)
+{
+    int d = (v * 240 + 63) / 127;
+    char *e = num_i(d / 10, t);
+    *e++ = '.';
+    e = num_i(d % 10, e);
+    s_cat(e, " dB");
+}
+static const char *pump_by_text(int v, char *t)
+{
+    if (v == PB_KICK)
+        return "kick";
+    if (v == PB_METRO)
+        return "metronome";
+    num_i(v - PB_T1 + 1, s_cat(t, "T"));
+    return t;
+}
 static void kname(knob_t *k, const char *name, const char *const *names, int v, int n)
 {
     kv(k, name, names[clampi(v, 0, n - 1)], v, 0);
@@ -974,7 +993,12 @@ static void page_knobs(knob_t *k)
     case P_MASTER: case P_MASTER2: case P_MASTER3:
         for (int i = 0; i < 4; i++) {
             int m = (p - P_MASTER) * 4 + i;
-            kn(&k[i], MS_NAME[m], proj.master[m], 127);
+            if (m == MS_PUMP) {
+                char t[12];
+                pump_text(proj.master[m], t);
+                kv(&k[i], MS_NAME[m], t, proj.master[m], 127);
+            } else
+                kn(&k[i], MS_NAME[m], proj.master[m], 127);
         }
         break;
     case P_SETUP:
@@ -1229,7 +1253,10 @@ static void page_footer(char *t)
     case P_MIX:
         s_cat(t, "BLACK track|hold: solo");
         break;
-    case P_MASTER: case P_MASTER2: case P_MASTER3: case P_SETUP: case P_STATUS:
+    case P_MASTER3:
+        s_cat(t, "SEL pump by, level");
+        break;
+    case P_MASTER: case P_MASTER2: case P_SETUP: case P_STATUS:
         break;
     case P_SENDS:
         s_cat(t, "KEYS play");
@@ -1715,6 +1742,15 @@ static void list_build(void)
             list_add(ACTION_NAME[A_FOLLOW], fol_t, LK_PICK, A_FOLLOW);
         }
         list_add(ACTION_NAME[A_PANIC], 0, LK_ACTION, A_PANIC);
+    } else if (keep == P_MASTER3) {                 /* the out page: the pump's settings, the level */
+        static char by[8], rel[12], lev[8];
+        char *e = num_i((int32_t)(master_pump_ms(proj.master[MS_PUMP_REL]) + 0.5f), rel);
+        s_cat(e, " ms");
+        num_i(proj.master[MS_LEVEL], lev);
+        list_add(ACTION_NAME[A_PUMP_BY], pump_by_text(proj.master[MS_PUMP_BY], by), LK_PICK, A_PUMP_BY);
+        list_add(ACTION_NAME[A_PUMP_REL], rel, LK_PICK, A_PUMP_REL);
+        list_add(ACTION_NAME[A_PUMP_ACC], proj.master[MS_PUMP_ACC] ? "on" : "off", LK_PICK, A_PUMP_ACC);
+        list_add(ACTION_NAME[A_LEVEL], lev, LK_PICK, A_LEVEL);
     } else if (keep == P_SETUP || keep == P_STATUS) {
         proj_slot_text(ui.pick_slot % NPROJ, slot_t);
         list_add(ACTION_NAME[A_LOAD_PROJ], slot_t, LK_PICK, A_LOAD_PROJ);
@@ -3367,8 +3403,10 @@ static void draw_master(void)
     const uint8_t *m = proj.master;
     uint32_t h = hash_u(hash_u(2166136261u, 0x3Au), (uint32_t)pg);
     int32_t x0 = 16, y0 = 12, w = 208, hh = 84, cy = y0 + hh / 2;
+    int pv = pg == 2 ? (int)(eng_pump_db * (float)(hh - 10) / 24.0f) : 0;   /* the pump's duck, now (pixels) */
     for (int i = 0; i < NMS; i++)
         h = hash_u(h, m[i]);
+    h = hash_u(h, (uint32_t)pv);
     if (!begin_main(h))
         return;
     cv_rect(x0, cy, w, 1, K_LINE);
@@ -3402,11 +3440,13 @@ static void draw_master(void)
         }
         cv_text(x0, y0 + hh + 3, &FONT_XS, "tape: drive, color, wobble, noise", K_DIM);
     } else {
-        static const char *const NM[4] = {"drums", "melodic", "comp", "level"};
+        static const char *const NM[4] = {"drums", "melodic", "comp", "pump"};
         for (int i = 0; i < 4; i++) {
             int32_t x = x0 + i * 52, v = m[MS_PERC + i] * (hh - 10) / 127;
             cv_round(x + 8, y0, 30, hh, 4, K_PANEL);
             cv_round(x + 8, y0 + hh - v, 30, v, 4, i == 2 ? K_NOW_M : K_NOW);
+            if (i == 3 && pv > 0)                    /* the pump: its duck now, hanging from the top */
+                cv_round(x + 12, y0 + 2, 22, pv < hh - 4 ? pv : hh - 4, 3, K_NOW_M);
             text_c(x + 23, y0 + hh + 3, &FONT_XS, NM[i], K_DIM);
         }
     }
