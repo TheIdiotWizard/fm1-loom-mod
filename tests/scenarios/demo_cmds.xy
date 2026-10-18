@@ -50,6 +50,17 @@ song 1:1 2:1
 songloop 0
 mst comp 40
 mst level 90
+expect mst.level 90
+expect mst.pump 0
+mst pump 21
+mst pumpby t2
+expect mst.pumpby 2
+mst pumpby kick
+mst release 75
+mst accent off
+expect mst.accent 0
+mst accent on
+expect mst.pump 21
 groove swing
 bpm 120
 tap HOME

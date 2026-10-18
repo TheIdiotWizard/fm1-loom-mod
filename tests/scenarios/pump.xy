@@ -1,0 +1,83 @@
+# the master's PUMP: the Master out page's knobs (perc, mel, comp, pump) and its list (pump by, release, accent,
+# level); a kick ducks the mix, a muted kick too (a silent kick can drive it), the depth at 0 nothing
+wait 300
+hits 1 1 1 x...x...x...x...
+expect mst.pump 0
+expect mst.level 100
+expect mst.release 60
+expect mst.accent 1
+tap GLO
+expect page Mix
+turn SELECT 3
+expect mst.pump 0
+spin K4 64
+expect mst.pump 64
+wait 40
+shot master_out.png
+# the list: pump by, release, accent, level
+tap SEL
+wait 40
+shot master_out_list.png
+turn ALGO 3
+expect mst.pumpby 3
+wait 40
+shot master_out_list_t3.png
+turn ALGO 6
+expect mst.pumpby 9
+wait 40
+shot master_out_list_metro.png
+turn ALGO -9
+expect mst.pumpby 0
+turn SELECT 1
+spin ALGO 20
+expect mst.release 80
+turn SELECT 1
+spin ALGO -1
+expect mst.accent 0
+turn SELECT 1
+spin ALGO -10
+expect mst.level 90
+wait 40
+shot master_out_list_level.png
+tap HOME
+# the kick plays: the pump moves (12 dB at 64, accent off: every kick fully)
+tap PLAY
+expect playing 1
+wait 520
+expect pump >30
+wait 40
+shot master_out_pumping.png
+tap PLAY
+expect playing 0
+wait 1500
+expect pump <5
+# the kit muted: its kick still pumps
+scenemute 1 x
+scene 1
+tap PLAY
+wait 520
+expect pump >30
+tap PLAY
+wait 1500
+# the depth at 0: nothing
+spin K4 -64
+expect mst.pump 0
+tap PLAY
+wait 520
+expect pump 0
+tap PLAY
+# an older project (format 4, before the pump): its level comes back from its old place, the pump off
+mst comp 44
+mst level 87
+mst pump 30
+tap SAVE
+expect dirty 0
+format4 1
+reboot
+wait 300
+expect mst.level 87
+expect mst.comp 44
+expect mst.pump 0
+expect mst.pumpby 0
+expect mst.release 60
+expect mst.accent 1

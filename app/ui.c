@@ -1677,6 +1677,18 @@ static void list_change(int32_t e)
             set_tp(t, TP_BRAIN, (proj.trk[t].par[TP_BRAIN] % 3 + d + 3) % 3);
             break;
         }
+        case A_PUMP_BY: case A_PUMP_REL: case A_PUMP_ACC: case A_LEVEL: {   /* the master out page's list */
+            int id = lst.row[lst.sel].id;
+            int m = id == A_PUMP_BY ? MS_PUMP_BY : id == A_PUMP_REL ? MS_PUMP_REL : id == A_PUMP_ACC ? MS_PUMP_ACC : MS_LEVEL;
+            int v = clampi(proj.master[m] + (m == MS_PUMP_REL || m == MS_LEVEL ? (int)accel(EN_ALGO, e) : d), 0,
+                           master_max(m));
+            if (v != proj.master[m]) {
+                proj.master[m] = (uint8_t)v;
+                engine_master(m, v);
+                mark_dirty();
+            }
+            break;
+        }
         default: break;
         }
         break;
@@ -1993,7 +2005,7 @@ static void action_run(int a)
         say("RESET", EG_NAME[proj.trk[sel_trk()].par[TP_ENGINE] % NENGINE]);
         break;
     case A_FOLLOW: case A_USB_AUDIO: case A_COUNT_IN: case A_THEME: case A_PLAYMODE: case A_FTYPE: case A_FX_HP: case A_FX_LP:
-    case A_FX_SEND: return;                      /* (ALGORITHM sets them; SEL leaves the list) */
+    case A_FX_SEND: case A_PUMP_BY: case A_PUMP_REL: case A_PUMP_ACC: case A_LEVEL: return;                      /* (ALGORITHM sets them; SEL leaves the list) */
     case A_REMOVE_NOTE: act_remove_note(lst.sel); break;
     case A_INSERT_SLOT:
         if (sg->len >= NSONG) {

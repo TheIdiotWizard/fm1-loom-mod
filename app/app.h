@@ -104,7 +104,8 @@ int plat_last_crash(uint32_t v[5]);     /* 1: a crash since power-on (vec, pc, e
 void loom_lights(uint32_t buttons, uint32_t keys, int glow, uint32_t dim_keys, int red);
 
 #define PROJ_MAGIC 0x384D4F4Cu          /* "LOM8" (was "XXY1": XY-1's projects start fresh) */
-#define PROJ_FORMAT 4u                  /* 4: no tape (its track and send), the reverb's modes, the master's tape,
+#define PROJ_FORMAT 5u                  /* 5: the master's pump (master[] 12 -> 16 bytes, out of rsv[]: a 4 loads,
+                                         * project.c settings_valid); 4: no tape (its track and send), the reverb's modes, the master's tape,
                                          * and each drum key its envelope and filter (DP_N 9 -> 18); 2: the character
                                          * stage moved TP_PLAYER on (and every index after it) */
 #define NUSER_PRESETS 16
@@ -129,8 +130,8 @@ typedef struct {
     uint8_t send_clock, send_notes, one_core, usb_full;
     uint8_t scene;                      /* the scene to start on */
     uint8_t trk_sel;                    /* the track selected */
-    uint8_t rsv[14];
-    uint8_t master[NMS];
+    uint8_t rsv[10];                    /* (format 4 had 14: its last four are master[0..3] now) */
+    uint8_t master[NMS];                /* fx.h MS_*: format 4's twelve end where these sixteen end */
     trk_t trk[NALLTRK];
 } settings_t;
 

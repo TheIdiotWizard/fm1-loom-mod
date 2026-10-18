@@ -97,6 +97,8 @@ knob on it; press **ARP** on T2 and turn **KNOB 1** to arp; press **GLO**, turn 
 - **Throw**: a momentary effect on the drums or the melodic tracks, from a key while you hold HOME.
 - **Weave**: a pattern crossed with a copied one: bars or steps in turn, or one's rhythm with the other's notes.
 - **Groove**: a timing and velocity feel. The project picks the type, each track sets how much.
+- **Pump**: the whole mix ducking on each kick and swelling back (Master out). A track's duck LFO does the same
+  to one track.
 
 ### How do I…
 
@@ -143,6 +145,7 @@ press…" means keep **HOME** down while you press the next thing.
 | make a new scene | Press **HOME** and press an empty white key. It becomes a copy of the scene playing. |
 | cue a scene at the bar | On Arrange, hold **HOME** and press the scene's white key. |
 | mute a track | On Arrange, press its black key. On Mix, hold **HOME** and press its black key. |
+| make the whole mix pump with the kick | Press **GLO**, turn **SELECT** to Master out and turn **KNOB 4** (pump). **SEL** picks what drives it and how fast it swells back. |
 | solo a track | On Mix, hold its black key. Let go, and the mutes come back. |
 | play a progression | Turn **ALGORITHM** to COND (the conductor). Press **EDIT** and play a chord: it moves the tracks that follow. Press **SEQ** and press a step: the chord goes on it. Set the scale to 4 on the Bar page so a step is a beat. |
 | save | Press **SAVE**. Hold **SAVE** and press white key 1 to 3 to save to that slot. |
@@ -721,7 +724,8 @@ Turn **ALGORITHM** past T8. Each aux track has its own page under **EDIT** and i
 Press **GLO**. The Mix page shows a meter for each track; the black keys pick one, and hold one to solo it.
 Hold **HOME** and press a black key to mute. The knobs are the sends to FX I and FX II, the pan and the
 level. Turn **SELECT** for Master EQ (low, mid, high and a blend from flat to the EQ), Master tape, and
-Master out (the drums' level, the melodic tracks' level, the compressor and the output level). Setup has the lights, MIDI clock and notes out, and one or two cores; its **SEL** list loads
+Master out (the drums' level, the melodic tracks' level, the compressor and the pump; its **SEL** list has
+what the pump follows, its release and accent, and the output level). Setup has the lights, MIDI clock and notes out, and one or two cores; its **SEL** list loads
 a project, starts a new one, and sets the USB audio level, the count-in and the theme (tape deck or blueprint). Status shows the audio load, the
 voices and the second core.
 
@@ -733,7 +737,24 @@ the hiss. Even pushed hard it stays smooth rather than gritty in the highs. With
 of the path, and a new project starts that way: turn it on where a song wants the grit. The tape keeps the
 level about where it was: turning drive or color changes the sound, not how loud it is.
 
-<img src="img/screen-mix.png" width="240" alt="Mix: a meter for each track while playing; knobs fx I, fx II, pan and level" title="The mixer"> <img src="img/screen-sends.png" width="240" alt="FX&#x27;s Sends page: the track&#x27;s sends to FX I (delay) and FX II (reverb plate), its pan and level" title="The sends"> <img src="img/screen-master.png" width="240" alt="Master EQ: low, mid, high and the blend from flat to the EQ" title="Master EQ"> <img src="img/screen-master-tape.png" width="240" alt="Master tape: drive, color, wobble and noise, a sine drawn through the tape" title="Master tape"> <img src="img/screen-status.png" width="240" alt="Status: audio load, peak, voices, the second core, guard trips and dropouts" title="Status">
+**Pump** (Master out's fourth knob) lowers the whole mix each time the kick plays, by up to 24 dB, and lets it
+swell back up: the big-beat breathing of house and French touch. Accented kicks pump harder. It works even with
+comp at 0, and even when the kick is muted, so a silent kick can drive it: write a kick on a track, mute it, and
+the mix breathes to a beat nobody hears. At 0 (a new project's) it is off. Its **SEL** list:
+
+- **pump by**: what drives it. **kick** is any kick of a kit (black key 1, or any key with the kick model);
+  **T1** to **T8** is any note on that track (a bass, a chord, a muted ghost track); **metronome** is the
+  click, on every beat while it sounds.
+- **release**: how fast the mix swells back, 10 ms to 1.5 s (107 ms to start with). Longer releases breathe
+  across the beat; short ones only nick the kick's tail.
+- **accent**: on, a hit pumps by its velocity (a soft one about half as deep as a full one); off, every hit
+  pumps fully.
+- **level**: the output level, the drive into the limiter (100 is unity).
+
+The pump is the whole mix's; a track's own duck LFO (above) still ducks just that track, for a bass that gets
+out of the kick's way while the rest plays on.
+
+<img src="img/screen-mix.png" width="240" alt="Mix: a meter for each track while playing; knobs fx I, fx II, pan and level" title="The mixer"> <img src="img/screen-sends.png" width="240" alt="FX&#x27;s Sends page: the track&#x27;s sends to FX I (delay) and FX II (reverb plate), its pan and level" title="The sends"> <img src="img/screen-master.png" width="240" alt="Master EQ: low, mid, high and the blend from flat to the EQ" title="Master EQ"> <img src="img/screen-master-tape.png" width="240" alt="Master tape: drive, color, wobble and noise, a sine drawn through the tape" title="Master tape"> <img src="img/screen-master-out.png" width="240" alt="Master out: bars for drums, melodic, comp and pump; knobs perc 100, mel 100, comp 30, pump 4.0 dB" title="Master out"> <img src="img/screen-status.png" width="240" alt="Status: audio load, peak, voices, the second core, guard trips and dropouts" title="Status">
 
 ## Saving
 
@@ -780,7 +801,7 @@ On a sound page, hold **SAVE** and press white key 1 to 16 to keep the track's s
 | GLO | Mix | FX I | FX II | pan | level | black: the track, held: solo |
 | GLO, SELECT | Master EQ | low | mid | high | blend | |
 | GLO, SELECT | Master tape | drive | color | wobble | noise | |
-| GLO, SELECT | Master out | perc | mel | comp | level | |
+| GLO, SELECT | Master out | perc | mel | comp | pump | SEL: pump by, release, accent, level |
 | GLO, SELECT | Setup | lights | clock | notes | cores | |
 | GLO, SELECT | Status | | | | | |
 

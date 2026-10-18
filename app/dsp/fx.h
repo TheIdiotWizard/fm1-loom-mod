@@ -60,9 +60,18 @@ int fx_has(const fxslot_t *f, int pick);                    /* the slot can do t
 
 /* ---- master ---- */
 /* the master's knobs, three pages of four: EQ (low, mid, high, blend), tape (TapeScam-lite: drive, color,
- * wobble, noise; all four at 0 = the tape out of the path), out (perc, mel, comp, level) */
+ * wobble, noise; all four at 0 = the tape out of the path), out (perc, mel, comp, pump); then the out page's
+ * list (SEL): what the pump follows, its release, accent, and the level (the drive into the limiter).
+ * PUMP (X0X's master PUMP): every hit of its source lowers the whole mix by up to 24 dB (rising in 12 ms) and
+ * lets it swell back over the release; it is keyed by the sequencer, not by audio, so a muted track drives it
+ * too. pump by: PB_KICK any kick of a kit (its first key, or a key on the kick model), PB_T1.. any note of
+ * track 1..8, PB_METRO the metronome's click. release 0..127: 10 .. 1500 ms (60 = 107 ms, X0X's); accent
+ * 0 / 1: a hit pumps by its velocity (0.5 .. 1 of the depth) or always fully. */
 enum { MS_EQ_LO, MS_EQ_MID, MS_EQ_HI, MS_EQ_BLEND, MS_TP_DRIVE, MS_TP_COLOR, MS_TP_WOBBLE, MS_TP_NOISE,
-       MS_PERC, MS_MEL, MS_COMP, MS_LEVEL, NMS };
+       MS_PERC, MS_MEL, MS_COMP, MS_PUMP, MS_PUMP_BY, MS_PUMP_REL, MS_PUMP_ACC, MS_LEVEL, NMS };
+#define MS_NKNOB 12                   /* the knob pages' (3 x 4); MS_PUMP_BY.. are the out page's list */
+enum { PB_KICK, PB_T1, PB_METRO = PB_T1 + 8, NPB };
+#define MS_PUMP_REL_DEF 60
 extern const char *const MS_NAME[NMS];
 #define MS_TP_COLOR_DEF 0             /* a new project's tape: out of the path (it was 24: a little colour; the demos
                                        * measured it taking 2-9 dB off the top octave and squashing the transients) */
@@ -70,11 +79,17 @@ typedef struct master master_t;
 #define MASTER_BYTES 1280
 #define MST_TAPE_DLY 512              /* the tape's wow / flutter line, floats a side (5 ms + 4.2 ms of swing at 44.1 kHz) */
 void master_init(master_t *m, float *tape_l, float *tape_r);   /* the tape's two lines (the pool), MST_TAPE_DLY each */
-void master_set(master_t *m, int p, int v);                 /* 0..127 (EQ blend 0, the tape's four 0 = neutral) */
+void master_set(master_t *m, int p, int v);                 /* 0..127 (EQ blend 0, the tape's four 0 = neutral;
+                                                             * pump by 0..NPB-1, accent 0..1) */
+int master_max(int p);                                      /* a value's top: 127, NPB - 1 or 1 */
+float master_pump_ms(int v);                                /* the pump's release, ms */
+/* a hit on pump source src (PB_*), velocity 1..127: the pump drops if it follows src (the audio interrupt) */
+void master_key(master_t *m, int src, int vel);
 /* perc and mel: the two groups (stereo, in place), summed with the fx returns (added into mel) */
 void master_process(master_t *m, float *perc_l, float *perc_r, float *mel_l, float *mel_r, float *out_l, float *out_r,
                     uint32_t n);
 float master_gr_db(const master_t *m);                      /* the compressor's gain reduction (UI) */
+float master_pump_db(const master_t *m);                    /* the pump's, now (UI: falls back slowly) */
 #ifdef PLAT_HOST
 extern int fx_host_stage;                                   /* the host's master taps (host.c LOOM_MST) */
 #endif

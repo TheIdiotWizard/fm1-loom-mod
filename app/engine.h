@@ -56,6 +56,7 @@ extern volatile uint8_t eng_voices, eng_voices_max;      /* sounding, and the gu
 extern volatile uint32_t eng_guard_count;
 extern volatile uint8_t eng_saws_max;                    /* brocade's saws at most: the guard's thinning (9 = none) */
 extern volatile uint32_t eng_punch_drum, eng_punch_mel;  /* the FX in effect */
+extern volatile float eng_pump_db;                       /* the master's pump: its duck now, dB (the Master out page) */
 extern volatile uint8_t eng_scene_now, eng_scene_cue;
 #define SCOPE_N 256u
 extern int16_t eng_scope[SCOPE_N];                       /* the last output samples, for the screen */
