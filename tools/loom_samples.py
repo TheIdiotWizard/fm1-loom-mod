@@ -216,7 +216,15 @@ def upload(link, image):
     t0 = time.time()
     total = len(image) - sio.BANK_HDR
     for cmd, args, timeout, what in frames(image):
-        r = link.req(cmd, args, timeout)
+        for tries in range(4):                      # a WRITE again when its answer is lost (the same bytes: the
+            try:                                    # sector's erase, if it starts one, and the page written again)
+                r = link.req(cmd, args, timeout)
+                break
+            except TimeoutError:
+                if cmd != 12 or tries == 3:
+                    raise
+                print(f"\n  (no answer to the write at {what:#x}: sent again)")
+                time.sleep(0.5)
         rc = r[-1] if r else 99
         if rc:
             where = f"write at {what:#x}" if cmd == 12 else what

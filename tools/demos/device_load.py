@@ -251,11 +251,23 @@ def restore(path):
 
 
 def upload_bank(path):
+    """the bank uploaded (the reader told BYE first: its words share the FM-1's way out; a lost reply: again)"""
+    d.sysex(fr.SR + [2])
     disconnect()
-    link = ls.Link()
-    ls.upload(link, Path(path).read_bytes())
-    link.o.close()
-    link.i.close()
+    time.sleep(6.0)
+    for attempt in range(3):
+        link = ls.Link()
+        try:
+            ls.upload(link, Path(path).read_bytes())
+            break
+        except TimeoutError as e:
+            print(f"\n  upload: {e}; again")
+            if attempt == 2:
+                raise
+            time.sleep(3.0)
+        finally:
+            link.o.close()
+            link.i.close()
     connect()
 
 
@@ -360,7 +372,9 @@ def main():
     release_all()
     stop()
     before = DEV / "before.loom8"
-    if not a.no_keep:
+    if not a.no_keep and before.exists():
+        print(f"  ({before} is there from an earlier run: kept, not taken again)")
+    elif not a.no_keep:
         disconnect()
         r = subprocess.run([PY, str(TOOLS / "fm1_backup.py"), "backup", str(before), "--magic", "LM8B"])
         connect()
