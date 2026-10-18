@@ -2842,8 +2842,19 @@ void synth_render_on(synth_t *s, int core, int v0, int v1, float *l, float *r, f
         v1 = NVOICE;
     uint32_t (*clk)(void) = synth_clock;
     volatile uint32_t *prof = synth_prof[core != 0];
-    for (vi = v0; vi < v1; vi++) {
-        voice_t *v = &s->v[vi];
+    int8_t ord[NVOICE];
+    int no = 0, oi;
+    for (vi = v0; vi < v1; vi++) {               /* the voices grouped by engine (each engine's code fetched from
+                                                  * the flash once, then reused from the cache by the next) */
+        int e = s->v[vi].engine, j = no++;
+        while (j > 0 && s->v[ord[j - 1]].engine > e) {
+            ord[j] = ord[j - 1];
+            j--;
+        }
+        ord[j] = (int8_t)vi;
+    }
+    for (oi = 0; oi < no; oi++) {
+        voice_t *v = &s->v[vi = ord[oi]];
         uint32_t i = 0, t0 = 0, tc = 0, tk = 0;
         const int timed = clk && (v_sounding(v) || v->pos == 0);
         if (timed) {
