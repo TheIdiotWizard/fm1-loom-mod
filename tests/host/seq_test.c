@@ -887,6 +887,39 @@ static void t_song(void)
     printf("ok %s\n", cur);
 }
 
+/* a song slot counts bars of 16 sixteenths, whatever track 1's length: a 64-step pattern on track 1 plays two
+ * bars of it under repeats 2, then the next slot (its pattern from the top); a track whose pattern stays goes on */
+static void t_song_bars(void)
+{
+    cur = "song-bars";
+    reset();
+    P.pat[0][0].len = 64;
+    note(0, 0, 60, 100);
+    note(0, 32, 61, 100);             /* bar 3 of track 1's pattern: never reached */
+    P.pat[1][0].len = 64;
+    note(1, 0, 40, 100);
+    note(1, 16, 41, 100);
+    note(1, 32, 42, 100);
+    P.scene[1].used = 1;
+    P.scene[1].pat[0] = 1;
+    P.pat[0][1].st[0].note[0] = 72;
+    P.pat[0][1].st[0].vel = 100;
+    P.song.len = 2;
+    P.song.loop = 1;
+    P.song.slot[0].scene = 0;
+    P.song.slot[0].rep = 2;
+    P.song.slot[1].scene = 1;
+    P.song.slot[1].rep = 1;
+    S.song_on = 1;
+    start();
+    run(49 * L16);
+    CHECK(count(E_ON, 0) == 3 && on_n(0)->a == 60 && on_n(1)->a == 72 && on_n(2)->a == 60);
+    CHECK(near(on_n(1)->t, 32 * L16 + 16, 1) && near(on_n(2)->t, 48 * L16 + 24, 1));
+    CHECK(count(E_ON, 1) == 3 && nth(E_ON, 1, 2)->a == 42 && near(nth(E_ON, 1, 2)->t, 32 * L16 + 16, 1));
+    /* (track 2, the same pattern in both scenes, runs on through the slots: its bar 3 in slot 2) */
+    printf("ok %s\n", cur);
+}
+
 static void t_brain(void)
 {
     uint8_t h[12] = {0};
@@ -1967,6 +2000,7 @@ int main(void)
     t_locks();
     t_scene();
     t_song();
+    t_song_bars();
     t_brain();
     t_arp();
     t_maestro();

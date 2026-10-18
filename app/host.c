@@ -252,7 +252,7 @@ static int expect_more(const char *what, const char *a, const char *b, const cha
  *   lock T PAT S PARAM VALUE     a parameter lock on the step (PARAM / VALUE as knob)
  *   scenedef N P1 .. P10         scene N's pattern for tracks 1-8, COND, THROW (1-based; 0 = pattern 1); used
  *   scenemute N MASK             scene N's mutes: a character a track 1-8, COND, THROW: x muted, . not
- *   song S:R [S:R ...]           the song: scene S (1-based) R times (each time track 1's span)
+ *   song S:R [S:R ...]           the song: scene S (1-based) for R bars (16 sixteenths each)
  *   songloop 0|1
  *   mst NAME VALUE               a master knob (lo mid hi blend drive color wobble noise perc mel comp level)
  *   groove NAME                  the project's groove type (swing lilt weave ...)
@@ -607,8 +607,8 @@ static int song_cmd(const char *cmd)
         pats.song.len = 0;
         for (int i = 1; i < n && pats.song.len < NSONG; i++) {
             int sc = atoi(w[i]) - 1, r = strchr(w[i], ':') ? atoi(strchr(w[i], ':') + 1) : 1;
-            if (sc < 0 || sc >= NSCENE || r < 1 || r > 16)
-                host_die("a song slot is S:R (scene 1..16, 1..16 times)", w[i]);
+            if (sc < 0 || sc >= NSCENE || r < 1 || r > SONG_BARS)
+                host_die("a song slot is S:R (scene 1..16, 1..64 bars)", w[i]);
             pats.song.slot[pats.song.len].scene = (uint8_t)sc;
             pats.song.slot[pats.song.len++].rep = (uint8_t)r;
         }

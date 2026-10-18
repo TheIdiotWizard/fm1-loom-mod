@@ -340,7 +340,7 @@ scenedef 5 2 2 1 2 1 1 1 1
 scenemute 5 ...x..x.
 scenedef 6 1 1 1 1 1 1 1 1
 scenemute 6 xx..xxxx
-song 1:2 2:8 3:1 4:8 5:4 6:2
+song 1:2 2:8 3:2 4:8 5:4 6:2
 songloop 0
 
 # ---- play the song (HOME, SELECT to the Song page, PLAY), and perform

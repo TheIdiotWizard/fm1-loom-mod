@@ -279,6 +279,8 @@ static void patterns_clamp(void)
             pats.song.slot[k].scene = 0;
         if (pats.song.slot[k].rep < 1)
             pats.song.slot[k].rep = 1;
+        if (pats.song.slot[k].rep > SONG_BARS)
+            pats.song.slot[k].rep = SONG_BARS;
     }
 }
 

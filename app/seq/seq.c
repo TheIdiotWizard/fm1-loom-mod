@@ -2111,22 +2111,25 @@ static void six_tick(seq_t *s, const seq_sink_t *o)
     }
     if (s->bar_six >= s->bar_len)
         s->bar_six = 0;
-    if (s->bar_six == 0 && !s->bar_fresh) {   /* the bar: cues, the song, the brain's detection */
-        uint32_t ch = bar_end(s, 0, o);
-        brain_bar(s);
-        if (ch)
-            restart(s, ch);
-    } else if (s->step_tick && !(s->step_tick & 15u)) {   /* a bar line (16 sixteenths) inside a longer pattern:
-                                                          * the patterns cued per track switch here, not later */
+    {
+        int top = s->bar_six == 0 && !s->bar_fresh;           /* track 1's span came round */
+        int line = s->step_tick && !(s->step_tick & 15u);     /* a bar line (16 sixteenths) */
         uint32_t ch = 0;
-        for (int t = 0; t < NSEQT; t++)
-            if (s->pcue[t] < NPATT) {
-                if (s->pcue[t] != s->ppat[t]) {
-                    s->ppat[t] = s->pcue[t];
-                    ch |= 1u << t;
+        if (song_plays(s) ? line && !s->bar_fresh : top)      /* the bar: cues, the song (its slots count bars
+                                                               * of 16 sixteenths, whatever track 1's length) */
+            ch = bar_end(s, 0, o);
+        else if (line)                /* a bar line inside a longer pattern: the patterns cued per track switch
+                                       * here, not later */
+            for (int t = 0; t < NSEQT; t++)
+                if (s->pcue[t] < NPATT) {
+                    if (s->pcue[t] != s->ppat[t]) {
+                        s->ppat[t] = s->pcue[t];
+                        ch |= 1u << t;
+                    }
+                    s->pcue[t] = 0xFF;
                 }
-                s->pcue[t] = 0xFF;
-            }
+        if (top)                      /* the brain's detection: track 1's span */
+            brain_bar(s);
         if (ch)
             restart(s, ch);
     }

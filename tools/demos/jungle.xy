@@ -354,7 +354,7 @@ scenedef 5 3 1 2 1 1 3 2 1
 scenemute 5 ...x...x
 scenedef 6 1 2 1 1 1 1 1 1
 scenemute 6 .xx.xx.x
-song 1:8 2:1 3:8 4:4 5:8 6:4
+song 1:8 2:4 3:8 4:4 5:8 6:4
 songloop 0
 
 # ---- play the song (HOME, SELECT to the Song page, PLAY) and perform: the intro's filter by hand, the throws

@@ -89,7 +89,7 @@ knob on it; press **ARP** on T2 and turn **KNOB 1** to arp; press **GLO**, turn 
   white keys while you hold HOME and a step.
 - **Lock**: a knob value a step sets as it plays.
 - **Scene** (S1 to S16): which pattern each track plays, plus the mutes and the conductor's key.
-- **Song**: a chain of scenes, each played a number of times.
+- **Song**: a chain of scenes, each played for a number of bars.
 - **Engine**: the way a track makes its sound. Eight synths and the kit, a drum synth.
 - **Preset**: a sound to load. 64 come with LOOM-8, and 16 are yours.
 - **Player**: what the keys do on a track: arp, strum or hold.
@@ -646,14 +646,15 @@ becomes a copy of the scene playing. Hold a white key for a second to clear that
 mute: 1 to 8 the tracks, 9 and 10 the conductor and the throws. Hold **HOME** and turn **PRESETS** to change scenes
 from any page.
 
-<img src="img/screen-song.png" width="240" alt="The Song page: S1, S1 and S2 in a row, looping" title="The song">
+<img src="img/screen-song.png" width="240" alt="The Song page: S1, S1 and S2 in a row, a bar each, looping" title="The song">
 
 **KNOB 1** is the tempo (hold **HOME** for tenths), **KNOB 2** the groove type (swing, lilt, weave,
 stretch, drunk, jitter, accent, lazy, push pull, sway, swell), **KNOB 3** the
 selected track's groove amount from −99 to 99, and **KNOB 4** the click: off, while recording, or on.
 
 Turn **SELECT** for the Song page. Press a white key to add that scene at the cursor. **KNOB 1** moves the
-cursor, **KNOB 2** changes the slot's scene, **KNOB 3** how many times it plays, and **KNOB 4** whether the
+cursor, **KNOB 2** changes the slot's scene, **KNOB 3** how many bars it plays (1 to 64; a bar is 16
+sixteenths, whatever the patterns' lengths, so a 64-step pattern takes four), and **KNOB 4** whether the
 song loops or stops at the end. **PLAY** on the Song page plays the song from slot 1. **SEL** inserts the
 scene playing, deletes a slot or clears the song.
 
@@ -755,7 +756,7 @@ On a sound page, hold **SAVE** and press white key 1 to 16 to keep the track's s
 | Button | Page | KNOB 1 | KNOB 2 | KNOB 3 | KNOB 4 | Keys |
 | --- | --- | --- | --- | --- | --- | --- |
 | HOME | Arrange | tempo | groove | amount | click | white: scenes, black: mutes |
-| HOME, SELECT | Song | slot | scene | repeat | at end | white: add a scene |
+| HOME, SELECT | Song | slot | scene | bars | at end | white: add a scene |
 | SEQ | Steps | pattern | length | scale | groove | white: steps, black: sound (drums); SEQ held: a keyboard |
 | SEQ, a step held | Steps | velocity | length | chance | nudge | white: length, black: sounds |
 | SEQ, HOME + a step | Steps | the tricks and values shown | | | | white: trick, black: value |

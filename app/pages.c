@@ -887,10 +887,10 @@ static void page_knobs(knob_t *k)
         kn(&k[0], "SLOT", cur + 1, NSONG);
         if (cur < sg->len) {
             kn(&k[1], "SCENE", sg->slot[cur].scene + 1, NSCENE);
-            kn(&k[2], "REPEAT", sg->slot[cur].rep, 16);
+            kn(&k[2], "BARS", sg->slot[cur].rep, SONG_BARS);
         } else {
             kv(&k[1], "SCENE", "-", 0, 0);
-            kv(&k[2], "REPEAT", "-", 0, 0);
+            kv(&k[2], "BARS", "-", 0, 0);
         }
         kv(&k[3], "AT END", sg->loop ? "loop" : "stop", 0, 0);
         break;
@@ -1899,7 +1899,7 @@ static void draw_song(void)
         }
         num_s((uint32_t)sg->slot[i].scene + 1u, s_cat(t, "S"));
         cv_text(x + 6, y + 3, &FONT_B, t, on ? K_BG : K_TEXT);
-        num_s((uint32_t)sg->slot[i].rep, s_cat(t, "x"));
+        num_s((uint32_t)sg->slot[i].rep, t);         /* its bars (the BARS knob names them) */
         text_r(x + 47, y + 4, &FONT_XS, t, on ? K_BG : K_DIM);
     }
     if (sg->len >= 16) {
