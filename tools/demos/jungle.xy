@@ -2,8 +2,8 @@
 # and think breaks, is build/demos/jungle.bin: private, never committed.)
 #   T1 slice "chop": the amen, one bar in 16 slices, mono; re-cut per section, rolls by multiply, its pitch turned up
 #      by hand through the build
-#   T2 stack "rope sub": the sub          T3 stack "ply bass" made a reese: detuned, legato, the filter on an LFO
-#   T4 wavetable "gauze choir": the pad   T5 stack "braid stab": dub stabs into the delay
+#   T2 stack "rope sub": the sub          T3 brocade "chenille" as the reese: nine saws, legato, the filter on an LFO
+#   T4 voile "voile choir": the pad       T5 stack "braid stab": dub stabs into the delay
 #   T6 slice "chop": the think break      T7 weft "thread lead" as a dub siren (a square LFO on the pitch)
 # Song: intro 8 bars (the amen through a closed filter, opened by hand), build 4, drop A 8 (a stutter throw at
 # its end), the change 4 (the think break, the sub alone, stabs), drop B 8, outro 4 (echo throw, then stop).
@@ -29,11 +29,9 @@ preset 2 rope_sub stack
 knob 2 brain no
 knob 2 level 71
 
-preset 3 ply_bass stack
+preset 3 chenille brocade
 knob 3 brain no
-knob 3 e2 1
-knob 3 e3 70
-knob 3 e4 50
+knob 3 e4 110
 knob 3 vmode legato
 knob 3 porta 40
 knob 3 cut 58
@@ -45,10 +43,9 @@ knob 3 lamt 92
 knob 3 ldest filter
 knob 3 lx 0
 knob 3 lx2 sine
-knob 3 camt 75
-knob 3 level 40
+knob 3 level 62
 
-preset 4 gauze_choir wavetable
+preset 4 voile_choir voile
 knob 4 brain no
 knob 4 level 50
 knob 4 send2 70

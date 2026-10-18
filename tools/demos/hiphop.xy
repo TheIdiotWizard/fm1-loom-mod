@@ -6,6 +6,7 @@
 #   T3 tines "felt bass": the bass       T4 tines "soft felt": the Rhodes, its tremolo on, chords held
 #   T5 sample: the horn stab (user 2, a Bb7, its root Bb3), moved to each chord's root on the hook
 #   T6 sample: the factory "ah" scratched: short notes with the bend trick, the portamento trick
+#   T7 cane "bamboo": the hook's flute (Braids' flute model, its vibrato)
 # Master tape: drive, color, wobble and hiss for the dust. Song: intro 2, verse 8, hook 4, verse 2 4, hook 4,
 # outro 2 (the break filtered out).
 master 4096
@@ -85,6 +86,11 @@ knob 6 ctype crush
 knob 6 camt 40
 knob 6 brain no
 knob 6 level 57
+
+preset 7 bamboo cane
+knob 7 brain no
+knob 7 level 56
+knob 7 send2 45
 
 knob 12 engine room
 mst drive 50
@@ -229,17 +235,36 @@ trick 6 1 30 porta 3
 notes 6 1 31 1 110 E4
 trick 6 1 31 bend 2
 
-# ---- scenes: T1 T2 T3 T4 T5 T6
+# ---- T7 cane's "bamboo": the hook's flute, lazy, on the swing
+pat 7 1 64 1 100 35
+notes 7 1 1 6 100 G5
+notes 7 1 7 2 85 F5
+notes 7 1 9 4 95 Eb5
+notes 7 1 13 4 90 D5
+notes 7 1 17 6 100 C5
+notes 7 1 23 2 85 Eb5
+notes 7 1 25 4 95 F5
+notes 7 1 29 4 95 Ab5
+notes 7 1 33 6 100 G5
+notes 7 1 39 2 85 F5
+notes 7 1 41 4 95 D5
+notes 7 1 45 4 90 Bb4
+notes 7 1 49 8 100 D5
+notes 7 1 57 2 85 Eb5
+notes 7 1 59 2 90 F5
+notes 7 1 61 4 100 G5
+
+# ---- scenes: T1 T2 T3 T4 T5 T6 T7
 scenedef 1 1 1 1 1 1 1 1 1
 scenemute 1 .xx.xxxx
 scenedef 2 1 1 1 1 1 1 1 1
 scenemute 2 ....xxxx
 scenedef 3 3 2 1 1 1 1 1 1
-scenemute 3 ......xx
+scenemute 3 .......x
 scenedef 4 2 2 1 1 2 1 1 1
 scenemute 4 .....xxx
 scenedef 5 3 2 1 1 1 1 1 1
-scenemute 5 ......xx
+scenemute 5 .......x
 scenedef 6 1 1 1 1 1 1 1 1
 scenemute 6 .xx.xxxx
 song 1:2 2:8 3:4 4:4 5:4 6:2

@@ -3,7 +3,8 @@
 #   T1 kit: the 2-step (the kick on 1 and the "and" of 3, clap and snare on 2 and 4, shuffled hats and shaker)
 #   T2 weft "denim bass": the bouncing bass, glides by the portamento trick
 #   T3 organ "reed combo": the stabs     T4 slice: the sung bar in 16, re-cut and pitch-locked (the chops)
-#   T5 slice: the sesame break, high-passed, as a top loop   T6 wavetable "silk pad"
+#   T5 slice: the sesame break, high-passed, as a top loop   T6 voile "voile choir": the pad, sung
+#   T7 voile "doo wop": a vocal answer at the end of each bar in the hooks and the breakdown
 # The groove: swing, every pattern at 50. Song: intro 4 (pad, the voice through a closed filter, hats), groove 8,
 # hook 8 (the voice whole), breakdown 4 (the chops, the sub held), hook 2 8 (chops pitched, the kit busier),
 # outro 2 (an echo throw on the voice).
@@ -61,10 +62,18 @@ knob 5 cut 84
 knob 5 brain no
 knob 5 level 107
 
-preset 6 silk_pad wavetable
+preset 6 voile_choir voile
 knob 6 brain no
 knob 6 level 76
 knob 6 send2 60
+
+preset 7 doo_wop voile
+knob 7 brain no
+knob 7 ftype hp12
+knob 7 cut 36
+knob 7 level 100
+knob 7 send1 55
+knob 7 send2 40
 
 # FX I a 3/16 delay (dotted eighth), FX II studio L
 knob 11 engine delay
@@ -234,12 +243,30 @@ notes 5 1 14 0 110 66
 notes 5 1 15 0 110 67
 notes 5 1 16 0 110 68
 
-# ---- T6 the pad
+# ---- T6 the pad (the choir)
 pat 6 1 64
 notes 6 1 1 16 80 C3 G3 Bb3 D4
 notes 6 1 17 16 80 Ab2 Eb3 G3 C4
 notes 6 1 33 16 80 F2 C3 Eb3 Ab3
 notes 6 1 49 16 80 G2 D3 F3 B3
+
+# ---- T7 voile's "doo wop": the answer at the end of each bar, swung with the rest
+pat 7 1 64 1 50 50
+notes 7 1 10 1 100 G4
+notes 7 1 11 1 90 Bb4
+notes 7 1 13 3 105 C5
+notes 7 1 26 1 100 C5
+notes 7 1 27 1 90 Bb4
+notes 7 1 29 3 105 G4
+notes 7 1 42 1 100 Ab4
+notes 7 1 43 1 90 G4
+notes 7 1 45 3 105 F4
+notes 7 1 58 1 100 F4
+notes 7 1 59 1 90 D4
+notes 7 1 61 3 105 G4
+chance 7 1 26 1:2
+chance 7 1 27 1:2
+chance 7 1 29 1:2
 
 # ---- scenes and the song
 scenedef 1 3 1 1 1 1 1 1 1
@@ -247,11 +274,11 @@ scenemute 1 .xx.x.xx
 scenedef 2 1 1 1 1 1 1 1 1
 scenemute 2 ...x.xxx
 scenedef 3 1 1 1 1 1 1 1 1
-scenemute 3 .....xxx
+scenemute 3 .....x.x
 scenedef 4 3 2 1 2 1 1 1 1
-scenemute 4 ..x.x.xx
+scenemute 4 ..x.x..x
 scenedef 5 2 1 1 2 1 1 1 1
-scenemute 5 .....xxx
+scenemute 5 .....x.x
 scenedef 6 3 1 1 1 1 1 1 1
 scenemute 6 .xx.x.xx
 song 1:4 2:8 3:8 4:4 5:8 6:2

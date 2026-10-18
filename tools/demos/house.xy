@@ -2,8 +2,8 @@
 # its bank is build/demos/house.bin: the sesame break and a sung "hey", private.)
 #   T1 kit: a long kick on every beat, clap, the open hat on the offbeats, shaker, conga; a little swing
 #   T2 tines "felt bass": the bass, ducked by the kick (pump)       T3 tines "felt piano": minor-ninth stabs, delayed
-#   T4 swarm "fleece pad": the pad, pumped by the kick               T5 slice: the sesame break, high-passed, the top
-#   T6 sample: "hey" (user 2) through the delay
+#   T4 brocade "damask" (six saws): the pad, pumped by the kick    T5 slice: the sesame break, high-passed, the top
+#   T6 sample: "hey" (user 2) through the delay                     T7 cane "hand drum": a tuned drum, groove and main
 # The bass, the stabs and the pad are written once, on Am; the conductor (COND, a step a bar) moves them through
 # Am - F - Dm - Em diatonically. Song: intro 4, groove 8, breakdown 4 (no kick), main 8, outro 4.
 master 4096
@@ -44,12 +44,14 @@ knob 3 send1 60
 knob 3 send2 40
 knob 3 cut 92
 
-preset 4 fleece_pad swarm
+preset 4 damask brocade
+knob 4 e1 6
+knob 4 cut 86
 knob 4 brain diatonic
 knob 4 ltype pump
 knob 4 lspeed track_1
 knob 4 lamt 100
-knob 4 level 54
+knob 4 level 64
 knob 4 send2 50
 
 knob 5 engine slice
@@ -72,6 +74,13 @@ knob 6 brain no
 knob 6 level 104
 knob 6 send1 90
 knob 6 send2 60
+
+preset 7 hand_drum cane
+knob 7 brain no
+knob 7 e3 64
+knob 7 pan 88
+knob 7 level 62
+knob 7 send2 30
 
 knob 11 engine delay
 knob 11 e1 85
@@ -153,6 +162,17 @@ notes 6 1 47 1 90 A3
 notes 6 1 63 0.5 80 A4
 chance 6 1 63 1:2
 
+# ---- T7 cane's "hand drum": a tuned drum answering the conga, off the conductor (brain no)
+pat 7 1 16 1 60 20
+notes 7 1 3 1 70 A4
+notes 7 1 6 1 95 E4
+notes 7 1 8 1 60 A4
+notes 7 1 11 1 100 A3
+notes 7 1 14 1 85 E4
+notes 7 1 16 1 60 A4
+chance 7 1 8 60
+chance 7 1 16 1:2
+
 # ---- the conductor: a step a bar, Am | F | Dm | Em (the chord's root against A4: F4 two degrees down, D5 and
 # E5 three and four up)
 pat 9 1 4 16
@@ -165,11 +185,11 @@ notes 9 1 4 1 100 E5
 scenedef 1 1 1 1 1 1 1 1 1 1
 scenemute 1 .xxx.xxx
 scenedef 2 2 1 1 1 1 1 1 1 1
-scenemute 2 ...x.xxx
+scenemute 2 ...x.x.x
 scenedef 3 3 2 1 1 1 1 1 1 1
 scenemute 3 .x..x.xx
 scenedef 4 2 1 1 1 1 1 1 1 1
-scenemute 4 ......xx
+scenemute 4 .......x
 scenedef 5 1 1 1 1 1 1 1 1 1
 scenemute 5 .x.x.xxx
 song 1:4 2:8 3:4 4:8 5:4

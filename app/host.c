@@ -376,8 +376,9 @@ static step_t *step_or_die(tpat_t *tp, const char *s)
 
 /* the peaks, every simulated millisecond: the voices, and the load the FM-1's Status page would show by a model
  * of its measurements (the user's: idle ~13 %, a synth voice ~3.5 %, a kit playing ~+27 % over idle, the master
- * tape ~+12 %). The second core renders voices [0, k) (engine.c split_at), the first the rest, the kits, the FX,
- * the tape and the mix, then waits for the second: the load is the longer of the two */
+ * tape ~+12 %). A voice counts by its cost (synth_voice_cost, 4 an ordinary one: brocade's by its saws, up to
+ * twice, cane's bell twice). The second core renders voices [0, k) (engine.c split_at), the first the rest, the
+ * kits, the FX, the tape and the mix, then waits for the second: the load is the longer of the two */
 static uint32_t st_ms, st_syn, st_drum, st_guard0, st_hi_ms;
 static float st_load, st_load_sum;
 #define LOAD_IDLE 13.0f
@@ -386,22 +387,24 @@ static float st_load, st_load_sum;
 #define LOAD_TAPE 12.0f
 static float load_model(int *nsyn, int *ndrum)
 {
-    int k = (int)split_at(), v0 = 0, v1 = 0, t, kits = 0;
+    int k = (int)split_at(), v0 = 0, v1 = 0, n = 0, t, kits = 0;
     float c0, c1;
     *ndrum = 0;
     for (int i = 0; i < NVOICE; i++)
-        if (synth_sounding(SY, i, i + 1))
-            *(i < k ? &v1 : &v0) += 1;
+        if (synth_sounding(SY, i, i + 1)) {
+            *(i < k ? &v1 : &v0) += synth_voice_cost(SY, i);
+            n++;
+        }
     for (t = 0; t < NTRK; t++)
         if (eng_drum[t] && dl_slot[t] != 0xFFu && drumline_sounding(DL(t))) {
             kits++;
             *ndrum += drumline_voices(DL(t));
         }
-    *nsyn = v0 + v1;
-    c0 = LOAD_IDLE + LOAD_VOICE * (float)v0 + LOAD_KIT * (float)kits;
+    *nsyn = n;
+    c0 = LOAD_IDLE + LOAD_VOICE * 0.25f * (float)v0 + LOAD_KIT * (float)kits;
     if (proj.master[MS_TP_DRIVE] || proj.master[MS_TP_COLOR] || proj.master[MS_TP_WOBBLE] || proj.master[MS_TP_NOISE])
         c0 += LOAD_TAPE;
-    c1 = LOAD_VOICE * (float)v1 + 2.0f;            /* (its own buffers, zeroed and summed) */
+    c1 = LOAD_VOICE * 0.25f * (float)v1 + 2.0f;            /* (its own buffers, zeroed and summed) */
     return c0 > c1 ? c0 : c1;
 }
 void app_host_ms(void)

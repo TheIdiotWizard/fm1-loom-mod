@@ -5,6 +5,7 @@
 #   the chorus     T3 tines "felt piano": the chords (whole notes, then eighths)     T4 slice: the hook in 16
 #   T5 sample: "oh" (user 2, its root C5) played as a vocal-chop lead, the post-chorus drop
 #   T6 wavetable "lace keys" through the arp (1/8, bounce, two octaves, latched), the chord held by hand each bar
+#   T7 brocade "damask": the chorus's supersaw bed, pumped    T8 voile "doo wop": sings the drop's riff with T5
 # Song: intro 2, verse 8, pre 2 (the build), chorus 8, drop 4 (the chop lead), outro 2.
 master 4096
 samples build/demos/pop.bin
@@ -72,6 +73,24 @@ knob 6 ap4 narrow
 knob 6 level 62
 knob 6 send1 50
 
+preset 7 damask brocade
+knob 7 e1 5
+knob 7 r 62
+knob 7 brain no
+knob 7 ltype pump
+knob 7 lspeed track_1
+knob 7 lamt 70
+knob 7 level 60
+knob 7 send2 50
+
+preset 8 doo_wop voile
+knob 8 brain no
+knob 8 ftype hp12
+knob 8 cut 36
+knob 8 level 104
+knob 8 send1 40
+knob 8 send2 40
+
 knob 11 engine delay
 knob 11 e1 80
 knob 11 e3 60
@@ -80,7 +99,7 @@ mst color 30
 mst comp 40
 mst level 78
 mst blend 127
-mst hi 80
+mst hi 88
 
 # ---- T1 the kit: kick 1, hat 3, open 4, clap 5, tom 6/7
 # P1 verse: light
@@ -162,38 +181,38 @@ notes 3 1 17 16 90 B3 D4 G4 B4
 notes 3 1 33 16 90 C4 E4 A4 C5
 notes 3 1 49 16 90 C4 F4 A4 C5
 pat 3 2 64 1 40
-notes 3 2 1 1 100 C4 E4 G4 C5
-notes 3 2 3 1 80 C4 E4 G4 C5
-notes 3 2 5 1 90 C4 E4 G4 C5
-notes 3 2 7 1 80 C4 E4 G4 C5
-notes 3 2 9 1 95 C4 E4 G4 C5
-notes 3 2 11 1 80 C4 E4 G4 C5
-notes 3 2 13 1 90 C4 E4 G4 C5
-notes 3 2 15 1 80 C4 E4 G4 C5
-notes 3 2 17 1 100 B3 D4 G4 B4
-notes 3 2 19 1 80 B3 D4 G4 B4
-notes 3 2 21 1 90 B3 D4 G4 B4
-notes 3 2 23 1 80 B3 D4 G4 B4
-notes 3 2 25 1 95 B3 D4 G4 B4
-notes 3 2 27 1 80 B3 D4 G4 B4
-notes 3 2 29 1 90 B3 D4 G4 B4
-notes 3 2 31 1 80 B3 D4 G4 B4
-notes 3 2 33 1 100 C4 E4 A4 C5
-notes 3 2 35 1 80 C4 E4 A4 C5
-notes 3 2 37 1 90 C4 E4 A4 C5
-notes 3 2 39 1 80 C4 E4 A4 C5
-notes 3 2 41 1 95 C4 E4 A4 C5
-notes 3 2 43 1 80 C4 E4 A4 C5
-notes 3 2 45 1 90 C4 E4 A4 C5
-notes 3 2 47 1 80 C4 E4 A4 C5
-notes 3 2 49 1 100 C4 F4 A4 C5
-notes 3 2 51 1 80 C4 F4 A4 C5
-notes 3 2 53 1 90 C4 F4 A4 C5
-notes 3 2 55 1 80 C4 F4 A4 C5
-notes 3 2 57 1 95 C4 F4 A4 C5
-notes 3 2 59 1 80 C4 F4 A4 C5
-notes 3 2 61 1 90 B3 D4 G4 B4
-notes 3 2 63 1 80 B3 D4 G4 B4
+notes 3 2 1 1 100 E4 G4 C5
+notes 3 2 3 1 80 E4 G4 C5
+notes 3 2 5 1 90 E4 G4 C5
+notes 3 2 7 1 80 E4 G4 C5
+notes 3 2 9 1 95 E4 G4 C5
+notes 3 2 11 1 80 E4 G4 C5
+notes 3 2 13 1 90 E4 G4 C5
+notes 3 2 15 1 80 E4 G4 C5
+notes 3 2 17 1 100 D4 G4 B4
+notes 3 2 19 1 80 D4 G4 B4
+notes 3 2 21 1 90 D4 G4 B4
+notes 3 2 23 1 80 D4 G4 B4
+notes 3 2 25 1 95 D4 G4 B4
+notes 3 2 27 1 80 D4 G4 B4
+notes 3 2 29 1 90 D4 G4 B4
+notes 3 2 31 1 80 D4 G4 B4
+notes 3 2 33 1 100 E4 A4 C5
+notes 3 2 35 1 80 E4 A4 C5
+notes 3 2 37 1 90 E4 A4 C5
+notes 3 2 39 1 80 E4 A4 C5
+notes 3 2 41 1 95 E4 A4 C5
+notes 3 2 43 1 80 E4 A4 C5
+notes 3 2 45 1 90 E4 A4 C5
+notes 3 2 47 1 80 E4 A4 C5
+notes 3 2 49 1 100 F4 A4 C5
+notes 3 2 51 1 80 F4 A4 C5
+notes 3 2 53 1 90 F4 A4 C5
+notes 3 2 55 1 80 F4 A4 C5
+notes 3 2 57 1 95 F4 A4 C5
+notes 3 2 59 1 80 F4 A4 C5
+notes 3 2 61 1 90 D4 G4 B4
+notes 3 2 63 1 80 D4 G4 B4
 
 # ---- T4 the hook: P1 as sung, every bar; P2 the verse's: only its first half, every other bar
 pat 4 1 16 1 100
@@ -262,7 +281,53 @@ trick 5 1 23 porta 3
 trick 5 1 39 porta 3
 trick 5 1 55 bend 2
 
-# ---- scenes: T1 T2 T3 T4 T5 T6
+# ---- T7 brocade's "damask": the chorus's supersaw bed, held, three notes a chord, pumped by the kick
+pat 7 1 64
+notes 7 1 1 16 85 E4 G4 C5
+notes 7 1 17 16 85 D4 G4 B4
+notes 7 1 33 16 85 E4 A4 C5
+notes 7 1 49 16 85 F4 A4 C5
+
+# ---- T8 voile's "doo wop" singing the drop's riff with the chop lead (a consonant at each note)
+pat 8 1 64 1 50
+notes 8 1 1 0.5 110 E5
+notes 8 1 3 0.5 90 G5
+notes 8 1 4 0.5 100 C6
+notes 8 1 6 0.5 90 G5
+notes 8 1 7 1 105 E5
+notes 8 1 9 0.5 90 D5
+notes 8 1 11 0.5 100 E5
+notes 8 1 12 0.5 90 G5
+notes 8 1 17 0.5 110 D5
+notes 8 1 19 0.5 90 G5
+notes 8 1 20 0.5 100 B5
+notes 8 1 22 0.5 90 G5
+notes 8 1 23 1 105 D5
+notes 8 1 25 0.5 90 B4
+notes 8 1 27 0.5 100 D5
+notes 8 1 28 0.5 90 G5
+notes 8 1 33 0.5 110 E5
+notes 8 1 35 0.5 90 A5
+notes 8 1 36 0.5 100 C6
+notes 8 1 38 0.5 90 A5
+notes 8 1 39 1 105 E5
+notes 8 1 41 0.5 90 C5
+notes 8 1 43 0.5 100 E5
+notes 8 1 44 0.5 90 A5
+notes 8 1 49 0.5 110 F5
+notes 8 1 51 0.5 90 A5
+notes 8 1 52 0.5 100 C6
+notes 8 1 54 0.5 90 A5
+notes 8 1 55 1 105 G5
+notes 8 1 57 0.5 90 F5
+notes 8 1 59 0.5 100 E5
+notes 8 1 60 0.5 90 D5
+trick 8 1 7 porta 3
+trick 8 1 23 porta 3
+trick 8 1 39 porta 3
+trick 8 1 55 bend 2
+
+# ---- scenes: T1 T2 T3 T4 T5 T6 T7 T8
 scenedef 1 1 1 1 1 1 1 1 1
 scenemute 1 xx..xxxx
 scenedef 2 1 1 1 2 1 1 1 1
@@ -270,9 +335,9 @@ scenemute 2 ....xxxx
 scenedef 3 3 1 2 2 1 1 1 1
 scenemute 3 .x..xxxx
 scenedef 4 2 2 2 1 1 1 1 1
-scenemute 4 ....x.xx
+scenemute 4 ....x..x
 scenedef 5 2 2 1 2 1 1 1 1
-scenemute 5 ...x..xx
+scenemute 5 ...x..x.
 scenedef 6 1 1 1 1 1 1 1 1
 scenemute 6 xx..xxxx
 song 1:2 2:8 3:1 4:8 5:4 6:2
@@ -307,6 +372,7 @@ knob 4 e3 72
 bars 0.375
 knob 4 e3 64
 knob 3 cut 110
+knob 3 r 44
 bars 0.125
 # chorus 8: the arp on T6, a chord held each bar
 play 6 C4 on 100
@@ -368,7 +434,8 @@ bars 0.75
 throw stutter on mel 4
 bars 0.25
 throw stutter off mel 4
-# drop 4: the chop lead; the arp let go
+# drop 4: the chop lead; the arp let go, the piano's tails long again
+knob 3 r 66
 knob 6 p4 0
 play 6 C4 on 1
 play 6 C4 off
