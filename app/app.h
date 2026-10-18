@@ -143,7 +143,9 @@ typedef struct {
     uint8_t send_clock, send_notes, one_core, usb_full;
     uint8_t scene;                      /* the scene to start on */
     uint8_t trk_sel;                    /* the track selected */
-    uint8_t rsv[10];                    /* (format 4 had 14: its last four are master[0..3] now) */
+    uint8_t rsv[10];                    /* (format 4 had 14: its last four are master[0..3] now); rsv[0] the count-in,
+                                         * [1] the theme, [2] REC's mode and SCENES SWITCH, [4..7] the save count
+                                         * (project.c: the slot saved or loaded last opens at power-on) */
     uint8_t master[NMS];                /* fx.h MS_*: format 4's twelve end where these sixteen end */
     trk_t trk[NALLTRK];
 } settings_t;
@@ -168,6 +170,8 @@ int project_load(int slot);             /* 0 = loaded; else defaults are in plac
 int project_save(int slot);             /* 0 = saved and verified; -1 = full / failed */
 void project_apply(void);               /* every value to the engine (boot, load) */
 int project_exists(int slot);
+int project_last_slot(void);            /* the slot saved or loaded last (0 when none holds a project) */
+int project_touch(int slot);            /* the loaded slot the last: its settings saved again, its count the next */
 void project_name_of(int slot, char *name);   /* "" if empty */
 int presets_load(void);
 int presets_save(void);

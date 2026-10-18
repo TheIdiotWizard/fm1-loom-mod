@@ -69,7 +69,7 @@ void app_init(void)
 #endif
     }
     smp_user_scan();                                /* (an empty or torn bank: no user samples) */
-    project_load(0);                                /* defaults when nothing (or another format) is saved */
+    project_load(project_last_slot());              /* the slot used last; defaults when nothing (or another format) is saved */
     presets_load();
     engine_init(&pats, proj_par);
     project_apply();

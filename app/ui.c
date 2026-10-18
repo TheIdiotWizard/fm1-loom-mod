@@ -846,6 +846,25 @@ static void track_select(int t)
     if (ui.dsound >= DL_NSOUND)
         ui.dsound = 0;
 }
+/* ALGORITHM (and PRESETS on Mix) through the tracks the page has: Mix its strips (T1-T8, FX I, FX II), every other
+ * page the tracks that play (T1-T8, the conductor, the throws) */
+static void track_step(int e)
+{
+    static const uint8_t MIXT[10] = {0, 1, 2, 3, 4, 5, 6, 7, AUX_FX1, AUX_FX2};
+    static const uint8_t SEQT[10] = {0, 1, 2, 3, 4, 5, 6, 7, AUX_BRAIN, AUX_PUNCH};
+    const uint8_t *L = ui.page == P_MIX ? MIXT : SEQT;
+    int cur = sel_trk(), i, d = e > 0 ? 1 : -1, n = e > 0 ? e : -e;
+    for (i = 0; i < 10 && L[i] != cur; i++)
+        ;
+    if (i == 10) {                               /* (not in the list: from where it would sit) */
+        for (i = 0; i < 10 && L[i] < cur; i++)
+            ;
+        if (d > 0)
+            n--;
+    }
+    i = ((i + d * n) % 10 + 10) % 10;
+    track_select(L[i]);
+}
 static void solo_begin(int trk)
 {
     ui.solo = (uint8_t)(trk + 1);
@@ -1118,6 +1137,8 @@ static int save_project(int slot);
 static void save_user_preset(int slot);
 static void page_button(int b)
 {
+    if (b != B_GLO && is_fx(sel_trk()))          /* (FX I and FX II are Mix's strips: elsewhere the instrument again) */
+        track_select(ui.last_inst);
     for (uint32_t i = 0; i < NPAGE_BTN; i++)
         if (PAGE_BTN[i].btn == b) {
             if (is_aux(sel_trk()) && (b == B_ENV || b == B_LFO || b == B_ARP)) {
@@ -1512,7 +1533,7 @@ static void presets(int32_t e)
             pattern_pick(trk, cur_pat(trk) + d);
         break;
     case P_MIX:
-        track_select(trk + d);
+        track_step(d);
         break;
     case P_FX1: case P_FX2:
         fx_pick(ui.page == P_FX1 ? AUX_FX1 : AUX_FX2, d);
@@ -1948,6 +1969,7 @@ static void do_load_proj(void)
     else {
         num_s((uint32_t)slot + 1u, s_cat(t, "slot "));
         say("LOADED", t);
+        project_touch(slot);                     /* (the slot loaded last opens at power-on) */
     }
     proj_slot = (uint8_t)slot;
     after_load();
@@ -2259,7 +2281,7 @@ static void input(void)
         if (lst.open)
             list_change(e);
         else
-            track_select(sel_trk() + (int)e);
+            track_step((int)e);
     }
     if ((e = ev[EN_PRESET]) != 0) {
         if (home_held())

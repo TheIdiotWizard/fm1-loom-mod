@@ -1,0 +1,43 @@
+# power-on opens the project saved or loaded last (the save count in its settings: project.c)
+wait 300
+# slot 2 at 90 BPM (SAVE TO), a restart opens it
+tap HOME
+spin K1 -30
+wait 50
+expect tempo 90
+tap SEL
+turn SELECT 1
+turn ALGO 1
+wait 50
+tap SEL
+wait 300
+tap HOME
+reboot
+wait 400
+expect tempo 90
+# slot 1 at 100 BPM; a restart opens slot 1
+tap HOME
+spin K1 10
+tap SEL
+turn SELECT 1
+turn ALGO -1
+wait 50
+tap SEL
+wait 300
+tap SEL
+wait 300
+tap HOME
+reboot
+wait 400
+expect tempo 100
+# slot 2 loaded (not changed): a restart opens slot 2
+tap HOME
+tap SEL
+turn ALGO 1
+wait 50
+tap SEL
+wait 300
+expect tempo 90
+reboot
+wait 400
+expect tempo 90

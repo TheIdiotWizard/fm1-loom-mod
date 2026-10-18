@@ -214,7 +214,8 @@ and says why.
 
 ### The tracks
 
-Turn **ALGORITHM** to pick a track: T1 to T8, then COND (the conductor), THROW (the throws), FX I and FX II. The keys play the
+Turn **ALGORITHM** to pick a track: T1 to T8, then COND (the conductor) and THROW (the throws). On Mix it goes
+through Mix's strips instead: T1 to T8, then FX I and FX II, the effects' returns. The keys play the
 track you picked on the Engine, Play, Envelope, Filter, LFO and Players pages. On a drum track, the black
 keys are the eleven drum keys, and the white keys play them too. On FX I and FX II, the keys play the
 instrument track you picked last, so you hear the effect.
@@ -792,7 +793,7 @@ out of the kick's way while the rest plays on.
 
 ## Saving
 
-LOOM-8 saves by itself: three seconds after your last change, once it is stopped and silent (writing to the
+At power-on LOOM-8 opens the project you saved or loaded last. It saves by itself: three seconds after your last change, once it is stopped and silent (writing to the
 flash would cut the sound). The header says "unsaved" and **SAVE** lights until then. Press **SAVE** to save at
 once. To save to another slot, hold **SAVE** and press white key 1 to 3, or use **HOME**'s **SEL** list: SAVE TO
 (turn **ALGORITHM** to the slot); LOOM-8 asks first if the slot holds another project. NEW PROJECT starts in the

@@ -16,6 +16,7 @@
  * high-pass, TP_CUT its low-pass, TP_LEVEL the return, TP_SEND2 of FX I its feed into FX II; BRAIN:
  * TP_E1..E4 mode, key, scale, degree; PUNCH: TP_E1 latch.
  * Part of the unity build, after app.h and engine.h. */
+#include <stddef.h>
 #include "app.h"
 #include "engine.h"
 #include "dsp/drumline.h"
@@ -509,6 +510,7 @@ int project_load(int slot)
     return bad ? -1 : 0;
 }
 
+static void count_next(void);                         /* (below: the save count) */
 /* 0 = saved and verified; -1 = the settings failed; -7 = the patterns do not fit (nothing written) */
 int project_save(int slot)
 {
@@ -527,11 +529,53 @@ int project_save(int slot)
     proj.send_notes = seq.send_notes;
     proj.metronome = seq.metronome;
     proj.scene = seq.scene;
+    count_next();
     for (i = 0; i < sizeof proj; i++)
         io_buf[i] = ((const uint8_t *)&proj)[i];
     if ((rc = save_buf(OBJ_PROJ(slot, 0), sizeof proj)) != 0)
         return rc < 0 ? -1 : rc;
     return save_stream();
+}
+
+/* the save count (settings rsv[4..7]): every save and every load takes the next, so the highest is the slot used
+ * last; app_init opens it */
+#define COUNT_AT offsetof(settings_t, rsv) + 4u
+static uint32_t count_max;
+static uint32_t slot_count(int slot)
+{
+    int n = plat_store_load(OBJ_PROJ(slot, 0), io_buf, (uint32_t)(COUNT_AT + 4u));
+    if (n < (int)(COUNT_AT + 4u) || get32(io_buf) != PROJ_MAGIC || get32(io_buf + 4) != PROJ_FORMAT)
+        return 0;
+    return get32(io_buf + COUNT_AT);
+}
+static void count_next(void)
+{
+    uint32_t c = ++count_max;
+    for (uint32_t i = 0; i < 4u; i++)
+        proj.rsv[4 + i] = (uint8_t)(c >> (8u * i));
+}
+int project_last_slot(void)
+{
+    int best = 0;
+    count_max = 0;
+    for (int s = 0; s < NPROJ; s++) {
+        uint32_t c = slot_count(s);
+        if (c > count_max) {
+            count_max = c;
+            best = s;
+        }
+    }
+    return best;
+}
+int project_touch(int slot)                       /* (only the settings change: the patterns' objects stay) */
+{
+    uint32_t i;
+    if (slot < 0 || slot >= NPROJ)
+        return -1;
+    count_next();
+    for (i = 0; i < sizeof proj; i++)
+        io_buf[i] = ((const uint8_t *)&proj)[i];
+    return save_buf(OBJ_PROJ(slot, 0), sizeof proj) < 0 ? -1 : 0;
 }
 
 int project_exists(int slot)
