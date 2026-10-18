@@ -26,8 +26,6 @@ import math
 import re
 import struct
 import zlib
-from functools import reduce
-from operator import add
 
 RATE = 22050                    # the factory samples' rate, and a user sample's unless it asks for another
 RATES = (11025, 16000, 22050, 32000)   # what the tool offers (dsp/sample.h: 4000..48000 played)
@@ -121,9 +119,37 @@ def read_any_wav(path):
     return sr, v, loop
 
 
+def _fir(x, h):
+    """x through the symmetric FIR h (odd length), centred (no delay), zeros beyond the ends"""
+    k = len(h) // 2
+    try:
+        import numpy as np
+        return list(np.convolve(np.asarray(x, dtype=float), np.asarray(h, dtype=float), mode="same"))
+    except ImportError:
+        xp = [0.0] * k + list(x) + [0.0] * k
+        return [sum(h[j] * xp[i + j] for j in range(len(h))) for i in range(len(x))]
+
+
+def _lowpass(fc, sr, taps=63):
+    """a windowed-sinc low-pass (Blackman) at fc Hz, unity at DC"""
+    k = taps // 2
+    h = []
+    for n in range(-k, k + 1):
+        s = 2.0 * fc / sr if n == 0 else math.sin(2.0 * math.pi * fc / sr * n) / (math.pi * n)
+        w = 0.42 + 0.5 * math.cos(math.pi * n / k) + 0.08 * math.cos(2.0 * math.pi * n / k)
+        h.append(s * w)
+    g = sum(h)
+    return [v / g for v in h]
+
+
+# the playback's linear interpolation (dsp/sample.c smp_play) rolls the top off as sinc^2(f / 22050): -3.9 dB at
+# 8 kHz, -6.3 at 10 kHz. This 5-tap pre-emphasis (least squares, DC 1) puts it back: flat within 0.3 dB to 9 kHz
+EMPHASIS = [v / 1.0196 for v in (0.0517, -0.21, 1.3362, -0.21, 0.0517)]
+
+
 def resample(x, sr, to):
-    """down: a windowed-sinc low-pass under the new rate's half (with numpy; without, a moving average over the ratio),
-    then linear interpolation"""
+    """down: a windowed-sinc low-pass under the new rate's half (with numpy; without, a 63-tap one), then linear
+    interpolation (an earlier version averaged neighbours instead: -2.4 dB at 10 kHz and the band above folded back)"""
     if sr == to:
         return list(x)
     try:
@@ -141,11 +167,7 @@ def resample(x, sr, to):
         n = int(math.ceil((len(a) - 1) * to / sr))
         return np.interp(np.arange(n) * (sr / to), np.arange(len(a)), a).tolist()
     if sr > to:
-        k = max(1, int(round(sr / to)))
-        if k == 2:
-            x = [(a + b) / 2 for a, b in zip(x, x[1:])] + [x[-1] / 2] if x else []
-        elif k > 1:
-            x = [reduce(add, x[i:i + k]) / k for i in range(len(x))]
+        x = _fir(x, _lowpass(0.47 * to, sr))
     step, out, p, last = sr / to, [], 0.0, len(x) - 1
     while p < last:
         i = int(p)
@@ -153,6 +175,11 @@ def resample(x, sr, to):
         out.append(x[i] * (1 - f) + x[i + 1] * f)
         p += step
     return out
+
+
+def emphasis(x):
+    """at any rate: the pre-emphasis that the playback's linear interpolation takes back off (EMPHASIS)"""
+    return _fir(x, EMPHASIS)
 
 
 def to_int16(x, peak_to=30000):

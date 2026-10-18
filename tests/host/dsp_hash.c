@@ -220,7 +220,7 @@ static void master_case(const char *name, const int *set)
 }
 static void master_cases(void)
 {
-    static const int off[] = {-1}, def[] = {MS_TP_COLOR, MS_TP_COLOR_DEF, -1};
+    static const int off[] = {-1}, def[] = {MS_TP_COLOR, 24, -1};
     static const int drv[] = {MS_TP_DRIVE, 64, -1}, drv2[] = {MS_TP_DRIVE, 127, -1}, drv3[] = {MS_TP_DRIVE, 10, -1};
     static const int col[] = {MS_TP_COLOR, 127, -1}, wob[] = {MS_TP_WOBBLE, 64, -1}, wob2[] = {MS_TP_WOBBLE, 127, -1};
     static const int noi[] = {MS_TP_NOISE, 64, -1}, noi2[] = {MS_TP_NOISE, 127, -1};
@@ -231,7 +231,7 @@ static void master_cases(void)
     static const int eq[] = {MS_EQ_LO, 80, MS_EQ_BLEND, 127, MS_COMP, 80, -1};
     static const int lev[] = {MS_PERC, 30, MS_MEL, 127, MS_LEVEL, 127, MS_COMP, 40, -1};
     master_case("master off", off);
-    master_case("master new", def);
+    master_case("master color 24", def);
     master_case("master drive 64", drv);
     master_case("master drive 127", drv2);
     master_case("master drive 10", drv3);

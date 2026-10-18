@@ -769,6 +769,11 @@ static void metro_tick(uint32_t n)
     }
 }
 
+#ifdef PLAT_HOST
+#define HOST_ON(b) (synth_host_solo >> (b) & 1u)  /* the host's stems (host.c LOOM_SOLO) */
+#else
+#define HOST_ON(b) 1
+#endif
 /* one stretch: the upper half of the voices and the drumlines here while the second core renders the
  * lower half; then the halves are summed in the order one core always used, the FX tracks, the master */
 static void render_sub(uint32_t n)
@@ -802,7 +807,7 @@ static void render_sub(uint32_t n)
             zerof(ts1, n);
             zerof(ts2, n);
             drumline_render(DL(t), tl, tr, ts1, ts2, n);
-            g = perf_mute[t] ? 0.0f : (float)epar[t][TP_LEVEL] * (float)epar[t][TP_LEVEL] * (1.0f / 10000.0f);
+            g = perf_mute[t] || !HOST_ON(t) ? 0.0f : (float)epar[t][TP_LEVEL] * (float)epar[t][TP_LEVEL] * (1.0f / 10000.0f);
             pan_gains(epar[t][TP_PAN] + perf_pan[t], &gl, &gr);
             glide_set(&trk_glide[t][GL_L], g * gl);
             glide_set(&trk_glide[t][GL_R], g * gr);
@@ -834,7 +839,7 @@ static void render_sub(uint32_t n)
     {
         PROF_T(pf);
         for (k = 0; k < 2; k++) {                         /* FX I, then FX II (which hears FX I's return) */
-            float g = (float)epar[AUX_FX1 + k][TP_LEVEL] * (float)epar[AUX_FX1 + k][TP_LEVEL] * (1.0f / 10000.0f);
+            float g = HOST_ON(8 + k) ? (float)epar[AUX_FX1 + k][TP_LEVEL] * (float)epar[AUX_FX1 + k][TP_LEVEL] * (1.0f / 10000.0f) : 0.0f;
             zerof(tl, n);
             zerof(tr, n);
             DSP_FAR(fx_process)(FXS(k), k ? s2 : s1, tl, tr, n);

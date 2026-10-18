@@ -1,7 +1,7 @@
 # LOOM-8 demo: 90s jungle / drum and bass, 170 BPM, A minor. (tools/demos/render.sh renders it; its bank, the amen
 # and think breaks, is build/demos/jungle.bin: private, never committed.)
-#   T1 slice "chop": the amen, one bar in 16 slices, mono; re-cut per section, rolls by multiply, its pitch turned up
-#      by hand through the build
+#   T1 slice "chop": the amen, one bar in 16 slices, mono, crushed a little (a sampler's twelve bits); re-cut per
+#      section, rolls by multiply, its pitch turned up by hand through the build
 #   T2 stack "rope sub": the sub          T3 brocade "chenille" as the reese: nine saws, legato, the filter on an LFO
 #   T4 voile "voile choir": the pad       T5 stack "braid stab": dub stabs into the delay
 #   T6 slice "chop": the think break      T7 weft "thread lead" as a dub siren (a square LFO on the pitch)
@@ -11,31 +11,36 @@ master 4096
 samples build/demos/jungle.bin
 bpm 170
 
-# ---- the sounds
+# ---- the sounds (90s jungle: the breaks do the work. The amen sped up and pitched up, a little sampler grit on it
+# (twelve bits or so: an S950's), the think under it; a deep sine sub alone in the lows; the reese on top, its
+# filter swept slowly; dub stabs and a siren into a long dotted echo; a dark hall for the pads; the master medium
+# dark, the breaks crisp, no tape)
+# T1 the amen: one bar in 16 slices, mono; driven a little and crushed a little (bits, not rate), the hall a touch
 knob 1 engine slice
 preset 1 chop slice
 knob 1 e1 u1
 knob 1 e4 127
 knob 1 cut 127
-knob 1 ctone 127
+knob 1 ctype crush
+knob 1 camt 34
+knob 1 ctone 110
+knob 1 cmix 100
 knob 1 brain no
 knob 1 level 124
-knob 1 ctype drive
-knob 1 camt 40
-knob 1 cmix 127
-knob 1 send2 12
-
+knob 1 send2 10
+# T2 stack "rope sub": the sub, alone below 100 Hz
 preset 2 rope_sub stack
 knob 2 brain no
-knob 2 level 71
-
+knob 2 level 84
+# T3 brocade "chenille" as the reese: nine saws, legato, the low-pass at 1 kHz moved by a slow LFO, resonant
 preset 3 chenille brocade
 knob 3 brain no
-knob 3 e4 110
+knob 3 e2 40
+knob 3 e4 84
 knob 3 vmode legato
 knob 3 porta 40
 knob 3 cut 58
-knob 3 res 40
+knob 3 res 44
 knob 3 fenv 76
 knob 3 ltype wave
 knob 3 lspeed 2
@@ -44,26 +49,26 @@ knob 3 ldest filter
 knob 3 lx 0
 knob 3 lx2 sine
 knob 3 level 62
-
+# T4 voile "voile choir": the pad, washed in the hall
 preset 4 voile_choir voile
 knob 4 brain no
-knob 4 level 50
-knob 4 send2 70
-
+knob 4 level 52
+knob 4 send2 56
+# T5 stack "braid stab": dub stabs into the echo
 preset 5 braid_stab stack
 knob 5 brain no
-knob 5 level 69
-knob 5 send1 70
-knob 5 send2 30
-
+knob 5 level 66
+knob 5 send1 64
+knob 5 send2 22
+# T6 the think break, under the amen
 knob 6 engine slice
 preset 6 chop slice
 knob 6 e1 u2
 knob 6 e4 127
 knob 6 ctone 127
 knob 6 brain no
-knob 6 level 112
-
+knob 6 level 108
+# T7 weft "thread lead" as a dub siren into the echo
 preset 7 thread_lead weft
 knob 7 brain no
 knob 7 ltype wave
@@ -72,24 +77,22 @@ knob 7 lamt 84
 knob 7 ldest amp
 knob 7 lx 1
 knob 7 lx2 square
-knob 7 level 56
-knob 7 send1 90
-knob 7 send2 60
-
-# FX I a dotted-eighth delay with long repeats, FX II a hall
+knob 7 level 54
+knob 7 send1 80
+knob 7 send2 34
+# FX I a dotted-eighth echo with long repeats, dubby (dark repeats); FX II a hall
 knob 11 engine delay
 knob 11 e1 80
 knob 11 e3 84
 knob 11 e4 50
 knob 12 engine hall
 knob 12 e2 70
-mst color 32
+# the master: no tape (the grit is on the amen); the low end held, the top lifted a little for the breaks
 mst blend 127
-mst hi 82
-mst lo 60
-mst drive 30
-mst comp 36
-mst level 89
+mst hi 76
+mst lo 62
+mst comp 56
+mst level 90
 
 # ---- T1 the amen (slice k = note 52 + k; 16 slices)
 # P1 straight, every slice in its place

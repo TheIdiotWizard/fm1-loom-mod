@@ -220,3 +220,6 @@ void synth_saws(synth_t *s, int max_saws);
  * bell 8, the most) */
 int synth_voice_cost(const synth_t *s, int vi);
 extern volatile uint16_t synth_peak[NTRK];                     /* per track meters, Q15, decaying (UI) */
+#ifdef PLAT_HOST
+extern uint16_t synth_host_solo;              /* the host's stems (host.c LOOM_SOLO): bits 0-7 tracks, 8 / 9 FX I / II */
+#endif

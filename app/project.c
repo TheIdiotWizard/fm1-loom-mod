@@ -113,9 +113,9 @@ static void aux_defaults(void)
         proj.trk[AUX_FX2].par[TP_E1 + k] = FXT_DEFAULT[FXT_REVERB][k];
     }
     proj.trk[AUX_FX1].par[TP_CUT] = 127;                 /* low-pass open */
-    proj.trk[AUX_FX1].par[TP_FENV] = 20;                 /* a little high-pass: no mud */
+    proj.trk[AUX_FX1].par[TP_FENV] = 40;                 /* the high-pass: the echoes from 130 Hz (no mud) */
     proj.trk[AUX_FX2].par[TP_CUT] = 127;
-    proj.trk[AUX_FX2].par[TP_FENV] = 20;
+    proj.trk[AUX_FX2].par[TP_FENV] = 52;                 /* the reverb from 230 Hz: the kick and the bass stay dry */
 }
 
 void project_defaults(void)
@@ -171,8 +171,8 @@ void project_defaults(void)
         tr->par[TP_CHAN] = 0;
     }
     aux_defaults();
-    /* the master: the EQ's blend off (neutral), a touch of tape colour (drive and the other two at 0: no
-     * gain stage, no wobble, no hiss), the groups at unity, a touch of compression */
+    /* the master: the EQ's blend off (neutral), the tape out of the path (MS_TP_COLOR_DEF 0: a project turns
+     * it on where it wants it), the groups at unity, a touch of compression */
     for (k = 0; k < NMS; k++)
         proj.master[k] = 64;
     proj.master[MS_EQ_BLEND] = 0;

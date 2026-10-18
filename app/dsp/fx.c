@@ -829,6 +829,13 @@ static inline float glide1(float cur, float tgt)             /* a level knob: ~1
     return fm_fabsf(tgt - cur) < 1e-5f ? tgt : cur;
 }
 
+#ifdef PLAT_HOST
+int fx_host_stage = 9;                        /* the host's taps (host.c LOOM_MST): 0 the groups only, 1 + EQ, 2 + tape,
+                                               * 3 + comp and level, else all (the limiter) */
+#define STAGE(k) (fx_host_stage >= (k))
+#else
+#define STAGE(k) 1
+#endif
 void master_process(master_t *m, float *perc_l, float *perc_r, float *mel_l, float *mel_r, float *out_l,
                     float *out_r, uint32_t n)
 {
@@ -842,7 +849,7 @@ void master_process(master_t *m, float *perc_l, float *perc_r, float *mel_l, flo
         gm = glide1(gm, m->gm);
         s = perc_l[i] * gp + mel_l[i] * gm;
         sr = perc_r[i] * gp + mel_r[i] * gm;
-        if (eq_on) {
+        if (eq_on && STAGE(1)) {
             int b;
             for (b = 0; b < 3; b++) {
                 s = biq(&m->eq[b], &m->eqs[0][b], s);
@@ -852,7 +859,7 @@ void master_process(master_t *m, float *perc_l, float *perc_r, float *mel_l, flo
         mel_l[i] = s;
         mel_r[i] = sr;
     }
-    if (m->ts.on) {
+    if (m->ts.on && STAGE(2)) {
         uint32_t o;
         if (!m->tape_on) {                    /* the tape comes in: from rest */
             ts_rest(&m->ts);
@@ -866,7 +873,7 @@ void master_process(master_t *m, float *perc_l, float *perc_r, float *mel_l, flo
     for (i = 0; i < n; i++) {
         float s = mel_l[i], sr = mel_r[i];
         lev = glide1(lev, m->glev);
-        if (comp_on) {
+        if (comp_on && STAGE(3)) {
             float want;
             /* the level: mean square over ~8 ms of both sides, x2 so a sine reads its peak; the static
              * curve every MST_CR samples; the reduction smoothed (attack / release) and ramped as a
@@ -916,6 +923,12 @@ void master_process(master_t *m, float *perc_l, float *perc_r, float *mel_l, flo
             m->la_pos = (m->la_pos + 1) & (MST_LA - 1);
             out_l[i] = soft_ceiling(d * m->gain);
             out_r[i] = soft_ceiling(dr * m->gain);
+#ifdef PLAT_HOST
+            if (!STAGE(4)) {                  /* (a tap before the limiter: the bus as it comes, unlimited) */
+                out_l[i] = d;
+                out_r[i] = dr;
+            }
+#endif
         }
     }
     m->gp_c = gp;

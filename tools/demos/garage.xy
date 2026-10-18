@@ -13,46 +13,72 @@ samples build/demos/garage.bin
 bpm 132
 groove swing
 
-# ---- the sounds
-knob 1 d1.k2 70
-knob 1 d1.k3 80
-knob 1 d5.volume 80
-knob 1 d2.volume 66
+# ---- the sounds (UK garage: crisp and skippy. The kit short and bright, shuffled hats and shaker up front, a
+# bouncing weft bass, the organ stabs short, the voice chopped and
+# pitched up through a moving filter and a dotted echo; a medium room; the master clean, no tape)
+# T1 the kit: a short punchy kick, a snare pitched up and cut short, a tight clap, hats between closed and open
+knob 1 d1.k1 86
+knob 1 d1.k2 42
+knob 1 d1.k3 76
+knob 1 d1.k4 88
+knob 1 d2.k1 100
+knob 1 d2.k2 26
+knob 1 d2.k3 100
+knob 1 d2.volume 70
+knob 1 d5.k1 112
+knob 1 d5.k2 40
+knob 1 d5.volume 78
+knob 1 d3.k1 102
+knob 1 d3.k2 30
+knob 1 d3.k4 44
 knob 1 d3.volume 70
-knob 1 d9.volume 64
+knob 1 d4.k1 102
+knob 1 d4.k2 56
+knob 1 d4.k4 44
+knob 1 d4.volume 62
+knob 1 d9.k1 70
+knob 1 d9.volume 62
 knob 1 d8.volume 70
 knob 1 ftype dynamic
-knob 1 res 40
-knob 1 fenv 30
-knob 1 level 79
-knob 1 send2 10
-
+knob 1 cut 10
+knob 1 res 46
+knob 1 fenv 24
+knob 1 level 84
+knob 1 send2 12
+# T2 weft "denim bass": the bouncing bass, glides by the portamento trick (as the earlier mix had it: the user's pick)
 preset 2 denim_bass weft
 knob 2 brain no
 knob 2 porta 30
 knob 2 level 105
-
+# T3 organ "reed combo": the stabs, short
 preset 3 reed_combo organ
 knob 3 brain no
-knob 3 level 83
-knob 3 r 30
-knob 3 send1 40
-knob 3 send2 30
-
+knob 3 d 62
+knob 3 s 40
+knob 3 r 24
+knob 3 level 80
+knob 3 send1 24
+knob 3 send2 18
+# T4 the sung bar in 16, re-cut: brightened, a resonant low-pass moved by a slow LFO, the echo and the room
 knob 4 engine slice
 preset 4 chop slice
 knob 4 e1 u1
 knob 4 e4 127
 knob 4 vmode poly
 knob 4 cut 127
+knob 4 res 46
+knob 4 ltype wave
+knob 4 lspeed 2
+knob 4 lamt 40
+knob 4 ldest filter
 knob 4 ctype tilt
-knob 4 camt 60
-knob 4 ctone 80
+knob 4 camt 70
+knob 4 ctone 100
 knob 4 brain no
-knob 4 level 104
-knob 4 send1 50
-knob 4 send2 40
-
+knob 4 level 102
+knob 4 send1 36
+knob 4 send2 30
+# T5 the sesame break, high-passed: the top loop
 knob 5 engine slice
 preset 5 chop slice
 knob 5 e1 u2
@@ -60,29 +86,31 @@ knob 5 e4 127
 knob 5 ftype hp12
 knob 5 cut 84
 knob 5 brain no
-knob 5 level 107
-
+knob 5 level 104
+# T6 voile "voile choir": the pad, back
 preset 6 voile_choir voile
 knob 6 brain no
-knob 6 level 76
-knob 6 send2 60
-
+knob 6 level 70
+knob 6 send2 40
+# T7 voile "doo wop": the answer at each bar's end
 preset 7 doo_wop voile
 knob 7 brain no
-knob 7 level 45
-knob 7 send1 55
-knob 7 send2 40
-
-# FX I a 3/16 delay (dotted eighth), FX II studio L
+knob 7 level 43
+knob 7 send1 40
+knob 7 send2 30
+# FX I a dotted-eighth echo, its repeats open; FX II "studio M", lifted a little on top
 knob 11 engine delay
 knob 11 e1 85
-knob 11 e3 70
-knob 12 engine studio_L
-mst color 30
-mst comp 36
-mst level 80
+knob 11 e3 64
+knob 11 e4 84
+knob 12 engine studio_M
+knob 12 e3 72
+# the master: no tape, a little air, the compressor light
 mst blend 127
-mst hi 78
+mst hi 74
+mst lo 64
+mst comp 56
+mst level 106
 
 # ---- T1 the kit: kick 1, snare 2, hat 3, open 4, clap 5, conga 8, shaker 9, fm 11
 pat 1 1 16 1 50 50

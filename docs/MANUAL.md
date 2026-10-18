@@ -708,7 +708,8 @@ Turn **ALGORITHM** past T8. Each aux track has its own page under **EDIT** and i
 
 - **FX I** and **FX II**: a send effect each: chorus, delay, lofi, phaser or reverb, with its
   four knobs. Press **FX** and turn **SELECT** to reach them from any track: **PRESETS** picks the effect, and
-  **SEL** has its high-pass, low-pass and, on FX I, the send into FX II. The keys play the track you were on.
+  **SEL** has its high-pass, low-pass and, on FX I, the send into FX II (a new project's high-passes keep the
+  lows dry: the echoes from about 130 Hz, the reverb from about 230 Hz). The keys play the track you were on.
   Turned to with **ALGORITHM**, they have the same knobs on **EDIT**.
 
 | Effect | Knobs |
@@ -745,8 +746,8 @@ it into the tape's preamp, harder and denser (the low end goes around it, so the
 tape's saturation, rounder and a little darker as it goes up; **wobble** is wow and flutter, the pitch
 wavering on both sides together, as on one tape (so the mix holds up on the FM-1's one speaker); **noise** is
 the hiss. Even pushed hard it stays smooth rather than gritty in the highs. With all four at 0 the tape is out
-of the path. A new project starts with a little color (24) and nothing else. The tape keeps the level about
-where it was: turning drive or color changes the sound, not how loud it is.
+of the path, and a new project starts that way: turn it on where a song wants the grit. The tape keeps the
+level about where it was: turning drive or color changes the sound, not how loud it is.
 
 <img src="img/screen-mix.png" width="240" alt="Mix: a meter for each track while playing; knobs fx I, fx II, pan and level" title="The mixer"> <img src="img/screen-sends.png" width="240" alt="FX&#x27;s Sends page: the track&#x27;s sends to FX I (delay) and FX II (reverb plate), its pan and level" title="The sends"> <img src="img/screen-master.png" width="240" alt="Master EQ: low, mid, high and the blend from flat to the EQ" title="Master EQ"> <img src="img/screen-master-tape.png" width="240" alt="Master tape: drive, color, wobble and noise, a sine drawn through the tape" title="Master tape"> <img src="img/screen-status.png" width="240" alt="Status: audio load, peak, voices, the second core, guard trips and dropouts" title="Status">
 

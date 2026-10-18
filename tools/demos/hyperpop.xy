@@ -1,6 +1,7 @@
 # LOOM-8 demo: hyperpop, 160 BPM, A minor (F G Am Em). (tools/demos/render.sh renders it; its bank is
 # build/demos/hyperpop.bin: a bar sung high and tuned hard, and an 808, both made by tools/demos/make_banks.py.)
-#   T1 kit: kick, clap and snare, hats with rolls (multiply), the kit's bus driven hard
+#   T1 kit: kick, clap and snare, metallic hats with rolls (multiply), the fm drum as a metallic hit, the
+#      kit's bus compressed and driven hard
 #   T2 sample: the 808 (user 2, its root C2), mono, gliding (portamento trick), driven
 #   T3 brocade "sequin", seven saws spread wide: the supersaw chords, ducked by the kick (the pump LFO)
 #   T4 slice: the voice in 16, crushed, chopped with octave and fifth locks
@@ -14,19 +15,44 @@ master 4096
 samples build/demos/hyperpop.bin
 bpm 160
 
-# ---- the sounds
-knob 1 d1.k1 70
-knob 1 d1.k2 60
-knob 1 d1.k3 110
+# ---- the sounds (hyperpop: the brightest of the six. Hard, clipped drums on top, hats loud, a sub that is all
+# 808, the chords thin and up high, the voice pitched up and crushed; short bright rooms, a master pushed loud)
+# T1 the kit: a deep kick with a big pitch drop, driven (the key's own drive), a snappy snare and a bright clap
+# layered, hats metallic and high (the shimmer, not the band), the bus compressed and driven; the fm drum (key
+# 11) tuned high and short, with a lot of modulation: the metallic "latex" hit
+knob 1 d1.k1 66
+knob 1 d1.k2 58
+knob 1 d1.k3 120
+knob 1 d1.k4 96
+knob 1 d1.drive 60
+knob 1 d2.k1 96
+knob 1 d2.k2 30
+knob 1 d2.k3 110
+knob 1 d2.volume 74
+knob 1 d5.k1 118
+knob 1 d5.k2 50
 knob 1 d5.volume 86
-knob 1 d2.volume 72
-knob 1 d2.k1 90
-knob 1 d3.volume 66
+knob 1 d3.k1 112
+knob 1 d3.k3 100
+knob 1 d3.k4 30
+knob 1 d3.volume 86
+knob 1 d4.k1 112
+knob 1 d4.k3 100
+knob 1 d4.k4 30
+knob 1 d4.k2 70
+knob 1 d4.volume 80
+knob 1 d11.k1 118
+knob 1 d11.k2 30
+knob 1 d11.k3 110
+knob 1 d11.k4 60
+knob 1 d11.volume 70
 knob 1 ftype dynamic
-knob 1 res 70
-knob 1 fenv 70
-knob 1 level 88
-
+knob 1 cut 10
+knob 1 res 80
+knob 1 fenv 76
+knob 1 level 92
+knob 1 send2 8
+# T2 the 808 (user 2, its root C2): mono, gliding, driven bright enough to read on a small speaker
 knob 2 engine sample
 knob 2 e1 u2
 knob 2 e4 one-shot
@@ -36,28 +62,30 @@ knob 2 a 0
 knob 2 d 100
 knob 2 s 127
 knob 2 r 40
-knob 2 cut 100
+knob 2 cut 110
 knob 2 ktrk 0
 knob 2 ctype drive
-knob 2 camt 90
-knob 2 ctone 100
+knob 2 camt 96
+knob 2 ctone 116
 knob 2 cmix 127
 knob 2 brain no
-knob 2 level 92
-
+knob 2 level 90
+# T3 brocade "sequin": seven saws spread wide, played high, through its own drive, pumped by the kick
 preset 3 sequin brocade
-knob 3 e2 60
+knob 3 e2 70
 knob 3 e4 127
 knob 3 s 70
 knob 3 r 56
 knob 3 cut 100
+knob 3 res 20
 knob 3 ltype pump
 knob 3 lspeed track_1
 knob 3 lamt 100
 knob 3 brain no
-knob 3 level 49
-knob 3 send2 30
-
+knob 3 level 56
+knob 3 send1 20
+knob 3 send2 22
+# T4 the voice in 16 slices, mono: bitcrushed (bits more than rate: bright grit), into the delay
 knob 4 engine slice
 preset 4 chop slice
 knob 4 e1 u1
@@ -65,14 +93,14 @@ knob 4 e4 127
 knob 4 vmode mono
 knob 4 cut 127
 knob 4 ctype crush
-knob 4 camt 50
-knob 4 ctone 30
-knob 4 cmix 90
+knob 4 camt 46
+knob 4 ctone 96
+knob 4 cmix 80
 knob 4 brain no
-knob 4 level 75
-knob 4 send1 40
-knob 4 send2 40
-
+knob 4 level 86
+knob 4 send1 34
+knob 4 send2 22
+# T5 gingham "picnic", the circuit-bent toy, through the arp
 preset 5 picnic gingham
 knob 5 brain no
 knob 5 player arp
@@ -82,36 +110,40 @@ knob 5 p3 2
 knob 5 p4 1
 knob 5 ap1 short
 knob 5 ap4 wide
-knob 5 level 100
-knob 5 send1 50
-
+knob 5 level 92
+knob 5 send1 40
+# T6 orbit "chime": sparkles
 preset 6 chime orbit
 knob 6 brain no
 knob 6 level 60
-knob 6 send1 60
-knob 6 send2 70
-
+knob 6 send1 50
+knob 6 send2 40
+# T7 voile "sheer lead": the sung topline, bright
 preset 7 sheer_lead voile
 knob 7 brain no
 knob 7 e2 95
 knob 7 e3 115
-knob 7 cut 112
-knob 7 level 66
-knob 7 send1 45
-knob 7 send2 40
-
+knob 7 cut 120
+knob 7 level 70
+knob 7 send1 36
+knob 7 send2 26
+# FX I a bright eighth-note ping-pong; FX II a small bright plate (short, open on top)
 knob 11 engine delay
 knob 11 e1 72
-knob 11 e3 60
+knob 11 e3 54
+knob 11 e4 96
 knob 12 engine plate
-knob 12 e1 110
-mst drive 64
-mst color 44
-mst comp 50
-mst level 66
+knob 12 e1 70
+knob 12 e3 64
+knob 12 e4 40
+# the master: no tape (it would round the top off: the genre wants it sharp), the top lifted, the bottom firm,
+# the bus compressor hard and the level up: the limiter at work, as these records are
 mst blend 127
-mst hi 84
-mst lo 70
+mst hi 96
+mst lo 72
+mst mid 54
+mst comp 60
+mst level 96
 
 # ---- T1 the kit: kick 1, snare 2, hat 3, open 4, clap 5
 # P1 the drop
@@ -121,6 +153,7 @@ hits 1 1 5 ....X.......X...
 hits 1 1 2 ....x.......x...
 hits 1 1 3 x.x.x.x.x.x.xox.
 hits 1 1 4 ..............x.
+hits 1 1 11 ...x.......o..x.
 trick 1 1 12 multiply 3
 trick 1 1 15 multiply 4
 # P2 drop 2: busier, the rolls change every other bar
@@ -130,6 +163,7 @@ hits 1 2 5 ....X.......X...
 hits 1 2 2 ....x.......x..o
 hits 1 2 3 xxx.x.xxx.x.xox.
 hits 1 2 4 ......x.......x.
+hits 1 2 11 ...x..x....o.x.x
 trick 1 2 2 multiply 2
 trick 1 2 8 multiply 3
 trick 1 2 13 multiply 4

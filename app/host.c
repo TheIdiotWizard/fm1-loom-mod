@@ -22,6 +22,14 @@
  *                                samples, its data's bytes, user N's rate), punch_drum / punch_mel (the masks in effect,
  *                                PX_* bits), parT.P; and with more words: step T VALUE, page NAME, comp T S VALUE (prints
  *                                both components; checks the first), note T PAT S VALUE
+ * The demos' stems and taps (tools/demos/render.sh --stems), from the environment:
+ *   LOOM_SOLO=1,3,fx1,fx2        only these tracks (dry and their sends) and FX returns sound
+ *   LOOM_MST=raw|eq|tape|comp    the master's output taken after that stage (raw: the groups summed, the level;
+ *                                comp: the compressor and the level, no limiter); unset: all of it
+ *   LOOM_LOAD=N                  the overload guard sees N % (the host's own timing, which varies with what else
+ *                                runs, out of the result: render.sh sets 0)
+ *   LOOM_MSTSET=color=0,drive=0  master knobs held at these values whatever the script sets (at each "mst" and at
+ *                                "stats reset", which every song has before its "wav")
  * LOOM_THEME=N: the screenshots in theme N (ui.c). The layout audit (gfx_loom.c): its findings fail the run. */
 #include <time.h>
 
@@ -444,10 +452,56 @@ static void stats_print(void)
            (unsigned)(eng_guard_count - st_guard0), st_load, st_ms ? st_load_sum / (float)st_ms : 0.0f, st_hi_ms);
 }
 
+static const char *const MN[NMS] = {"lo", "mid", "hi", "blend", "drive", "color", "wobble", "noise", "perc", "mel",
+                                    "comp", "level"};
+static void host_env(void)                          /* LOOM_SOLO, LOOM_MST (once) */
+{
+    static int done;
+    const char *e;
+    if (done)
+        return;
+    done = 1;
+    if ((e = getenv("LOOM_SOLO")) && *e) {
+        char b[128], *p;
+        uint16_t m = 0;
+        snprintf(b, sizeof b, "%s", e);
+        for (p = strtok(b, ", "); p; p = strtok(0, ", "))
+            m |= (uint16_t)(!strcmp(p, "fx1") ? 1u << 8 : !strcmp(p, "fx2") ? 1u << 9
+                            : atoi(p) >= 1 && atoi(p) <= 8 ? 1u << (atoi(p) - 1) : 0u);
+        synth_host_solo = m;
+    }
+    if ((e = getenv("LOOM_LOAD")) && *e)            /* the guard's input fixed (a script's "load N" still wins) */
+        load_force = atoi(e);
+    if ((e = getenv("LOOM_MST")) && *e)
+        fx_host_stage = !strcmp(e, "raw") ? 0 : !strcmp(e, "eq") ? 1 : !strcmp(e, "tape") ? 2 : !strcmp(e, "comp") ? 3 : 9;
+}
+static void mst_override(void)                      /* LOOM_MSTSET: knobs held where it says */
+{
+    const char *e = getenv("LOOM_MSTSET");
+    char b[256], *p;
+    if (!e || !*e)
+        return;
+    snprintf(b, sizeof b, "%s", e);
+    for (p = strtok(b, ","); p; p = strtok(0, ",")) {
+        char *eq = strchr(p, '=');
+        int k;
+        if (!eq)
+            continue;
+        *eq = 0;
+        for (k = 0; k < NMS && !ieq(p, MN[k]); k++)
+            ;
+        if (k < NMS) {
+            proj.master[k] = (uint8_t)clampi(atoi(eq + 1), 0, 127);
+            engine_master(k, proj.master[k]);
+        }
+    }
+}
+
 static int song_cmd(const char *cmd)
 {
     char buf[512], *w[80];
     int n = words(buf, w, 80), t, k;
+    host_env();
     if (!strcmp(cmd, "knob")) {                     /* knob T PARAM VALUE */
         if (n < 4)
             host_die("knob T PARAM VALUE", "");
@@ -627,14 +681,13 @@ static int song_cmd(const char *cmd)
     } else if (!strcmp(cmd, "songloop"))
         pats.song.loop = (uint8_t)(atoi(w[1]) != 0);
     else if (!strcmp(cmd, "mst")) {                 /* mst NAME VALUE */
-        static const char *const MN[NMS] = {"lo", "mid", "hi", "blend", "drive", "color", "wobble", "noise", "perc",
-                                            "mel", "comp", "level"};
         for (k = 0; k < NMS && !ieq(w[1], MN[k]); k++)
             ;
         if (k == NMS || n < 3)
             host_die("no master knob", w[1]);
         proj.master[k] = (uint8_t)clampi(atoi(w[2]), 0, 127);
         engine_master(k, proj.master[k]);
+        mst_override();
         run_ms(1);
     } else if (!strcmp(cmd, "groove")) {
         for (k = 0; k < NGROOVE && !ieq(w[1], GR_NAME[k]); k++)
@@ -675,6 +728,7 @@ static int song_cmd(const char *cmd)
             st_ms = st_syn = st_drum = st_hi_ms = 0;
             st_load = st_load_sum = 0.0f;
             st_guard0 = eng_guard_count;
+            mst_override();
         } else
             stats_print();
     } else

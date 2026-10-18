@@ -14,8 +14,9 @@
 
   SPEC: [NAME=]file.wav[:ROOT][@BARS][%RATE]
 
-Each file becomes one sample: mixed to mono, resampled to its rate, its peak normalised, IMA ADPCM with a
-checkpoint every 64 samples (tools/sampleio.py, as the factory bank). NAME is what the screen shows (lower
+Each file becomes one sample: mixed to mono, resampled to its rate (a windowed-sinc anti-alias filter first),
+pre-emphasised for the playback's linear interpolation (flat to 0.4 x its rate as it plays), its peak normalised, IMA
+ADPCM with a checkpoint every 64 samples (tools/sampleio.py, as the factory bank). NAME is what the screen shows (lower
 case, 11 characters; default: the file's name); ROOT the MIDI note it plays at its own pitch on a synth
 track (default: a note in the file's name, "piano_C4.wav", else 60 = C4). A loop in the WAV's 'smpl' chunk
 is kept (the sample engine's loop mode plays it). @BARS says the file is a loop of that many bars (1..16):
@@ -106,7 +107,7 @@ def at_rate(p, rate):
     name, x, sr, root, loop, bars, _ = p
     if loop:
         loop = (int(loop[0] * rate / sr), int((loop[1] + 1) * rate / sr))
-    return (name, sio.to_int16(sio.resample(x, sr, rate)), root, loop, bars, rate)
+    return (name, sio.to_int16(sio.emphasis(sio.resample(x, sr, rate))), root, loop, bars, rate)
 
 
 def fits(parsed, default):

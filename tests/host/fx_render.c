@@ -175,7 +175,7 @@ int main(void)
 {
     static const struct { const char *name; uint8_t k[4]; const char *what; } T[] = {
         {"off", {0, 0, 0, 0}, "the tape out (all four at 0): the bus as it was"},
-        {"default", {0, MS_TP_COLOR_DEF, 0, 0}, "a new project's: color 24 (the saturation alone, trimmed)"},
+        {"color24", {0, 24, 0, 0}, "color 24 (the saturation alone, trimmed; a new project's tape is off)"},
         {"color64", {0, 64, 0, 0}, "color 64"},
         {"drive40", {40, 24, 0, 0}, "drive 40, color 24: the gain stage in (its 5 kHz voicing, the lows around it)"},
         {"drive100_color60", {100, 60, 0, 0}, "drive 100, color 60: hard"},

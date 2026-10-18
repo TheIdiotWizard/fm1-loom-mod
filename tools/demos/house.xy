@@ -1,6 +1,6 @@
 # LOOM-8 demo: deep house, 122 BPM, A minor, the conductor driving the changes. (tools/demos/render.sh renders it;
 # its bank is build/demos/house.bin: the sesame break and a sung "hey", private.)
-#   T1 kit: a long kick on every beat, clap, the open hat on the offbeats, shaker, conga; a little swing
+#   T1 kit: a round kick on every beat, clap, the open hat on the offbeats, shaker, conga; a little swing
 #   T2 tines "felt bass": the bass, ducked by the kick (pump)       T3 tines "felt piano": minor-ninth stabs, delayed
 #   T4 brocade "damask" (six saws): the pad, pumped by the kick    T5 slice: the sesame break, high-passed, the top
 #   T6 sample: "hey" (user 2) through the delay                     T7 cane "hand drum": a tuned drum, groove and main
@@ -16,44 +16,56 @@ knob 9 e1 0
 knob 9 e2 9
 knob 9 e3 1
 
-# ---- the sounds
-knob 1 d1.k1 70
-knob 1 d1.k2 86
-knob 1 d1.k4 40
-knob 1 d5.volume 74
-knob 1 d4.volume 62
-knob 1 d4.k2 60
-knob 1 d9.volume 60
+# ---- the sounds (deep house: warm and round, the air from the hats alone. A round kick with a short tail, the
+# open hat on every offbeat, a clap on 2 and 4 and a 16th shaker; the bass round and up in the mix, ducked by the
+# kick; minor-ninth stabs into a dotted echo, a pumped pad, a long dark hall kept off the low end; the master
+# warm: no top lift, a little low end, no tape)
+# T1 the kit: the kick round (its tone down, a soft punch), a dry clap, a short open hat, a soft shaker
+knob 1 d1.k1 76
+knob 1 d1.k2 64
+knob 1 d1.k3 48
+knob 1 d1.k4 60
+knob 1 d5.k1 96
+knob 1 d5.k2 56
+knob 1 d5.k4 50
+knob 1 d5.volume 72
+knob 1 d4.k1 96
+knob 1 d4.k2 50
+knob 1 d4.k4 70
+knob 1 d4.volume 66
+knob 1 d3.k1 96
+knob 1 d3.volume 60
+knob 1 d9.k1 50
+knob 1 d9.volume 62
 knob 1 d8.volume 64
-knob 1 d3.volume 56
 knob 1 res 30
-knob 1 level 100
-knob 1 send2 14
-
+knob 1 level 88
+knob 1 send2 10
+# T2 tines "felt bass": round, a fat low end, ducked by the kick (pump)
 preset 2 felt_bass tines
 knob 2 brain diatonic
 knob 2 ltype pump
 knob 2 lspeed track_1
-knob 2 lamt 50
-knob 2 level 108
-
+knob 2 lamt 44
+knob 2 level 122
+# T3 tines "felt piano": the minor-ninth stabs, warm, into the dotted echo
 preset 3 felt_piano tines
 knob 3 brain diatonic
-knob 3 level 62
-knob 3 send1 60
-knob 3 send2 40
+knob 3 level 70
+knob 3 send1 44
+knob 3 send2 28
 knob 3 cut 92
-
+# T4 brocade "damask" (six saws): the pad, pumped by the kick, dark
 preset 4 damask brocade
 knob 4 e1 6
-knob 4 cut 86
+knob 4 cut 78
 knob 4 brain diatonic
 knob 4 ltype pump
 knob 4 lspeed track_1
 knob 4 lamt 100
-knob 4 level 64
-knob 4 send2 50
-
+knob 4 level 66
+knob 4 send2 40
+# T5 the sesame break, high-passed: the top
 knob 5 engine slice
 preset 5 chop slice
 knob 5 e1 u1
@@ -61,8 +73,8 @@ knob 5 e4 127
 knob 5 ftype hp12
 knob 5 cut 88
 knob 5 brain no
-knob 5 level 96
-
+knob 5 level 92
+# T6 "hey" (user 2) through the echo
 knob 6 engine sample
 knob 6 e1 u2
 knob 6 e4 one-shot
@@ -71,28 +83,29 @@ knob 6 s 127
 knob 6 r 60
 knob 6 cut 110
 knob 6 brain no
-knob 6 level 104
-knob 6 send1 90
-knob 6 send2 60
-
+knob 6 level 100
+knob 6 send1 60
+knob 6 send2 36
+# T7 cane "hand drum": a tuned drum, off the conductor
 preset 7 hand_drum cane
 knob 7 brain no
 knob 7 pan 88
-knob 7 level 62
-knob 7 send2 30
-
+knob 7 level 66
+knob 7 send2 20
+# FX I a dotted-eighth echo, darker repeats; FX II a long dark hall (its high-pass keeps the bass and kick dry)
 knob 11 engine delay
 knob 11 e1 85
-knob 11 e3 76
-knob 11 e4 44
+knob 11 e3 70
+knob 11 e4 50
 knob 12 engine hall
 knob 12 e2 76
-mst color 40
-mst comp 36
-mst level 86
+knob 12 e3 56
+# the master: warm, the low end a little up, no top lift, a gentle compressor
 mst blend 127
 mst lo 72
-mst hi 74
+mst hi 64
+mst comp 56
+mst level 110
 
 # ---- T1 the kit: kick 1, snare 2, hat 3, open 4, clap 5, conga 8, shaker 9
 pat 1 1 16 1 50 20
