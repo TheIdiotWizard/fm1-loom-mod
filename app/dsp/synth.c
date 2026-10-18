@@ -2871,13 +2871,18 @@ void synth_render_on(synth_t *s, int core, int v0, int v1, float *l, float *r, f
     volatile uint32_t *prof = synth_prof[core != 0];
     int8_t ord[NVOICE];
     int no = 0, oi;
-    for (vi = v0; vi < v1; vi++) {               /* the voices grouped by engine (each engine's code fetched from
-                                                  * the flash once, then reused from the cache by the next) */
-        int e = s->v[vi].engine, j = no++;
+    for (vi = v0; vi < v1; vi++) {               /* on the FM-1 the voices grouped by engine (each engine's code
+                                                  * fetched from the flash once, then reused from the cache by the
+                                                  * next); the simulator keeps their order: its sums the same split
+                                                  * or whole (synth_test) */
+        int j = no++;
+#ifndef PLAT_HOST
+        int e = s->v[vi].engine;
         while (j > 0 && s->v[ord[j - 1]].engine > e) {
             ord[j] = ord[j - 1];
             j--;
         }
+#endif
         ord[j] = (int8_t)vi;
     }
     for (oi = 0; oi < no; oi++) {
