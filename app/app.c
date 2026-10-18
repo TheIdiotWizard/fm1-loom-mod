@@ -19,8 +19,24 @@ static int load_force = -1;             /* the script's "load N": the guard sees
 #endif
 
 _Static_assert(OBJ_NOBJ == 23 && OBJ_PROJ0 == 2, "the store map lists every object (APP_STORE_MAP)");
-_Static_assert(SMP_BANK_BASE >= 0xC1000u && SMP_BANK_BASE + SMP_BANK_SIZE <= 0xDC000u,
-               "the user sample bank between the project slots and the panel calibration");
+_Static_assert(SMP_REG0 >= 0xC1000u && SMP_REG0 + SMP_REG0_SIZE <= 0xDC000u && SMP_REG0 >= PLAT_DATA_LO,
+               "the user sample bank's first window between the project slots and the panel calibration");
+_Static_assert(SMP_REG1 == PLAT_XDATA1_LO && SMP_REG1 + SMP_REG1_SIZE == PLAT_XDATA1_HI &&
+               SMP_REG2 == PLAT_XDATA0_LO && SMP_REG2 + SMP_REG2_SIZE == PLAT_XDATA0_HI,
+               "the user sample bank's other windows: fm1-base's two extra windows, whole (plat.h)");
+_Static_assert(SMP_HDR_USED <= SMP_BANK_HDR, "the bank's entries fit its header");
+
+/* no store object (the calibration, the presets, the projects: APP_STORE_MAP, two sectors each) in a window of the
+ * sample bank: nothing else writes there (checked at every start; the store's own checks are fm1-base's) */
+static int store_clear_of_bank(void)
+{
+    static const uint32_t map[OBJ_NOBJ] = APP_STORE_MAP;
+    for (int o = 0; o < OBJ_NOBJ; o++)
+        for (int r = 0; r < SMP_NREG; r++)
+            if (map[o] + 0x2000u > smp_reg_off(r) && map[o] < smp_reg_off(r) + smp_reg_size(r))
+                return 0;
+    return 1;
+}
 
 /* the lights: LOOM-8's (the unlit buttons glowing, keys dim, PLAY green or red) on fm1-base's plat_lights */
 void loom_lights(uint32_t buttons, uint32_t keys, int glow, uint32_t dim_keys, int red)
@@ -39,7 +55,19 @@ void app_init(void)
 #ifndef PLAT_HOST
     plat_loom_init();
 #endif
-    smp_user_attach(plat_data(SMP_BANK_BASE));      /* the user bank, read in place (none without the flash) */
+    {   /* the user bank, read in place through its windows (none without the flash, or over a store object) */
+        const uint8_t *reg[SMP_NREG];
+        int ok = store_clear_of_bank();
+        for (int r = 0; r < SMP_NREG; r++)
+            reg[r] = ok ? plat_data(smp_reg_off(r)) : 0;
+        smp_user_attach(reg);
+#ifdef PLAT_HOST
+        if (!ok) {
+            printf("the sample bank's windows overlap a store object (APP_STORE_MAP)\n");
+            exit(2);
+        }
+#endif
+    }
     smp_user_scan();                                /* (an empty or torn bank: no user samples) */
     project_load(0);                                /* defaults when nothing (or another format) is saved */
     presets_load();

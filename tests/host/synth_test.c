@@ -322,57 +322,22 @@ static int period_of(const float *x, int n, int lo, int hi)   /* the autocorrela
     }
     return best;
 }
-/* a tiny IMA encoder (tools/sampleio.py's), to build a user bank in RAM */
-static const int IMA_S[89] = {7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60,
-    66, 73, 80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598,
-    658, 724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327, 3660, 4026,
-    4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818, 18500, 20350,
-    22385, 24623, 27086, 29794, 32767};
-static const int IMA_I[8] = {-1, -1, -1, -1, 2, 4, 6, 8};
-static void put32(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24); }
-static uint8_t bank[SMP_BANK_SIZE];
+#include "bank.h"                                /* a user bank built in RAM, its windows apart */
 static float gen_hz;
-static float gen_sine(int i) { return (float)(20000.0 * sin(6.283185307179586 * (double)gen_hz * i / SMP_RATE)); }
-/* one sample (gen(i): its values, int16 scale), as the bank's only entry, its bars stated */
+static int gen_rate = SMP_RATE;
+static float gen_sine(int i) { return (float)(20000.0 * sin(6.283185307179586 * (double)gen_hz * i / gen_rate)); }
+/* one sample (gen(i): its values, int16 scale), as the bank's only entry, its bars stated, at SMP_RATE */
 static void bank_gen(float (*gen)(int), int n, int root, int bars)
 {
-    int pred = 0, idx = 0, i;
-    uint32_t ck_off = 0, adp_off = (uint32_t)((n + 63) / 64) * 4u, len;
-    uint8_t *d = bank + SMP_BANK_HDR, *e = bank + 32;
-    memset(bank, 0, sizeof bank);
-    for (i = 0; i < n; i++) {
-        int x = (int)gen(i), step, diff, code = 0, vd;
-        if (i % 64 == 0)
-            put32(d + ck_off + (uint32_t)(i / 64) * 4u, (uint32_t)(pred & 0xFFFF) | (uint32_t)idx << 16);
-        step = IMA_S[idx];
-        diff = x - pred;
-        if (diff < 0) { code = 8; diff = -diff; }
-        vd = step >> 3;
-        if (diff >= step) { code |= 4; diff -= step; vd += step; }
-        if (diff >= step >> 1) { code |= 2; diff -= step >> 1; vd += step >> 1; }
-        if (diff >= step >> 2) { code |= 1; vd += step >> 2; }
-        pred = code & 8 ? pred - vd : pred + vd;
-        pred = pred > 32767 ? 32767 : pred < -32768 ? -32768 : pred;
-        idx += IMA_I[code & 7];
-        idx = idx < 0 ? 0 : idx > 88 ? 88 : idx;
-        d[adp_off + (uint32_t)(i >> 1)] |= (uint8_t)(code << ((i & 1) * 4));
-    }
-    len = adp_off + (uint32_t)(n + 1) / 2u;
-    put32(bank, SMP_BANK_MAGIC);
-    bank[4] = 1;
-    bank[6] = 1;
-    put32(bank + 8, len);
-    put32(bank + 12, smp_crc32(d, len));
-    memcpy(e, "sine", 4);
-    put32(e + 12, adp_off);
-    put32(e + 16, ck_off);
-    put32(e + 20, (uint32_t)n);
-    e[32] = (uint8_t)root;
-    e[34] = (uint8_t)bars;
+    bank_reset();
+    bank_add("sine", gen, n, root, bars, SMP_RATE);
+    bank_seal();
+    bank_attach();
 }
 static void bank_sine(float hz, int n, int root)       /* one sample, a sine, as the bank's only entry */
 {
     gen_hz = hz;
+    gen_rate = SMP_RATE;
     bank_gen(gen_sine, n, root, 0);
 }
 
@@ -467,7 +432,6 @@ static void sample_tests(void)
     }
     {   /* a user bank in RAM: a 441 Hz sine, its root A4 */
         bank_sine(441.0f, 8000, 69);
-        smp_user_attach(bank);
         check("a user bank: read, one sample, named", smp_user_scan() == 1 && !strcmp(smp_name(smp_factory()), "sine") &&
                                                        smp_get(smp_factory()) != 0);
         par[0][TP_E1] = (uint8_t)smp_factory();
@@ -490,14 +454,139 @@ static void sample_tests(void)
             synth_note_off(S, 0, 78);
         }
         bank[SMP_BANK_HDR + 100] ^= 0x55;          /* a flipped byte: the CRC refuses it */
+        bank_attach();
         check("a bank whose data does not match its CRC is refused", smp_user_scan() == 0 && !smp_get(smp_factory()));
         bank[SMP_BANK_HDR + 100] ^= 0x55;
-        bank[32 + 20] = 0xFF;                      /* a sample longer than the data */
-        bank[32 + 21] = 0xFF;
-        bank[32 + 22] = 0x01;
+        bank[SMP_ENT0 + 20] = 0xFF;                /* a sample longer than the data */
+        bank[SMP_ENT0 + 21] = 0xFF;
+        bank[SMP_ENT0 + 22] = 0x01;
+        bank_attach();
         check("an entry pointing past the data is refused", smp_user_scan() == 0);
-        smp_user_attach(0);
-        smp_user_scan();
+        bank_detach();
+    }
+    {   /* each sample its own rate: a 441 Hz sine at its root A4 is a period of 100 frames, its length its own */
+        static const int RT[4] = {11025, 16000, 22050, 32000};
+        int k;
+        ok = 1;
+        for (k = 0; k < 4; k++) {
+            int ns = RT[k] * 2 / 5, want = (int)((float)ns * 44100.0f / (float)RT[k]);
+            gen_hz = 441.0f;
+            gen_rate = RT[k];
+            bank_reset();
+            bank_add("sine", gen_sine, ns, 69, 0, RT[k]);
+            bank_seal();
+            bank_attach();
+            if (smp_user_scan() != 1 || smp_get(smp_factory())->rate != RT[k]) {
+                printf("    %d Hz: not read\n", RT[k]);
+                ok = 0;
+                continue;
+            }
+            par[0][TP_E1] = (uint8_t)smp_factory();
+            par[0][TP_E4] = SM_LOOP;
+            sample_run(69, 0.3f, &n);
+            p1 = period_of(sbuf + 2205, 4096, 80, 120);
+            sample_run(81, 0.2f, &n);
+            p2 = period_of(sbuf + 2205, 4096, 40, 60);
+            par[0][TP_E4] = SM_ONESHOT;
+            stop = sample_run(69, 0.6f, &n);
+            if (abs(p1 - 100) > 1 || abs(p2 - 50) > 1 || abs(stop - want) > 200) {
+                printf("    %d Hz: period %d (100), an octave up %d (50), ends %d (%d)\n", RT[k], p1, p2, stop, want);
+                ok = 0;
+            }
+        }
+        check("11025 / 16000 / 22050 / 32000 Hz: the root's pitch and the sample's length at each", ok);
+        gen_rate = SMP_RATE;
+        bank_detach();
+    }
+    {   /* the windows: a sample running from the first into the second, one in the last; every sample decoded as
+         * encoded, forwards and through the voice's reads backwards */
+        static float fwd[40000];
+        int i, ok2 = 1;
+        uint32_t at = smp_reg_v(1) - 4096u;          /* its checkpoints 4 KB before the seam: its ADPCM across it */
+        const smp_t *sm;
+        smp_cache_t c;
+        gen_hz = 300.0f;
+        gen_rate = 16000;
+        bank_reset();
+        bank_add_at("seam", gen_sine, 30000, 60, 0, 16000, at);
+        for (i = 0; i < 30000; i++)
+            fwd[i] = (float)bank_pcm[i] * (1.0f / 32768.0f);
+        gen_hz = 500.0f;
+        bank_add_at("last", gen_sine, 8000, 60, 0, 11025, smp_reg_v(2) + 64u);
+        bank_seal();
+        bank_attach();
+        check("a bank over the three windows: read, two samples", smp_user_scan() == 2);
+        sm = smp_get(smp_factory());
+        sprintf(what, "the seam's sample runs on into the next window (split at %u of %u)", sm ? sm->split : 0u,
+                sm ? sm->n : 0u);
+        check(what, sm && sm->adp2 && sm->split > 0u && sm->split < sm->n && !(sm->split & 1u));
+        smp_cache_reset(&c);
+        for (i = 0; sm && i < 30000; i++)
+            if (smp_one(&c, sm, i) != fwd[i]) {
+                printf("    sample %d: %f, encoded %f\n", i, (double)smp_one(&c, sm, i), (double)fwd[i]);
+                ok2 = 0;
+                break;
+            }
+        smp_cache_reset(&c);
+        for (i = 29999; sm && ok2 && i >= 0; i--)    /* backwards: each window again from its checkpoint */
+            if (smp_one(&c, sm, i) != fwd[i]) {
+                printf("    backwards, sample %d differs\n", i);
+                ok2 = 0;
+            }
+        check("across the seam: every sample as encoded, forwards and backwards", ok2);
+        par[0][TP_E1] = (uint8_t)smp_factory();
+        par[0][TP_E4] = SM_ONESHOT;
+        stop = sample_run(60, 2.5f, &n);
+        sprintf(what, "and the engine plays it whole at 16 kHz: %d frames (%d)", stop, 30000 * 44100 / 16000);
+        check(what, abs(stop - 30000 * 44100 / 16000) < 200);
+        sm = smp_get(smp_factory() + 1);
+        check("a sample in the last window (PLAT_XDATA0) at 11025 Hz", sm && sm->rate == 11025 && sm->n == 8000 &&
+                                                                   !sm->adp2);
+        /* bounds: checkpoints across a seam, three windows for one sample, too long, the wrong size or version */
+        bank_reset();
+        bank_add_at("x", gen_sine, 8000, 60, 0, 16000, smp_reg_v(1) - 64u);   /* 500 B of checkpoints, 64 left */
+        bank_seal();
+        bank_attach();
+        check("a sample whose checkpoints cross a window's end is refused", smp_user_scan() == 0);
+        bank_reset();
+        /* (its 12 KB of checkpoints before the first seam, its ADPCM on past the second window's end) */
+        bank_add_at("x", gen_sine, 2 * (int)SMP_REG1_SIZE + 4096, 60, 0, 16000, smp_reg_v(1) - 14000u);
+        bank_seal();
+        bank_attach();
+        check("a sample over three windows (two seams) is refused", smp_user_scan() == 0);
+        bank_reset();
+        bank_add("x", gen_sine, 8000, 60, 0, 16000);
+        bank_seal();
+        put32(bank + 8, SMP_BANK_SIZE - SMP_BANK_HDR + 4u);
+        bank_attach();
+        check("a bank longer than its windows is refused", smp_user_scan() == 0);
+        bank_seal();
+        put32(bank + 16, 0xD000u);
+        bank_attach();
+        check("a bank made for other windows is refused", smp_user_scan() == 0);
+        bank_seal();
+        bank[4] = 1;
+        bank_attach();
+        check("a version 1 bank is refused", smp_user_scan() == 0);
+        bank_seal();
+        bank[SMP_ENT0 + 36] = 0;
+        bank[SMP_ENT0 + 37] = 0;
+        bank_attach();
+        check("a sample with no rate is refused", smp_user_scan() == 0);
+        bank[SMP_ENT0 + 36] = 0x60;                 /* 60000 Hz */
+        bank[SMP_ENT0 + 37] = 0xEA;
+        bank_attach();
+        check("a sample at 60 kHz is refused", smp_user_scan() == 0);
+        bank[SMP_ENT0 + 36] = (uint8_t)16000;
+        bank[SMP_ENT0 + 37] = (uint8_t)(16000 >> 8);
+        bank[6] = SMP_NUSER + 1;
+        bank_attach();
+        check("33 samples are refused", smp_user_scan() == 0);
+        bank[6] = 1;
+        bank_attach();
+        check("and the same bank, put right, is read", smp_user_scan() == 1);
+        gen_rate = SMP_RATE;
+        bank_detach();
     }
     reset();
 }
@@ -583,7 +672,6 @@ static void slice_tests(void)
     par[0][TP_FTYPE] = FT_LP12;
     /* a test loop in the user bank: 8 sections, each its own pitch, its own rate (no bars) */
     bank_gen(gen_sections, 8 * SL_SEC, root, 0);
-    smp_user_attach(bank);
     check("the test loop: read", smp_user_scan() == 1);
     par[0][TP_E1] = (uint8_t)smp_factory();
     par[0][TP_E2] = 1;                           /* 8 slices: a section each */
@@ -755,6 +843,26 @@ static void slice_tests(void)
         sprintf(what, "tempo: the break's eighth lasts %d frames at 120 BPM (%d), %d at 90 (%d), %d at 90 and -12",
                 s120, want120, s90, want90, s12);
         check(what, abs(s120 - want120) < 64 && abs(s90 - want90) < 64 && abs(s12 - 2 * want90) < 128);
+    }
+    {   /* a user loop at its own rate: 16 kHz, no bars: a slice of n / 8 samples lasts n / 8 / 16000 s; stating
+         * 1 bar, an eighth of the bar at the tempo, whatever its rate */
+        int s16, sb, want16 = (int)((float)(8 * SL_SEC / 8) * 44100.0f / 16000.0f), wantb = 44100 * 2 / 8;
+        bank_reset();
+        bank_add("own", gen_sections, 8 * SL_SEC, 53, 0, 16000);
+        bank_add("bar", gen_sections, 8 * SL_SEC, 53, 1, 16000);
+        bank_seal();
+        bank_attach();
+        smp_user_scan();
+        synth_tempo(S, 120.0f);
+        par[0][TP_E1] = (uint8_t)smp_factory();
+        s16 = slice_run(53 + 2, 0.5f, &n, 1);
+        par[0][TP_E1] = (uint8_t)(smp_factory() + 1);
+        sb = slice_run(53 + 2, 0.5f, &n, 1);
+        sprintf(what, "a 16 kHz loop: a slice %d frames at its own speed (%d), %d as a bar at 120 (%d)", s16, want16,
+                sb, wantb);
+        check(what, abs(s16 - want16) < 64 && abs(sb - wantb) < 64);
+        bank_detach();
+        par[0][TP_E1] = SMP_BREAK;
     }
     {   /* bounded and finite: every factory sample and an empty slot, each count, pitch and gate at the ends,
          * notes 0 and 127 */

@@ -6,8 +6,10 @@
 
 For each song: its WAVs into OUT_DIR/<song>/ (breaks cut to one bar from BREAKS_DIR, the rest synthesized here:
 sung vocal phrases on a sixteenth grid, an 808, a horn stab, a "hey"), then the bank image OUT_DIR/<song>.bin by
-tools/loom_samples.py build, exactly as the FM-1 would be loaded (22050 Hz IMA ADPCM, one 52 KB bank). Every bank
-fits the device's bank; the tool refuses one that does not.
+tools/loom_samples.py build, exactly as the FM-1 would be loaded (IMA ADPCM in the 216 KB bank): the loops the slice
+engine cuts at 32000 Hz (LOOP: brighter cuts; a bar at 32 kHz is about 35 KB), the one-shots at the rate the
+tool chooses (22050 Hz: they fit). Every bank fits the device's bank (about 70 KB the largest); the tool refuses one
+that does not.
 
 The breaks are classic records (schwung-breakbeat's samples/): for private listening only. Nothing this script makes
 may be committed, published or put on a site: OUT_DIR is under build/ (git-ignored).
@@ -25,6 +27,7 @@ SR = 44100
 HERE = Path(__file__).resolve().parent
 TOOL = HERE.parent / "loom_samples.py"
 RNG = np.random.default_rng(7)
+LOOP = "@1%32k"                                       # a one-bar loop for the slice engine, at 32000 Hz
 
 
 def write(path, x):
@@ -241,7 +244,7 @@ def bank_jungle(B, out):
     """amen (bar 1 of amen01, 137.9 BPM) and think (114.4 BPM): at 170 both run fast and high, as they did"""
     write(out / "amen.wav", bar_of(B / "amen01.wav", 2))
     write(out / "think.wav", bar_of(B / "think.wav", 1))
-    return ["amen=" + str(out / "amen.wav") + "@1", "think=" + str(out / "think.wav") + "@1"]
+    return ["amen=" + str(out / "amen.wav") + LOOP, "think=" + str(out / "think.wav") + LOOP]
 
 
 def bank_garage(B, out):
@@ -252,7 +255,7 @@ def bank_garage(B, out):
               (14, 2, "", "a", "Eb5")], 132, voice="alto", fshift=1.05)
     write(out / "vox.wav", v)
     write(out / "sesame.wav", bar_of(B / "sesame.wav", 1))
-    return ["babyvox=" + str(out / "vox.wav") + "@1", "sesame=" + str(out / "sesame.wav") + "@1"]
+    return ["babyvox=" + str(out / "vox.wav") + LOOP, "sesame=" + str(out / "sesame.wav") + LOOP]
 
 
 def bank_hyperpop(B, out):
@@ -263,14 +266,14 @@ def bank_hyperpop(B, out):
              160, voice="soprano", fshift=1.22, hard=True, breath=0.02)
     write(out / "vox.wav", v)
     write(out / "808.wav", tr808(65.41, 1.0, 3.0))
-    return ["hypervox=" + str(out / "vox.wav") + "@1", "808=" + str(out / "808.wav") + ":36"]
+    return ["hypervox=" + str(out / "vox.wav") + LOOP, "808=" + str(out / "808.wav") + ":36"]
 
 
 def bank_house(B, out):
     """the sesame break (119 BPM) to filter into a top loop, and a "hey" on A3"""
     write(out / "sesame.wav", bar_of(B / "sesame.wav", 1))
     write(out / "hey.wav", sing([(0, 3, "h", "ei", "A3")], 122, steps=4, voice="alto", glide_ms=20))
-    return ["sesame=" + str(out / "sesame.wav") + "@1", "hey=" + str(out / "hey.wav") + ":57"]
+    return ["sesame=" + str(out / "sesame.wav") + LOOP, "hey=" + str(out / "hey.wav") + ":57"]
 
 
 def bank_pop(B, out):
@@ -280,7 +283,7 @@ def bank_pop(B, out):
               (13, 3, "t", "ou", "E5")], 110, voice="soprano", fshift=1.0)
     write(out / "hook.wav", v)
     write(out / "oh.wav", sing([(0, 3, "", "ou", "C5")], 110, steps=3.4, voice="soprano", vib=False))
-    return ["hook=" + str(out / "hook.wav") + "@1", "oh=" + str(out / "oh.wav") + ":72"]
+    return ["hook=" + str(out / "hook.wav") + LOOP, "oh=" + str(out / "oh.wav") + ":72"]
 
 
 def bank_hiphop(B, out):
@@ -288,7 +291,7 @@ def bank_hiphop(B, out):
     the factory one"""
     write(out / "funky.wav", bar_of(B / "funkydrummer.wav", 2))
     write(out / "horn.wav", horn())
-    return ["funky=" + str(out / "funky.wav") + "@1", "horn=" + str(out / "horn.wav") + ":58"]
+    return ["funky=" + str(out / "funky.wav") + LOOP, "horn=" + str(out / "horn.wav") + ":58"]
 
 
 BANKS = {"jungle": bank_jungle, "garage": bank_garage, "hyperpop": bank_hyperpop, "house": bank_house,

@@ -70,7 +70,9 @@ tests/run_tests.sh
 
 Runs, on the build machine: the units' own tests (the synth, the drumline, the FX, the sequencer:
 `tests/host/*_test.sh`); the DSP's fingerprints against a reference (`tests/host/dsp_hash.sh save` before a change
-that must not move a sample, then the tests compare); the user sample bank's tool; fm1-base's update-path tests
+that must not move a sample, then the tests compare); the user sample bank's tool (`tests/host/bank_test.py`: its
+layout over the three flash windows, the rates, the bounds) and an upload played through the app
+(`tests/scenarios/upload.xy`); fm1-base's update-path tests
 against `app/build/loom.fwsc`; the browser build; and the whole app in fm1-base's simulator
 (`tests/scenarios/*.xy`, backup and restore among them), with its screenshots and audio in `app/build/scenarios/`
 and the layout audit. Silent: the audio goes to WAV files. fm1-base's own tests: `base/tests/run_tests.sh`.
@@ -94,7 +96,10 @@ in a row bring up a safe mode with USB on; the web installer can put M-VAVE's fi
 
 Backup and restore of the projects and the user presets: `python3 base/tools/fm1_backup.py backup FILE --magic LM8B`
 and `restore FILE` (or the site's Backup page). The user sample bank is not in a backup: `tools/loom_samples.py`
-loads it from the WAV files.
+loads it from the WAV files. The bank: 216 KB of flash in three windows (`app/dsp/sample.h`: 0xC1000..0xDBFFF, and
+fm1-base's PLAT_XDATA1 0xE5000..0xFBFFF and PLAT_XDATA0 0x93000..0x96FFF), which nothing else writes: not the store
+(app.c checks the map), not a restore, not an update (the loader writes below 0x93000 and erases a sector above it
+only for an update record, which the bank never holds: `tools/sampleio.py`).
 
 ## Publishing a release
 

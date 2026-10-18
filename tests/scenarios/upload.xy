@@ -1,0 +1,28 @@
+# the user bank uploaded as from USB: the SysEx frames tools/loom_samples.py would send (build/gen/user_bank.syx, made
+# by tests/run_tests.sh: "syx"), each through samples.c (BEGIN, the pages, the header's parts, END: its CRC checked);
+# then the bank as the same tool's image would leave it ("samples"), the same; then an upload over it, and the first
+# sample, at 16 kHz, on track 3's sample engine at its own pitch
+expect user 0
+upload build/gen/user_bank.syx
+expect user 2
+expect rate1 16000
+expect rate2 22050
+expect rate3 0
+samples build/gen/user_bank.bin
+expect user 2
+expect rate1 16000
+upload build/gen/user_bank.syx
+expect user 2
+spin ALGO 2
+expect trk 3
+tap EDIT
+param 3 0 9
+param 3 1 8
+param 3 4 0
+expect par3.1 8
+wait 60
+shot upload_user1.png
+wav upload_user1.wav
+tapkey w0
+wait 400
+wavstop

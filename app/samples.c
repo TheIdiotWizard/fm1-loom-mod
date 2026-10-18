@@ -3,36 +3,45 @@
  * Leo Kuroshita (@kurogedelic), Hugelton Instruments. */
 /* LOOM-8's user sample bank over USB-MIDI SysEx (tools/loom_samples.py): F0 7D 46 4C cmd args.. F7, the
  * Felucca editor's framing, 7-bit bytes, data packed 7 to 8 (a byte of high bits, then up to seven bytes).
- * One bank (slot 0): flash 0xCF000..0xDBFFF (dsp/sample.h), a 1024-byte header then the data.
+ * One bank (slot 0), 216 KB over three flash windows (dsp/sample.h SMP_REG*); an offset is virtual, through the
+ * windows end to end: a 2048-byte header (at 0xC1000), then the data.
  *   INFO        1                    -> "LOOM-8 <version>", 0 0 0 0 0 0
  *   SMP_BEGIN  11 slot               -> slot, rc     the bank's user samples vanish, its first sector is erased
- *   SMP_WRITE  12 slot off3 data     -> slot, off3, rc    256 bytes (packed) at off (>= 1024, 256-aligned) of the
- *                                       bank; a 4 KB boundary is erased first
+ *   SMP_WRITE  12 slot off3 data     -> slot, off3, rc    256 bytes (packed) at off (>= 2048, 256-aligned) of the
+ *                                       bank; a 4 KB boundary (a sector of a window) is erased first
  *   SMP_END    13 slot               -> slot, rc     the header staged by SMP_HDR checked (its CRC against the
- *                                       data in flash), written last: the commit
- *   SMP_ERASE  14 slot               -> slot, rc     the whole bank erased
- *   SMP_INFO   15                    -> 1, size KB, used KB, count, then each sample's name (0-terminated)
- *   SMP_HDR    16 slot part data     -> slot, part, rc    the header in two parts of 320 bytes (packed), into RAM
+ *                                       data in flash; no update record in the extra windows), written last:
+ *                                       the commit
+ *   SMP_ERASE  14 slot               -> slot, rc     the whole bank erased (54 sectors: a few seconds)
+ *   SMP_INFO   15 [from]             -> 2, size KB (2 bytes, 7 bits each, low first), used KB (2), count, from, k,
+ *                                       then samples from .. from + k - 1: name (0-terminated), rate (3), length
+ *                                       in samples (3); k at most SB_INFO_K (ask again from from + k)
+ *   SMP_HDR    16 slot part data     -> slot, part, rc    the header in parts of 320 bytes (packed), into RAM:
+ *                                       parts 0..4 (the 1344 bytes used: 64 + 32 entries of 40)
  *   PING       25                    -> 0
- * rc: 0 ok, 1 size / offset, 2 erase, 3 write, 4 not begun (the bank is live), 5 header, 6 CRC, 7 no samples.
+ * rc: 0 ok, 1 size / offset, 2 erase, 3 write, 4 not begun (the bank is live), 5 header, 6 CRC, 7 no samples,
+ * 8 an update record's mark ("AT" at 0xF06 of a sector in PLAT_XDATA0 / 1: the loader would erase it).
  * Every frame is answered (the tool waits for each). The erases and writes run with the interrupts off a
  * sector or a page at a time (the audio drops out while a bank is written): fm1-base's plat_data_erase /
- * plat_data_write (the data area); the bank is read in place (plat_data). Part of the app's unity build, after ui.c;
- * fm1-base hands it the SysEx frames it does not take (app_sysex). */
+ * plat_data_write (the data area and its extra windows); the bank is read in place (plat_data). Part of the app's
+ * unity build, after ui.c; fm1-base hands it the SysEx frames it does not take (app_sysex). */
 #define SB_HDR0 0x7D
 #define SB_HDR1 0x46
 #define SB_HDR2 0x4C
 enum { SB_INFO = 1, SB_BEGIN = 11, SB_WRITE, SB_END, SB_ERASE, SB_SINFO, SB_HDR, SB_PING = 25 };
 #define SB_PART 320u                                 /* SMP_HDR: a header part, bytes */
+#define SB_NPART ((SMP_HDR_USED + SB_PART - 1u) / SB_PART)
+#define SB_INFO_K 12u                                /* SMP_INFO: samples a reply (12 x 18 bytes at most) */
 
 static uint8_t sb_out[288];
 static uint32_t sb_n;
-/* the staged header (608 bytes used) and a page of data live in project.c's io_buf (3840 B): a project is
+/* the staged header (1344 bytes used) and a page of data live in project.c's io_buf (3840 B): a project is
  * never loaded or saved between the frames of an upload (a save in the middle spoils the staged header: the
  * END then fails and the tool says so) */
 #define sb_hdr io_buf
-#define sb_buf (io_buf + 1024)
-typedef char sb_fits[(1024u + 256u <= sizeof io_buf && 2u * SB_PART <= 1024u) ? 1 : -1];
+#define sb_buf (io_buf + SMP_BANK_HDR)
+typedef char sb_fits[(SMP_BANK_HDR + 256u <= sizeof io_buf && SB_NPART * SB_PART <= SMP_BANK_HDR &&
+                      SB_INFO_K * (SMP_NAME + 6u) + 16u <= sizeof sb_out) ? 1 : -1];
 static uint8_t sb_open;                              /* begun: the bank is being written */
 
 static void sb_begin_reply(uint32_t cmd)
@@ -66,20 +75,52 @@ static uint32_t sb_unpack7(const uint8_t *a, uint32_t na, uint8_t *out, uint32_t
     }
     return n;
 }
-static int sb_flash(void) { return plat_data(SMP_BANK_BASE) != 0; }   /* the flash is there (fm1-base's data area) */
-static int sb_erase(uint32_t off) { return plat_data_erase(SMP_BANK_BASE + off); }   /* one 4 KB sector of the bank
-                                                                                        * (the audio silenced) */
+static int sb_flash(void)                            /* the flash is there (fm1-base's data area and its windows) */
+{
+    for (int r = 0; r < SMP_NREG; r++)
+        if (!plat_data(smp_reg_off(r)) || !plat_data(smp_reg_off(r) + smp_reg_size(r) - 1u))
+            return 0;
+    return 1;
+}
+static int sb_erase(uint32_t v)                      /* the 4 KB sector at virtual offset v (the audio silenced) */
+{
+    uint32_t off;
+    return smp_reg_of(v, &off) < 0 ? -1 : plat_data_erase(off);
+}
+static int sb_write(uint32_t v, const uint8_t *p, uint32_t n)   /* n bytes at v, inside one window */
+{
+    uint32_t off;
+    int r = smp_reg_of(v, &off);
+    if (r < 0 || n > smp_reg_off(r) + smp_reg_size(r) - off)
+        return -1;
+    return plat_data_write(off, p, n);
+}
+/* an update record's mark in the bank's data: "AT" at bytes 0xF06..0xF07 of a sector of an extra window (the
+ * update loader erases a sector it takes for a record: base/bsp/loader/ldr_core.c) */
+static int sb_record_mark(uint32_t len)
+{
+    for (int r = 1; r < SMP_NREG; r++)
+        for (uint32_t s = 0; s < smp_reg_size(r); s += 0x1000u) {
+            uint32_t v = smp_reg_v(r) + s + 0xF06u;
+            const uint8_t *p = plat_data(smp_reg_off(r) + s + 0xF06u);
+            if (v + 2u <= SMP_BANK_HDR + len && p && p[0] == 'A' && p[1] == 'T')
+                return 1;
+        }
+    return 0;
+}
 static uint32_t sb_rd32(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
 
 static uint32_t sb_end(void)
 {
-    uint32_t len = sb_rd32(sb_hdr + 8), cnt = sb_hdr[6];
-    if (sb_rd32(sb_hdr) != SMP_BANK_MAGIC || sb_hdr[4] != 1 || !cnt || cnt > SMP_NUSER ||
-        len > SMP_BANK_SIZE - SMP_BANK_HDR)
+    uint32_t len = sb_rd32(sb_hdr + 8), cnt = sb_hdr[6], crc;
+    if (sb_rd32(sb_hdr) != SMP_BANK_MAGIC || sb_hdr[4] != SMP_BANK_VER || sb_hdr[5] || !cnt || cnt > SMP_NUSER ||
+        len > SMP_BANK_SIZE - SMP_BANK_HDR || sb_rd32(sb_hdr + 16) != SMP_BANK_SIZE)
         return 5;
-    if (smp_crc32(plat_data(SMP_BANK_BASE + SMP_BANK_HDR), len) != sb_rd32(sb_hdr + 12))
+    if (smp_bank_crc(len, &crc) || crc != sb_rd32(sb_hdr + 12))
         return 6;
-    if (plat_data_write(SMP_BANK_BASE, sb_hdr, 32u + cnt * 36u))
+    if (sb_record_mark(len))
+        return 8;
+    if (plat_data_write(SMP_BANK_BASE, sb_hdr, SMP_ENT0 + cnt * SMP_ENT))
         return 3;
     sb_open = 0;
     return smp_user_scan() == (int)cnt ? 0u : 7u;
@@ -109,14 +150,30 @@ static int smp_frame(const uint8_t *p, uint32_t n)
     case SB_PING:
         sb_b(0);
         break;
-    case SB_SINFO:
-        sb_b(1);
+    case SB_SINFO: {
+        uint32_t from = na ? a[0] : 0u, used = (smp_user_bytes() + 1023u) / 1024u, cnt = (uint32_t)smp_user_count(), k;
+        k = from < cnt ? cnt - from : 0u;
+        k = k > SB_INFO_K ? SB_INFO_K : k;
+        sb_b(2);
         sb_b(SMP_BANK_SIZE / 1024u);
-        sb_b((smp_user_bytes() + 1023u) / 1024u);
-        sb_b((uint32_t)smp_user_count());
-        for (i = 0; i < (uint32_t)smp_user_count(); i++)
+        sb_b(SMP_BANK_SIZE / 1024u >> 7);
+        sb_b(used);
+        sb_b(used >> 7);
+        sb_b(cnt);
+        sb_b(from);
+        sb_b(k);
+        for (i = from; i < from + k; i++) {
+            const smp_t *sm = smp_get(smp_factory() + (int)i);
             sb_str(smp_name(smp_factory() + (int)i));
+            sb_b(sm->rate);
+            sb_b(sm->rate >> 7u);
+            sb_b(sm->rate >> 14u);
+            sb_b(sm->n);
+            sb_b(sm->n >> 7);
+            sb_b(sm->n >> 14);
+        }
         break;
+    }
     case SB_BEGIN: case SB_ERASE:
         if (na < 1u || a[0] != 0u)
             return 1;
@@ -147,10 +204,11 @@ static int smp_frame(const uint8_t *p, uint32_t n)
             rc = 4;
         else if (!sb_flash())
             rc = 3;
-        else {
+        else {                                       /* (a 256-byte page never crosses a window: they are 4 KB
+                                                      * aligned) */
             if (!(off & 0xFFFu) && sb_erase(off))
                 rc = 2;
-            if (!rc && plat_data_write(SMP_BANK_BASE + off, sb_buf, len))
+            if (!rc && sb_write(off, sb_buf, len))
                 rc = 3;
         }
         sb_b(a[0]);
@@ -162,11 +220,11 @@ static int smp_frame(const uint8_t *p, uint32_t n)
     }
     case SB_HDR: {
         uint32_t part;
-        if (na < 2u || a[0] != 0u || a[1] > 1u)
+        if (na < 2u || a[0] != 0u || a[1] >= SB_NPART)
             return 1;
         part = a[1];
         if (part == 0u)
-            for (i = 0; i < 2u * SB_PART; i++)
+            for (i = 0; i < SB_NPART * SB_PART; i++)
                 sb_hdr[i] = 0;
         sb_unpack7(a + 2, na - 2u, sb_hdr + part * SB_PART, SB_PART);
         sb_b(a[0]);

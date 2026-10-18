@@ -15,8 +15,11 @@
  *   cores N                      the second core on (1) or off (0): its job then runs in place
  *   samples FILE                 the user sample bank from FILE (an image from tools/loom_samples.py build), as an
  *                                upload would leave it (empty at boot)
+ *   upload FILE                  an upload's SysEx frames (tools/loom_samples.py syx), each through samples.c as from
+ *                                USB; a frame not answered, or answered with an error, fails the run
  *   expect WHAT VALUE            besides fm1-base's: playing, scene, voices, guard, cores, dirty, mem (the last save's
- *                                share of a project slot, %), tempo, trk, punch_drum / punch_mel (the masks in effect,
+ *                                share of a project slot, %), tempo, trk, user / userbytes / rateN (the user bank's
+ *                                samples, its data's bytes, user N's rate), punch_drum / punch_mel (the masks in effect,
  *                                PX_* bits), parT.P; and with more words: step T VALUE, page NAME, comp T S VALUE (prints
  *                                both components; checks the first), note T PAT S VALUE
  * LOOM_THEME=N: the screenshots in theme N (ui.c). The layout audit (gfx_loom.c): its findings fail the run. */
@@ -129,6 +132,7 @@ static void steps_print(int t, int p)
     }
 }
 
+static int isnum(const char *s);
 /* fm1-base's expect, for LOOM-8's own state with one value */
 int app_expect(const char *what, int *got)
 {
@@ -150,6 +154,14 @@ int app_expect(const char *what, int *got)
         *got = (int)(seq_tempo(&seq) + 0.5f);
     else if (!strcmp(what, "trk"))
         *got = proj.trk_sel + 1;
+    else if (!strcmp(what, "user"))                 /* the user bank: its samples, its data's bytes, user N's rate */
+        *got = smp_user_count();
+    else if (!strcmp(what, "userbytes"))
+        *got = (int)smp_user_bytes();
+    else if (!strncmp(what, "rate", 4) && isnum(what + 4)) {
+        const smp_t *sm = smp_get(smp_factory() + atoi(what + 4) - 1);
+        *got = sm ? sm->rate : 0;
+    }
     else if (!strcmp(what, "punch_drum"))           /* the punch masks in effect (seq.h PX_* bits) */
         *got = (int)eng_punch_drum;
     else if (!strcmp(what, "punch_mel"))
@@ -686,10 +698,10 @@ int app_host_cmd(const char *cmd, const char *a, const char *b, const char *c, c
         engine_set(t, p, v);
         run_ms(1);
     } else if (!strcmp(cmd, "samples")) {           /* samples FILE: the user bank as uploaded */
-        static uint8_t img[SMP_BANK_SIZE];
+        static uint8_t img[SMP_BANK_SIZE + 1];
         FILE *bf = fopen(a, "rb");
         size_t nb;
-        uint32_t o;
+        uint32_t v;
         if (!bf) {
             printf("no bank %s\n", a);
             exit(2);
@@ -697,12 +709,64 @@ int app_host_cmd(const char *cmd, const char *a, const char *b, const char *c, c
         memset(img, 0xFF, sizeof img);
         nb = fread(img, 1, sizeof img, bf);
         fclose(bf);
+        if (nb > SMP_BANK_SIZE) {
+            printf("bank %s: larger than the bank's windows (%u B)\n", a, (unsigned)SMP_BANK_SIZE);
+            exit(2);
+        }
         smp_user_drop();
-        for (o = 0; o < SMP_BANK_SIZE; o += 0x1000u) {   /* as written: the bank's sectors erased, then the image */
-            plat_data_erase(SMP_BANK_BASE + o);
-            plat_data_write(SMP_BANK_BASE + o, img + o, 0x1000u);
+        for (v = 0; v < SMP_BANK_SIZE; v += 0x1000u) {   /* as written: each sector erased, then the image's */
+            uint32_t off;
+            smp_reg_of(v, &off);
+            plat_data_erase(off);
+            plat_data_write(off, img + v, 0x1000u);
         }
         printf("samples: %s, %d B, %d user samples\n", a, (int)nb, smp_user_scan());
+        run_ms(1);
+    } else if (!strcmp(cmd, "upload")) {            /* upload FILE: the SysEx frames of an upload (tools/loom_samples.py
+                                                     * syx), each through samples.c as from USB, its answer checked */
+        static uint8_t fr[2048];
+        FILE *uf = fopen(a, "rb");
+        int c, nf = 0;
+        uint32_t n = 0;
+        if (!uf) {
+            printf("no frames %s\n", a);
+            exit(2);
+        }
+        while ((c = fgetc(uf)) != EOF) {
+            if (c == 0xF0) {
+                n = 0;
+                continue;
+            }
+            if (c != 0xF7) {
+                if (n < sizeof fr)
+                    fr[n++] = (uint8_t)c;
+                continue;
+            }
+            if (!smp_frame(fr, n) || sb_n < 7u || sb_out[4] != fr[3]) {
+                printf("upload: frame %d (command %d) not answered\n", nf, n > 3 ? fr[3] : -1);
+                exit(2);
+            }
+            if (fr[3] >= SB_BEGIN && fr[3] <= SB_HDR && fr[3] != SB_SINFO && sb_out[sb_n - 2u]) {
+                printf("upload: frame %d (command %d) failed, rc %d\n", nf, fr[3], sb_out[sb_n - 2u]);
+                exit(2);
+            }
+            if (fr[3] == SB_SINFO) {                /* the info's answer: size, used, count, names, rates, lengths */
+                uint32_t i = 13, k;
+                printf("info: version %d, %d KB, %d KB used, %d samples from %d:", sb_out[5], sb_out[6] | sb_out[7] << 7,
+                       sb_out[8] | sb_out[9] << 7, sb_out[10], sb_out[11]);
+                for (k = 0; k < sb_out[12] && i < sb_n; k++) {
+                    printf(" %s", (const char *)sb_out + i);
+                    i += (uint32_t)strlen((const char *)sb_out + i) + 1u;
+                    printf(" %u Hz %u", (unsigned)(sb_out[i] | sb_out[i + 1] << 7 | sb_out[i + 2] << 14),
+                           (unsigned)(sb_out[i + 3] | sb_out[i + 4] << 7 | sb_out[i + 5] << 14));
+                    i += 6;
+                }
+                printf("\n");
+            }
+            nf++;
+        }
+        fclose(uf);
+        printf("upload: %s, %d frames, %d user samples, %u B\n", a, nf, smp_user_count(), (unsigned)smp_user_bytes());
         run_ms(1);
     } else if (!strcmp(cmd, "load"))
         load_force = atoi(a);

@@ -5,17 +5,22 @@
 tools/loom_samples.py (the user bank, uploaded over USB): WAV reading, resampling, IMA ADPCM with
 checkpoints, and the user bank's layout (app/dsp/sample.h).
 
-A sample is mono IMA ADPCM at 22050 Hz, 4 bits a sample, the low nibble first, from predictor 0 / index 0.
-Every SMP_BLK (64) samples a checkpoint: the decoder's state before that sample, (predictor & 0xFFFF) |
-index << 16, one uint32 each, so a voice can start, loop and play backwards from any block (dsp/sample.c
-decodes a block of 65 at a time into the voice's cache).
+A sample is mono IMA ADPCM, 4 bits a sample, the low nibble first, from predictor 0 / index 0: the factory's at
+22050 Hz, a user sample at its own rate (RATES; the firmware plays 4000..48000 Hz). Every SMP_BLK (64) samples a
+checkpoint: the decoder's state before that sample, (predictor & 0xFFFF) | index << 16, one uint32 each, so a voice
+can start, loop and play backwards from any block (dsp/sample.c decodes a block of 65 at a time into the voice's
+cache). A second of sound takes 0.5625 bytes a sample: 12.4 KB at 22050 Hz.
 
-The user bank (flash 0xCF000, 52 KB): a 1024-byte header, then the data (each sample's checkpoints,
-4-aligned, and its ADPCM). Header: magic "LSMP", version 1, count, data length, CRC-32 of the data, then
-up to 16 entries of 36 bytes: name (12, NUL-padded), ADPCM offset, checkpoint offset (from the data's
-start), samples, loop start, loop end (samples; end 0: none), root note, flags, bars (a loop of that many
-bars: the slice engine follows the tempo with it; 0 = not stated, as in banks made before it was there),
-one spare.
+The user bank (216 KB): three flash windows (REGIONS), one virtual space through them end to end, offset 0 the
+header (at 0xC1000). The header (2048 bytes): magic "LSMP", version 2, count, flags, data length (from byte 2048),
+CRC-32 of the data, the bank's size it was made for, then from byte 64 up to 32 entries of 40 bytes: name (12,
+NUL-padded), ADPCM offset, checkpoint offset (virtual, from the bank's start), samples, loop start, loop end
+(samples; end 0: none), root note, flags, bars (a loop of that many bars: the slice engine follows the tempo with
+it; 0 = not stated), a spare, rate (Hz, 16 bits), two spare. The data: each sample's checkpoints (4-aligned, in
+one window) then its ADPCM (which may run on from one window into the next, once), one after another in the
+order given; 0xFF between. In the two extra windows (fm1-base's PLAT_XDATA1 / 0) no sector may carry an update
+record's mark, "AT" at bytes 0xF06..0xF07 (the update loader would erase that sector): the layout moves a sample
+on by 4 bytes until none does.
 """
 import math
 import re
@@ -24,12 +29,22 @@ import zlib
 from functools import reduce
 from operator import add
 
-RATE = 22050
+RATE = 22050                    # the factory samples' rate, and a user sample's unless it asks for another
+RATES = (11025, 16000, 22050, 32000)   # what the tool offers (dsp/sample.h: 4000..48000 played)
+RATE_MIN, RATE_MAX = 4000, 48000
 BLK = 64
-BANK_SIZE = 0xD000              # 0xCF000 .. 0xDBFFF
-BANK_HDR = 1024
+# the bank's windows (dsp/sample.h SMP_REG*), in the order it fills them: flash offset, size
+REGIONS = [(0xC1000, 0x1B000),  # the data area after the projects, up to the calibration (108 KB)
+           (0xE5000, 0x17000),  # fm1-base's PLAT_XDATA1 (92 KB)
+           (0x93000, 0x4000)]   # fm1-base's PLAT_XDATA0 (16 KB)
+XDATA = (1, 2)                  # the windows where no sector may carry an update record's mark
+REC_MARK = 0xF06                # "AT" there, in a sector: an update record (base/bsp/loader/ldr_core.c)
+BANK_SIZE = sum(n for _, n in REGIONS)
+BANK_HDR = 2048
 BANK_MAX_DATA = BANK_SIZE - BANK_HDR
-BANK_N = 16
+BANK_N = 32
+BANK_VER = 2
+ENT0, ENT = 64, 40
 BANK_MAGIC = 0x504D534C         # "LSMP"
 NAME_LEN = 12
 BARS_MAX = 16                   # (dsp/sample.h SMP_BARS_MAX)
@@ -107,9 +122,24 @@ def read_any_wav(path):
 
 
 def resample(x, sr, to):
-    """crude anti-alias (moving average over the ratio), then linear interpolation"""
+    """down: a windowed-sinc low-pass under the new rate's half (with numpy; without, a moving average over the ratio),
+    then linear interpolation"""
     if sr == to:
         return list(x)
+    try:
+        import numpy as np
+    except ImportError:
+        np = None
+    if np is not None and len(x) > 1:
+        a = np.asarray(x, dtype=np.float64)
+        if to < sr:
+            fc = 0.45 * to / sr                         # the cut, cycles a sample: 90 % of the new half rate
+            half = int(math.ceil(8.0 / fc))
+            t = np.arange(-half, half + 1)
+            h = 2.0 * fc * np.sinc(2.0 * fc * t) * np.blackman(len(t))
+            a = np.convolve(a, h / h.sum(), mode="same")
+        n = int(math.ceil((len(a) - 1) * to / sr))
+        return np.interp(np.arange(n) * (sr / to), np.arange(len(a)), a).tolist()
     if sr > to:
         k = max(1, int(round(sr / to)))
         if k == 2:
@@ -202,37 +232,138 @@ def clean_name(name):
     return (s or "sample")[:NAME_LEN - 1]
 
 
+def region_starts():
+    """each window's first virtual offset"""
+    out, v = [], 0
+    for _, n in REGIONS:
+        out.append(v)
+        v += n
+    return out
+
+
+def region_of(v):
+    """the window of virtual offset v (len(REGIONS): past the bank)"""
+    for r, v0 in enumerate(region_starts()):
+        if v0 <= v < v0 + REGIONS[r][1]:
+            return r
+    return len(REGIONS)
+
+
+def flash_of(v):
+    """the flash offset of virtual offset v"""
+    r = region_of(v)
+    return REGIONS[r][0] + v - region_starts()[r]
+
+
+def sample_bytes(n):
+    """a sample of n samples in the bank: its checkpoints and its ADPCM, 4-aligned"""
+    return ((n + BLK - 1) // BLK) * 4 + ((n + 1) // 2 + 3) // 4 * 4
+
+
+def bytes_per_second(rate):
+    return rate * (0.5 + 4.0 / BLK)
+
+
+def _place(blobs, pad):
+    """lay the samples out one after another from BANK_HDR: [(ck offset, ADPCM offset)] and the end"""
+    starts = region_starts() + [BANK_SIZE]
+    v, out = BANK_HDR, []
+    for k, (ckb, adpb) in enumerate(blobs):
+        v = (v + pad[k] + 3) & ~3
+        while True:
+            r = region_of(v)
+            if r >= len(REGIONS):
+                raise ValueError("too long")
+            if v + len(ckb) > starts[r + 1]:            # the checkpoints in one window
+                v = starts[r + 1]
+                continue
+            a = v + len(ckb)
+            ra = region_of(a) if a < BANK_SIZE else len(REGIONS)
+            if ra >= len(REGIONS) or a + len(adpb) > starts[min(ra + 2, len(REGIONS))]:
+                if ra + 1 >= len(REGIONS):              # past the last window
+                    raise ValueError("too long")
+                v = starts[ra + 1]                      # it would cross two seams: from the next window
+                continue
+            break
+        out.append((v, a))
+        v = a + len(adpb)
+    if v > BANK_SIZE:
+        raise ValueError("too long")
+    return out, v
+
+
+def _marks(img, end):
+    """virtual offsets in the extra windows where an update record's mark lies"""
+    starts = region_starts()
+    out = []
+    for r in XDATA:
+        for sec in range(0, REGIONS[r][1], 0x1000):
+            v = starts[r] + sec + REC_MARK
+            if v + 2 <= end and img[v:v + 2] == b"AT":
+                out.append(v)
+    return out
+
+
 def user_bank(samples):
-    """samples: [(name, int16 list at RATE, root, (loop start, loop end) or None[, bars])] -> the bank image
-    (header + data, ready for flash 0xCF000), without the padding to BANK_SIZE"""
+    """samples: [(name, int16 list, root, (loop start, loop end) or None[, bars[, rate]])] (rate: the samples'
+    own, Hz; default RATE) -> the bank image (header + data, from virtual offset 0, ready for the windows), without
+    the padding to BANK_SIZE"""
     if not 1 <= len(samples) <= BANK_N:
         raise ValueError(f"1..{BANK_N} samples in the bank")
-    ents, data = [], bytearray()
+    blobs, meta = [], []
     for name, s, root, loop, *more in samples:
         bars = more[0] if more else 0
+        rate = more[1] if len(more) > 1 else RATE
         if not 0 <= bars <= BARS_MAX:
             raise ValueError(f"{name}: {bars} bars (0..{BARS_MAX})")
+        if not RATE_MIN <= rate <= RATE_MAX:
+            raise ValueError(f"{name}: {rate} Hz ({RATE_MIN}..{RATE_MAX})")
         if not s:
             raise ValueError(f"{name}: no audio")
         adp, ck = ima_encode(s)
-        ck_off = len(data)
-        data += struct.pack("<%dI" % len(ck), *ck)
-        adp_off = len(data)
-        data += adp
-        while len(data) & 3:
-            data.append(0)
+        blobs.append((struct.pack("<%dI" % len(ck), *ck), adp))
         ls, le = (loop if loop else (0, 0))
         le = min(le, len(s))
         if le <= ls:
             ls = le = 0
-        ents.append(struct.pack("<12sIIIIIBBBx", clean_name(name).encode().ljust(NAME_LEN, b"\0"), adp_off, ck_off,
-                                len(s), ls, le, max(0, min(127, root)), 0, bars))
-    if len(data) > BANK_MAX_DATA:
-        raise ValueError(f"too long: {len(data)} B, the bank holds {BANK_MAX_DATA} B "
-                         f"(about {BANK_MAX_DATA * 2 * 8 / 9 / RATE:.1f} s in all)")
-    hdr = struct.pack("<IHBBII16x", BANK_MAGIC, 1, len(ents), 0, len(data), zlib.crc32(data) & 0xFFFFFFFF)
-    hdr += b"".join(ents)
-    return hdr.ljust(BANK_HDR, b"\0") + bytes(data)
+        meta.append((clean_name(name), len(s), ls, le, max(0, min(127, root)), bars, rate))
+    pad = [0] * len(blobs)
+    for _ in range(4096):
+        try:
+            where, end = _place(blobs, pad)
+        except ValueError:
+            used = BANK_HDR + sum(len(a) + len(b) for a, b in blobs)
+            raise ValueError(f"too long: {used - BANK_HDR} B, the bank holds {BANK_MAX_DATA} B (about "
+                             f"{BANK_MAX_DATA / bytes_per_second(RATE):.1f} s at {RATE} Hz, "
+                             f"{BANK_MAX_DATA / bytes_per_second(11025):.1f} s at 11025 Hz)") from None
+        img = bytearray(b"\xFF" * end)
+        for (ckb, adpb), (c, a) in zip(blobs, where):
+            img[c:c + len(ckb)] = ckb
+            img[a:a + len(adpb)] = adpb
+        marks = _marks(img, end)
+        if not marks:
+            break
+        for k, (c, a) in enumerate(where):              # move the sample holding the mark on by 4 bytes
+            if c <= marks[0] < a + len(blobs[k][1]):
+                pad[k] += 4
+                break
+        else:
+            raise ValueError("an update record's mark outside the samples")  # (0xFF between them: never)
+    else:
+        raise ValueError("could not keep the update record's mark out of the bank")
+    data = bytes(img[BANK_HDR:])
+    ents = b"".join(struct.pack("<12sIIIIIBBBBHH", nm.encode().ljust(NAME_LEN, b"\0"), a, c, n, ls, le, root, 0,
+                                bars, 0, rate, 0)
+                    for (nm, n, ls, le, root, bars, rate), (c, a) in zip(meta, where))
+    hdr = struct.pack("<IHBBIII", BANK_MAGIC, BANK_VER, len(meta), 0, len(data), zlib.crc32(data) & 0xFFFFFFFF,
+                      BANK_SIZE)
+    hdr = hdr.ljust(ENT0, b"\0") + ents
+    return hdr.ljust(BANK_HDR, b"\0") + data
+
+
+def bank_used(img):
+    """the data bytes a bank image uses"""
+    return len(img) - BANK_HDR
 
 
 def midi_hz(n):

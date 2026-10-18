@@ -5,24 +5,36 @@
 """LOOM-8's user sample bank: WAV files into the FM-1's flash over USB-MIDI, beside the factory samples.
 
   loom_samples.py info                          what the bank holds now
-  loom_samples.py load [NAME=]file.wav[:ROOT][@BARS] ...   replace the bank with these (up to 16)
+  loom_samples.py load [--rate R] SPEC ...      replace the bank with these (up to 32)
   loom_samples.py erase                         empty the bank
-  loom_samples.py build OUT.bin [NAME=]file.wav[:ROOT][@BARS] ...   no device: the bank's image into OUT.bin
+  loom_samples.py build [--rate R] OUT.bin SPEC ...   no device: the bank's image into OUT.bin
                                                 (the host simulator loads it: "samples OUT.bin")
+  loom_samples.py syx [--rate R] OUT.syx SPEC ...     no device: the SysEx frames "load" would send (and "info"),
+                                                into OUT.syx (the host simulator plays them through: "upload OUT.syx")
 
-Each file becomes one sample: mixed to mono, resampled to 22050 Hz, its peak normalised, IMA ADPCM with a
+  SPEC: [NAME=]file.wav[:ROOT][@BARS][%RATE]
+
+Each file becomes one sample: mixed to mono, resampled to its rate, its peak normalised, IMA ADPCM with a
 checkpoint every 64 samples (tools/sampleio.py, as the factory bank). NAME is what the screen shows (lower
 case, 11 characters; default: the file's name); ROOT the MIDI note it plays at its own pitch on a synth
 track (default: a note in the file's name, "piano_C4.wav", else 60 = C4). A loop in the WAV's 'smpl' chunk
 is kept (the sample engine's loop mode plays it). @BARS says the file is a loop of that many bars (1..16):
 a break for the slice engine, which then plays it at the song's tempo (a 1-bar loop of 2 s fits 120 BPM
-exactly; at 140 BPM it plays faster); its ROOT is slice 1's note, F3 (53, the lowest key) unless given.
-The bank holds 51 KB of data: about 4.1 s of sound in all (a bar at 120 BPM takes 2 s).
+exactly; at 140 BPM it plays faster), whatever its rate; its ROOT is slice 1's note, F3 (53, the lowest key)
+unless given.
+
+The rate: %RATE for one sample, --rate for the rest: 11025, 16000, 22050 or 32000 (or 11k, 16k, 22k, 32k), or
+auto (the default): the highest of 22050, 16000 and 11025 at which the whole bank fits, the same for every
+sample that did not choose. Higher is brighter (a sample keeps what lies below half its rate) and costs more
+room, and a little more of the FM-1's time while it plays. The bank holds 214 KB of sound: about 17.7 s in all
+at 22050 Hz, 24.3 s at 16000, 35.3 s at 11025, 12.2 s at 32000 (a bar at 120 BPM takes 2 s). A sample may be as
+long as the bank's first two windows (about 16 s at 22050 Hz).
 On a track, the sample engine's (and the kit's sample model's) sample knob counts the factory samples first,
 then user 1, user 2 ...: a load replaces them all, in the order given.
 
-Protocol (app/samples.c): F0 7D 46 4C cmd ... F7; BEGIN 11, WRITE 12, HDR 16, END 13, ERASE 14,
-INFO 15. Needs mido and a backend (pip install mido python-rtmidi) for the device commands.
+Protocol (app/samples.c): F0 7D 46 4C cmd ... F7; BEGIN 11, WRITE 12, HDR 16, END 13 (the FM-1 checks the data's
+CRC before it commits), ERASE 14, INFO 15. Needs mido and a backend (pip install mido python-rtmidi) for the
+device commands.
 """
 import sys
 import time
@@ -32,8 +44,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import sampleio as sio  # noqa: E402
 
 HDR = [0x7D, 0x46, 0x4C]
-RC = {1: "size or offset", 2: "erase", 3: "write", 4: "not begun", 5: "header", 6: "data CRC", 7: "no samples"}
+RC = {1: "size or offset", 2: "erase", 3: "write", 4: "not begun", 5: "header", 6: "data CRC", 7: "no samples",
+      8: "an update record's mark"}
 PART = 320
+NPART = (sio.ENT0 + sio.BANK_N * sio.ENT + PART - 1) // PART
+AUTO = (22050, 16000, 11025)                        # what auto tries, best first
+LOOP_ROOT = 53                                      # a loop's slice 1: F3, the lowest key at the keys' own octave
 
 
 def pack7(b):
@@ -46,14 +62,26 @@ def pack7(b):
     return out
 
 
-LOOP_ROOT = 53                                      # a loop's slice 1: F3, the lowest key at the keys' own octave
+def rate_of(s):
+    """"22050" / "22k" / "auto" -> Hz or None (auto)"""
+    s = s.lower()
+    if s == "auto":
+        return None
+    r = {"11k": 11025, "16k": 16000, "22k": 22050, "32k": 32000}.get(s) or (int(s) if s.isdigit() else 0)
+    if r not in sio.RATES:
+        raise ValueError(f"rate {s}: one of {', '.join(map(str, sio.RATES))} (or auto)")
+    return r
 
 
 def parse(spec):
-    """"[NAME=]file.wav[:ROOT][@BARS]" -> (name, int16 samples at 22050 Hz, root, loop, bars)"""
+    """"[NAME=]file.wav[:ROOT][@BARS][%RATE]" -> (name, float samples, file rate, root, loop, bars, rate or None)"""
     name = None
     if "=" in spec:
         name, spec = spec.split("=", 1)
+    rate = None
+    if "%" in spec:
+        spec, r = spec.rsplit("%", 1)
+        rate = rate_of(r)
     bars = 0
     if "@" in spec and spec.rsplit("@", 1)[1].isdigit():
         spec, b = spec.rsplit("@", 1)
@@ -68,19 +96,83 @@ def parse(spec):
     sr, x, loop = sio.read_any_wav(path)
     if not x:
         raise ValueError(f"{path}: no audio")
-    if loop:
-        loop = (int(loop[0] * sio.RATE / sr), int((loop[1] + 1) * sio.RATE / sr))
-    x = sio.resample(x, sr, sio.RATE)
     if root is None:
         root = LOOP_ROOT if bars else sio.note_from_name(path.stem)
-    if bars:
-        print(f"  {name or path.stem}: {bars} bar{'s' if bars > 1 else ''} of {len(x) / sio.RATE:.2f} s = "
-              f"{bars * 240.0 * sio.RATE / len(x):.1f} BPM at its own speed")
-    return (name or path.stem, sio.to_int16(x), root, loop, bars)
+    return (name or path.stem, x, sr, root, loop, bars, rate)
 
 
-def build(specs):
-    return sio.user_bank([parse(s) for s in specs])
+def at_rate(p, rate):
+    """a parsed file at a rate -> sampleio's sample tuple"""
+    name, x, sr, root, loop, bars, _ = p
+    if loop:
+        loop = (int(loop[0] * rate / sr), int((loop[1] + 1) * rate / sr))
+    return (name, sio.to_int16(sio.resample(x, sr, rate)), root, loop, bars, rate)
+
+
+def fits(parsed, default):
+    """the bank at these rates, if it fits (None: it does not)"""
+    try:
+        return sio.user_bank([at_rate(p, p[6] or default) for p in parsed])
+    except ValueError as e:
+        if str(e).startswith("too long"):
+            return None
+        raise
+
+
+def length_at(p, rate):
+    return int(len(p[1]) * rate / p[2])
+
+
+def build(specs, rate=None, quiet=False):
+    """the bank's image; --rate R for every sample that did not choose (None: auto)"""
+    parsed = [parse(s) for s in specs]
+    if not 1 <= len(parsed) <= sio.BANK_N:
+        raise ValueError(f"1..{sio.BANK_N} samples in the bank")
+    tries = [rate] if rate else AUTO
+    img, chose = None, None
+    for r in tries:
+        # (a quick estimate first: the layout is exact, but resampling every file at every rate is slow)
+        est = sum(sio.sample_bytes(length_at(p, p[6] or r)) for p in parsed)
+        if est > sio.BANK_MAX_DATA:
+            continue
+        img = fits(parsed, r)
+        if img:
+            chose = r
+            break
+    if img is None:
+        need = sum(sio.sample_bytes(length_at(p, p[6] or tries[-1])) for p in parsed)
+        raise ValueError(f"too long: {need / 1024:.1f} KB at {tries[-1]} Hz, the bank holds "
+                         f"{sio.BANK_MAX_DATA / 1024:.1f} KB (about {sio.BANK_MAX_DATA / sio.bytes_per_second(11025):.1f} s "
+                         f"at 11025 Hz, {sio.BANK_MAX_DATA / sio.bytes_per_second(22050):.1f} s at 22050 Hz)")
+    if not quiet:
+        report(parsed, chose, img, auto=rate is None)
+    return img
+
+
+def report(parsed, chose, img, auto):
+    for k, p in enumerate(parsed):
+        r = p[6] or chose
+        n = length_at(p, r)
+        hz = f"{r} Hz" + (" (auto)" if auto and not p[6] else "")
+        line = f"  user {k + 1:2} {sio.clean_name(p[0]):11}  {hz:15} {n / r:6.2f} s  {sio.sample_bytes(n) / 1024:6.1f} KB"
+        if p[5]:
+            line += f"  {p[5]} bar{'s' if p[5] > 1 else ''} = {p[5] * 240.0 * r / n:.1f} BPM at its own speed"
+        print(line)
+    used = sio.bank_used(img)
+    free = sio.BANK_MAX_DATA - used
+    print(f"bank: {img[6]} samples, {used / 1024:.1f} of {sio.BANK_MAX_DATA / 1024:.1f} KB used; free: " +
+          ", ".join(f"{free / sio.bytes_per_second(r):.1f} s at {r} Hz" for r in sio.RATES))
+
+
+def frames(image):
+    """the upload's frames: (command, args, timeout s, what it is)"""
+    hdr = image[:sio.BANK_HDR]
+    yield 11, [0], 10, "begin"
+    for off in range(sio.BANK_HDR, len(image), 256):
+        yield 12, [0, off & 0x7F, (off >> 7) & 0x7F, (off >> 14) & 0x7F] + pack7(image[off:off + 256]), 5, off
+    for part in range(NPART):
+        yield 16, [0, part] + pack7(hdr[part * PART:(part + 1) * PART]), 3, f"header part {part}"
+    yield 13, [0], 20, "end"
 
 
 class Link:
@@ -117,62 +209,90 @@ class Link:
 
 
 def upload(link, image):
-    hdr, data = image[:sio.BANK_HDR], image[sio.BANK_HDR:]
-    r = link.req(11, [0], 10)
-    if r[1]:
-        sys.exit(f"begin failed ({RC.get(r[1], r[1])})")
     t0 = time.time()
-    for off in range(0, len(data), 256):
-        a = sio.BANK_HDR + off
-        r = link.req(12, [0, a & 0x7F, (a >> 7) & 0x7F, (a >> 14) & 0x7F] + pack7(data[off:off + 256]), 5)
-        if r[4]:
-            sys.exit(f"write at {a:#x} failed ({RC.get(r[4], r[4])})")
-        print(f"\r  {min(off + 256, len(data))} / {len(data)} B", end="", flush=True)
-    for part in range(2):
-        r = link.req(16, [0, part] + pack7(hdr[part * PART:(part + 1) * PART]))
-        if r[2]:
-            sys.exit(f"header part {part} failed")
-    r = link.req(13, [0], 10)
-    print(f"\n  {time.time() - t0:.1f} s:", "loaded" if r[1] == 0 else f"FAILED ({RC.get(r[1], r[1])})")
-    return r[1] == 0
+    total = len(image) - sio.BANK_HDR
+    for cmd, args, timeout, what in frames(image):
+        r = link.req(cmd, args, timeout)
+        rc = r[-1] if r else 99
+        if rc:
+            where = f"write at {what:#x}" if cmd == 12 else what
+            print()
+            sys.exit(f"{where} failed ({RC.get(rc, rc)})")
+        if cmd == 12:
+            done = min(what + 256, len(image)) - sio.BANK_HDR
+            print(f"\r  {done / 1024:6.1f} / {total / 1024:.1f} KB  {100 * done // max(1, total):3d} %", end="",
+                  flush=True)
+    print(f"\n  {time.time() - t0:.1f} s: loaded, the data's CRC checked by the FM-1")
+    n, _, used, names = info(link)
+    if n != image[6]:
+        sys.exit(f"  but the FM-1 shows {n} samples, not {image[6]}")
+    return True
+
+
+def info(link):
+    """-> (count, size KB, used KB, [(name, rate, samples)])"""
+    out, size, used, n = [], 0, 0, 0
+    while True:
+        r = link.req(15, [len(out)])
+        if r[0] != 2:
+            sys.exit("the FM-1's LOOM-8 is older than this tool: update it")
+        size, used, n, k = r[1] | r[2] << 7, r[3] | r[4] << 7, r[5], r[7]
+        i = 8
+        for _ in range(k):
+            j = r.index(0, i)
+            nm = bytes(r[i:j]).decode(errors="replace")
+            rate = r[j + 1] | r[j + 2] << 7 | r[j + 3] << 14
+            ns = r[j + 4] | r[j + 5] << 7 | r[j + 6] << 14
+            out.append((nm, rate, ns))
+            i = j + 7
+        if not k or len(out) >= n:
+            return n, size, used, out
+
+
+def args_of(argv):
+    """[--rate R] rest -> (rate or None, rest)"""
+    rate = None
+    if argv[:1] == ["--rate"] and len(argv) > 1:
+        rate = rate_of(argv[1])
+        argv = argv[2:]
+    elif argv[:1] and argv[0].startswith("--rate="):
+        rate = rate_of(argv[0].split("=", 1)[1])
+        argv = argv[1:]
+    return rate, argv
 
 
 def main():
-    if len(sys.argv) < 2 or sys.argv[1] not in ("info", "load", "erase", "build"):
+    if len(sys.argv) < 2 or sys.argv[1] not in ("info", "load", "erase", "build", "syx"):
         sys.exit(__doc__)
     cmd = sys.argv[1]
-    if cmd == "build":
-        if len(sys.argv) < 4:
-            sys.exit(__doc__)
-        try:
-            img = build(sys.argv[3:])
-        except (OSError, ValueError) as e:
-            sys.exit(f"cannot build the bank: {e}")
-        Path(sys.argv[2]).write_bytes(img)
-        print(f"{sys.argv[2]}: {img[6]} samples, {len(img) - sio.BANK_HDR} of {sio.BANK_MAX_DATA} B")
-        return
-    if cmd == "load":
-        if len(sys.argv) < 3:
-            sys.exit(__doc__)
-        try:
-            img = build(sys.argv[2:])
-        except (OSError, ValueError) as e:
-            sys.exit(f"cannot build the bank: {e}")
-        print(f"bank: {img[6]} samples, {len(img) - sio.BANK_HDR} of {sio.BANK_MAX_DATA} B")
-        sys.exit(0 if upload(Link(), img) else 1)
+    try:
+        rate, rest = args_of(sys.argv[2:])
+        if cmd in ("build", "syx"):
+            if len(rest) < 2:
+                sys.exit(__doc__)
+            img = build(rest[1:], rate)
+            if cmd == "build":
+                Path(rest[0]).write_bytes(img)
+            else:
+                fr = list(frames(img)) + [(15, [0], 3, "info")]   # (and what "info" asks, after)
+                Path(rest[0]).write_bytes(b"".join(bytes([0xF0] + HDR + [c] + a + [0xF7]) for c, a, _, _ in fr))
+            print(f"{rest[0]}: {img[6]} samples, {sio.bank_used(img)} of {sio.BANK_MAX_DATA} B")
+            return
+        if cmd == "load":
+            if not rest:
+                sys.exit(__doc__)
+            img = build(rest, rate)
+            sys.exit(0 if upload(Link(), img) else 1)
+    except (OSError, ValueError) as e:
+        sys.exit(f"cannot build the bank: {e}")
     link = Link()
     if cmd == "erase":
-        r = link.req(14, [0], 20)
+        r = link.req(14, [0], 60)
         print("erase:", "ok" if r[1] == 0 else f"FAILED ({RC.get(r[1], r[1])})")
         return
-    r = link.req(15, [])
-    size, used, n = r[1], r[2], r[3]
-    names, i = [], 4
-    for _ in range(n):
-        j = r.index(0, i)
-        names.append(bytes(r[i:j]).decode(errors="replace"))
-        i = j + 1
-    print(f"user bank: {n} samples, {used} of {size} KB" + "".join(f"\n  user {k + 1}: {s}" for k, s in enumerate(names)))
+    n, size, used, smp = info(link)
+    print(f"user bank: {n} samples, {used} of {size} KB" +
+          "".join(f"\n  user {k + 1:2}: {nm:11}  {rt} Hz  {ns / max(1, rt):.2f} s" for k, (nm, rt, ns) in enumerate(smp)))
 
 
 if __name__ == "__main__":

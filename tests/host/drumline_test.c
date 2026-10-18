@@ -19,6 +19,9 @@
 #include "drumline.h"
 #include "synth.h"
 #include "fastmath.h"
+#include "sample.h"
+#include "bank.h"                                 /* a user bank built in RAM */
+static float gen_tone(int i) { return (float)(16000 * ((i / 20) & 1 ? 1 : -1)); }   /* a square, 20 samples a half */
 #ifdef __APPLE__
 #include <unistd.h>
 #include <libproc.h>
@@ -885,6 +888,26 @@ int main(void)
         par[TP_DRUM(0, DP_K1)] = (uint8_t)smp_factory();  /* the first user slot: empty here */
         h = one_hit(0, 127, 0, 0, 0, 0);
         check("  an empty user slot is silent, the voice ends at once", h.peak == 0.0f && h.tend >= 0.0f && h.tend < 0.01f);
+        {   /* a user sample at its own rate: 0.4 s of noise-free tone at 11025 and at 32000 Hz lasts 0.4 s */
+            static const int RT[2] = {11025, 32000};
+            int k, ok = 1;
+            for (k = 0; k < 2; k++) {
+                bank_reset();
+                bank_add("tone", gen_tone, RT[k] * 2 / 5, 60, 0, RT[k]);
+                bank_seal();
+                bank_attach();
+                smp_user_scan();
+                par[TP_DRUM(0, DP_K1)] = (uint8_t)smp_factory();
+                h = one_hit(0, 127, 0, 0, 0, 0);
+                if (fm_fabsf(h.tend - 0.4f) > 0.01f || h.peak < 0.05f) {
+                    printf("  %d Hz: ends at %.3f s (0.400), peak %.2f\n", RT[k], (double)h.tend, (double)h.peak);
+                    ok = 0;
+                }
+            }
+            check("  a user sample at 11025 / 32000 Hz plays its own length", ok);
+            bank_detach();
+            par[TP_DRUM(0, DP_K1)] = (uint8_t)smp_factory();
+        }
         {   /* every factory sample, forward and back, pitched to the ends: finite, bounded */
             int ok = 1, sm, rv, pt;
             for (sm = 0; sm < smp_factory(); sm++)
