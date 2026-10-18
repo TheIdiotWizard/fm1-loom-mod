@@ -191,8 +191,8 @@ static void set_tp(int trk, int p, int v)
         engine_set_all(trk);
         {                                        /* a kit has a page more under ENV: off it, back to the first */
             int g = page_group(ui.page);
-            if (ui.page - PAGE_BTN[g].first >= group_n(g))
-                ui.page = PAGE_BTN[g].first;
+            if (grp_index(ui.page) < 0)
+                ui.page = (uint8_t)grp_page(g, 0);
         }
     } else
         engine_set(trk, p, v);
@@ -837,8 +837,8 @@ static void track_select(int t)
         ui.last_inst = (uint8_t)t;
     {                                            /* a track with fewer pages: back to the button's first */
         int g = page_group(ui.page);
-        if (ui.page - PAGE_BTN[g].first >= group_n(g))
-            ui.page = PAGE_BTN[g].first;
+        if (grp_index(ui.page) < 0)
+            ui.page = (uint8_t)grp_page(g, 0);
     }
     ui.touched = -1;
     if (ui.rec_armed)
@@ -928,6 +928,7 @@ static void keyboard_down(int k)
 }
 static void ask_end(int yes);
 static void act_clear_scene(void);
+static void weave_set(int t, int from, int pat, int rule);   /* (below: the weave) */
 static void key_down(int k)
 {
     int trk = sel_trk(), w = ordinal(WHITE_K, 16, k), b = ordinal(BLACK_K, 11, k), p = ui.page;
@@ -1051,6 +1052,22 @@ static void key_down(int k)
         }
         return;
     }
+    if (p == P_WEAVE) {                          /* ARP's Weave: black keys the track woven in (again: none), white its pattern */
+        ui.kmode[k] = KM_IDLE;
+        if (b >= 0 && b < NSEQT)
+            weave_set(trk, wv_from(trk) == b + 1 ? 0 : b + 1, -1, -1);
+        else if (w >= 0 && w < NPATT)
+            weave_set(trk, wv_from(trk) ? -1 : trk + 1, w, -1);
+        else
+            return;
+        if (wv_from(trk)) {
+            char t[24];
+            num_s((uint32_t)wv_pat(trk) + 1u, s_cat(s_cat(t, TRACK_NAME[wv_from(trk) - 1]), " P"));
+            say("WEAVES WITH", t);
+        } else
+            say("NO WEAVE", TRACK_NAME[trk]);
+        return;
+    }
     if (p == P_THROWS) {                         /* the throws' page: the keys fire them (punch_key) */
         ui.kmode[k] = KM_PUNCH;
         punch_key(k, 1);
@@ -1141,11 +1158,11 @@ static void page_button(int b)
         track_select(ui.last_inst);
     for (uint32_t i = 0; i < NPAGE_BTN; i++)
         if (PAGE_BTN[i].btn == b) {
-            if (is_aux(sel_trk()) && (b == B_ENV || b == B_LFO || b == B_ARP)) {
+            if (is_aux(sel_trk()) && (b == B_ENV || b == B_LFO || (b == B_ARP && is_fx(sel_trk())))) {
                 say_no(TRACK_NAME[sel_trk()], "EDIT has its page");
                 return;
             }
-            ui.page = (uint8_t)(b == B_HOME && ui.page == P_ARRANGE ? P_SONG : PAGE_BTN[i].first);
+            ui.page = (uint8_t)(b == B_HOME && ui.page == P_ARRANGE ? P_SONG : grp_page((int)i, 0));
             ui.touched = -1;
             ui.held = 0;
             ui.trickpg = 0;
@@ -1155,8 +1172,8 @@ static void page_button(int b)
 }
 static void page_turn(int d)
 {
-    int g = page_group(ui.page), f = PAGE_BTN[g].first, n = group_n(g);
-    ui.page = (uint8_t)(f + ((ui.page - f + d) % n + n) % n);
+    int g = page_group(ui.page), n = group_n(g), i = grp_index(ui.page);
+    ui.page = (uint8_t)grp_page(g, ((i < 0 ? 0 : i + d) % n + n) % n);
     ui.touched = -1;
 }
 static void button_down(int b)
@@ -1468,6 +1485,11 @@ static void knob(int k, int32_t e)
         if (k == 0)
             set_tp(AUX_PUNCH, TP_E1, clampi(proj.trk[AUX_PUNCH].par[TP_E1] + (e > 0 ? 1 : -1), 0, 1));
         return;
+    case P_WEAVE:
+        weave_set(trk, k == 0 ? clampi(wv_from(trk) + (e > 0 ? 1 : -1), 0, NSEQT) : -1,
+                  k == 1 ? clampi(wv_pat(trk) + (e > 0 ? 1 : -1), 0, NPATT - 1) : -1,
+                  k == 2 ? clampi(wv_rule(trk) + (e > 0 ? 1 : -1), 0, NWV - 1) : -1);
+        return;
     case P_ARRANGE: arrange_knob(k, e); return;
     case P_SONG: song_knob(k, e); return;
     case P_STEPS: steps_knob(k, e); return;
@@ -1559,7 +1581,7 @@ static void presets(int32_t e)
             say("FILTER", tp_info_par(q, par)->names[par[q] % n]);
         }
         break;
-    case P_THROWS:
+    case P_THROWS: case P_WEAVE:
         break;
     default:
         if (is_fx(trk))
@@ -1658,7 +1680,6 @@ static void list_change(int32_t e)
     case LK_PICK:
         switch (lst.row[lst.sel].id) {
         case A_ENGINE: ui.pick_engine = (uint8_t)clampi(ui.pick_engine + d, 0, NENGINE - 1); break;
-        case A_WEAVE: ui.pick_weave = (uint8_t)clampi(ui.pick_weave + d, 0, NWV - 1); break;
         case A_EFFECT: {
             int t = ui.pick_fx, trk = fx_page(ui.page) ? (ui.page == P_FX1 ? AUX_FX1 : AUX_FX2) : sel_trk();
             for (int tries = 0; tries < NFXPICK; tries++) {
@@ -1792,23 +1813,52 @@ static void act_rotate(int d)
         }
     mark_dirty();
 }
-/* the pattern woven with the copied one (pattern_woven): bars or steps in turn, or one's rhythm with the
- * other's notes; HOME + REC undoes it */
-static void act_weave(void)
+/* a track's weave into the sequencer (pages.c wv_*), and a change to it: -1 leaves a value as it is */
+static void weave_apply(int t)
+{
+    if (t < 0 || t >= NSEQT)
+        return;
+    seq.wv_pat[t] = (uint8_t)wv_pat(t);
+    seq.wv_rule[t] = (uint8_t)wv_rule(t);
+    seq.wv_from[t] = (uint8_t)wv_from(t);
+}
+static void weave_set(int t, int from, int pat, int rule)
+{
+    if (t < 0 || t >= NSEQT)
+        return;
+    if (from >= 0)
+        proj.trk[t].rsv[0] = (uint8_t)from;
+    if (pat >= 0)
+        proj.trk[t].rsv[1] = (uint8_t)pat;
+    if (rule >= 0)
+        proj.trk[t].rsv[2] = (uint8_t)rule;
+    weave_apply(t);
+    mark_dirty();
+}
+/* SEL on Weave: KEEP AS PATTERN, the weave written whole into the track's first empty pattern */
+static void act_keep_weave(void)
 {
     static tpat_t out PLAT_POOL;
-    static const char *const SAID[NWV] = {"bars in turn", "steps in turn", "copied notes", "copied rhythm"};
-    int m = ui.pick_weave % NWV;
-    undo_keep();
-    {
-        int k = sel_trk() == AUX_PUNCH ? WK_FX : is_drum(sel_trk()) ? WK_KIT : WK_MEL;
-        pattern_woven(&out, tpat(sel_trk()), k, &clip, k, m);
+    int trk = sel_trk(), f = wv_from(trk), to = -1;
+    char t[8];
+    if (!f)
+        return;
+    for (int p = 0; p < NPATT && to < 0; p++) {
+        int empty = 1;
+        for (int i = 0; i < NSTEP && empty; i++)
+            empty = step_empty(&pats.pat[trk][p].st[i]);
+        if (empty && p != cur_pat(trk))
+            to = p;
     }
-    *tpat(sel_trk()) = out;
-    if (ui.bar * 16 >= out.len)
-        ui.bar = 0;
+    if (to < 0) {
+        say_no("NO EMPTY PATTERN", "clear one first");
+        return;
+    }
+    pattern_woven(&out, tpat(trk), wv_kind(trk), &pats.pat[f - 1][wv_pat(trk)], wv_kind(f - 1), wv_rule(trk));
+    pats.pat[trk][to] = out;
     mark_dirty();
-    say("WOVEN", SAID[m]);
+    num_s((uint32_t)to + 1u, s_cat(t, "P"));
+    say("KEPT AS", t);
 }
 static void act_dup_bar(void)
 {
@@ -1959,6 +2009,8 @@ static void after_load(void)
 {
     project_apply();
     apply_brain();
+    for (int t = 0; t < NSEQT; t++)
+        weave_apply(t);
     engine_tempo(proj.tempo_x10);
     engine_groove(proj.groove);
     undo.valid = 0;
@@ -2038,7 +2090,7 @@ static void action_run(int a)
     case A_CLEAR_BOTH: act_clear_notes(); act_clear_locks(); say("CLEARED", "notes and locks"); break;
     case A_COPY_PAT: clip = *tpat(sel_trk()); clip_ok = 1; say("COPIED", "pattern"); break;
     case A_PASTE_PAT: undo_keep(); *tpat(sel_trk()) = clip; mark_dirty(); say("PASTED", "pattern"); break;
-    case A_WEAVE: act_weave(); break;
+    case A_WEAVE: act_keep_weave(); break;
     case A_ROT_FWD: act_rotate(1); say("ROTATED", "forward"); break;
     case A_ROT_BACK: act_rotate(-1); say("ROTATED", "back"); break;
     case A_DUP_BAR: act_dup_bar(); break;
@@ -2503,7 +2555,7 @@ static void sp_parts(const char *s)
 }
 static void sp_page(void)
 {
-    int g = page_group(ui.page), n = group_n(g), d = ui.page - PAGE_BTN[g].first, any = 0;
+    int g = page_group(ui.page), n = group_n(g), d = grp_index(ui.page), any = 0;
     char t[80];
     knob_t k[4];
     sp_cat(page_name_of(ui.page, sel_trk()));
@@ -2934,6 +2986,8 @@ void ui_init(void)
     ui.rem[0] = 60;
     ui.nrem = 1;
     ui.act_t = plat_ms();
+    for (int t = 0; t < NSEQT; t++)
+        weave_apply(t);
     ui.scene_seen = 0xFF;
     ui.last_inst = (uint8_t)(is_aux(sel_trk()) ? 0 : sel_trk());
     apply_brain();

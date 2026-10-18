@@ -65,16 +65,16 @@ static uint16_t trk_tint(int t) { return ink_mix(trk_ink(t), theme->tint); }
  * the page says so), its sends and the two effects; ARP three with the arp (its page 2, then hold). EDIT has a
  * third page where the engine has a second page of knobs (TP_X1..X4): brocade's Sub */
 enum { P_ARRANGE, P_SONG, P_STEPS, P_BAR, P_ENGINE, P_PLAY, P_SUB, P_ENV, P_FILTER, P_ENV2, P_KITF, P_CHARACTER, P_SENDS,
-       P_FX1, P_FX2, P_THROWS, P_LFO, P_LFO2, P_PLAYERS, P_PLAYERS2, P_PLAYERS3, P_MIX, P_MASTER, P_MASTER3, P_SETUP,
+       P_FX1, P_FX2, P_THROWS, P_LFO, P_LFO2, P_PLAYERS, P_PLAYERS2, P_PLAYERS3, P_WEAVE, P_MIX, P_MASTER, P_MASTER3, P_SETUP,
        P_STATUS, NPAGES };
 static const char *const PAGE_NAME[NPAGES] = {"Arrange", "Song", "Steps", "Bar", "Engine", "Play", "Sub", "Envelope",
                                               "Filter", "Filter env", "Kit filter", "Character", "Sends", "FX I",
-                                              "FX II", "Throws", "LFO", "LFO 2", "Players", "Players 2", "Hold", "Mix",
+                                              "FX II", "Throws", "LFO", "LFO 2", "Players", "Players 2", "Hold", "Weave", "Mix",
                                               "Master EQ", "Master out", "Setup", "Debug"};
 static int mst_base(int p) { return p == P_MASTER ? MS_EQ_LO : MS_PERC; }   /* a master page's first knob */
 static const struct { uint8_t btn, first, n; } PAGE_BTN[] = {
     {B_HOME, P_ARRANGE, 2}, {B_SEQ, P_STEPS, 2}, {B_EDIT, P_ENGINE, 3}, {B_ENV, P_ENV, 4}, {B_FX, P_CHARACTER, 5},
-    {B_LFO, P_LFO, 2}, {B_ARP, P_PLAYERS, 3}, {B_GLO, P_MIX, 5}};
+    {B_LFO, P_LFO, 2}, {B_ARP, P_PLAYERS, 4}, {B_GLO, P_MIX, 5}};
 #define NPAGE_BTN (sizeof PAGE_BTN / sizeof PAGE_BTN[0])
 static int page_group(int p)
 {
@@ -191,7 +191,7 @@ static const char *const ACTION_NAME[NACTIONS] = {
     "ROTATE BACK", "DUPLICATE BAR", "ENGINE", "PRESET", "SCRAMBLE", "SAVE AS PRESET", "RESET SOUND", "FOLLOWS CONDUCTOR",
     "INSERT SCENE", "DELETE SLOT", "CLEAR SONG", "PLAY SONG", "LOAD PROJECT", "NEW PROJECT", "USB AUDIO", "CLEAR SCENE",
     "ALL NOTES OFF", "EFFECT", "REMOVE", "COUNT-IN", "PLAY MODE", "FILTER TYPE", "HIGH-PASS", "LOW-PASS",
-    "TO FX II", "WEAVE WITH COPIED", "THEME", "PUMP BY", "RELEASE", "ACCENT", "LEVEL", "SCENES SWITCH", "SAVE TO", "RENAME", "AUTOSAVE"};
+    "TO FX II", "KEEP AS PATTERN", "THEME", "PUMP BY", "RELEASE", "ACCENT", "LEVEL", "SCENES SWITCH", "SAVE TO", "RENAME", "AUTOSAVE"};
 /* the weave's ways (pattern.h WV_*): what this pattern keeps of itself */
 static const char *const WEAVE_NAME[NWV] = {"bars", "steps", "rhythm", "notes"};
 #define LIST_ROWS 28
@@ -480,13 +480,38 @@ static int group_n(int g)
     int trk = sel_trk(), b = PAGE_BTN[g].btn;
     if (b == B_EDIT)                                 /* brocade: its Sub page third */
         return trk == AUX_PUNCH ? 1 : x_page(trk) ? 3 : 2;
-    if (b == B_ARP)
-        return pl_type(trk) == PL_ARP ? 3 : 2;
+    if (b == B_ARP)                                  /* (grp_page: Players, Players 2, Hold the arp's, Weave) */
+        return is_aux(trk) ? 1 : pl_type(trk) == PL_ARP ? 4 : 3;
     if (b == B_ENV)
         return is_drum(trk) ? 4 : 3;                 /* a kit: the key's envelope, filter; the kit's envelope, filter */
     if (b == B_GLO)
         return DEBUG_BUILD ? 5 : 4;                  /* Debug last, in a debug build only */
     return PAGE_BTN[g].n;
+}
+/* a button's i-th page now (ARP's depend on the player: the arp has Hold before Weave; the conductor and the
+ * throws only Weave), and a page's place among them (-1: not one of them now) */
+/* a track's weave (its settings' rsv[0..2]): the track woven in + 1 (0: none), its pattern, the rule */
+static int wv_from(int t) { return t < NSEQT && proj.trk[t].rsv[0] <= NSEQT ? proj.trk[t].rsv[0] : 0; }
+static int wv_pat(int t) { return proj.trk[t].rsv[1] % NPATT; }
+static int wv_rule(int t) { return proj.trk[t].rsv[2] % NWV; }
+static int wv_kind(int t) { return t == AUX_PUNCH ? WK_FX : is_drum(t) ? WK_KIT : WK_MEL; }
+static int grp_page(int g, int i)
+{
+    if (PAGE_BTN[g].btn == B_ARP) {
+        static const uint8_t ARPP[4] = {P_PLAYERS, P_PLAYERS2, P_PLAYERS3, P_WEAVE};
+        static const uint8_t OTHER[3] = {P_PLAYERS, P_PLAYERS2, P_WEAVE};
+        int trk = sel_trk();
+        return is_aux(trk) ? P_WEAVE : pl_type(trk) == PL_ARP ? ARPP[i & 3] : OTHER[(i % 3 + 3) % 3];
+    }
+    return PAGE_BTN[g].first + i;
+}
+static int grp_index(int p)
+{
+    int g = page_group(p), n = group_n(g);
+    for (int i = 0; i < n; i++)
+        if (grp_page(g, i) == p)
+            return i;
+    return -1;
 }
 /* the TP_* a page's knob k edits, -1 none */
 static int tp_page_param(int p, int k, int trk)
@@ -500,8 +525,8 @@ static int tp_page_param(int p, int k, int trk)
         {TP_E1, TP_E2, TP_E3, TP_E4}, {TP_E1, TP_E2, TP_E3, TP_E4}, {-1, -1, -1, -1},
         {TP_LTYPE, TP_LSPEED, TP_LAMT, TP_LDEST},
         {TP_LX, TP_LX2, -1, -1}, {TP_PLAYER, TP_P1, TP_P2, TP_P3}, {TP_AP1, TP_AP2, TP_AP3, TP_AP4},
-        {TP_P4, -1, -1, -1}, {TP_SEND1, TP_SEND2, TP_PAN, TP_LEVEL}};
-    if (p < P_ENGINE || p > P_MIX || p == P_THROWS || k < 0 || k > 3)
+        {TP_P4, -1, -1, -1}, {-1, -1, -1, -1}, {TP_SEND1, TP_SEND2, TP_PAN, TP_LEVEL}};
+    if (p < P_ENGINE || p > P_MIX || p == P_THROWS || p == P_WEAVE || k < 0 || k > 3)
         return -1;
     if (fx_page(p))                                  /* (the effect tracks' own knobs, whatever trk is) */
         return M[p - P_ENGINE][k];
@@ -636,7 +661,7 @@ static void draw_header(void)
         const char *bn = BTN_LABEL[PAGE_BTN[page_group(ui.page)].btn];
         const char *pn = page_name_of(ui.page, sel_trk());
         int32_t w = text_w(&FONT_XS, bn) + 6;
-        if (ui.page >= P_STEPS && ui.page <= P_PLAYERS3 && ui.page != P_THROWS) {   /* a track's page: the track first */
+        if (((ui.page >= P_STEPS && ui.page <= P_PLAYERS3) || ui.page == P_WEAVE) && ui.page != P_THROWS) {   /* a track's page */
             int pt = page_trk(ui.page);
             const char *tn = TRACK_NAME[pt];
             int32_t tw = text_w(&FONT_XS, tn) + 10;
@@ -1002,6 +1027,15 @@ static void page_knobs(knob_t *k)
             for (int i = 0; i < 4; i++)
                 ktp(&k[i], trk, tp_page_param(p, i, trk));
         break;
+    case P_WEAVE: {                                  /* the track's weave: the track and pattern woven in, the rule */
+        int f = wv_from(trk);
+        static char wt[8];
+        kv(&k[0], "FROM", f ? TRACK_NAME[f - 1] : "off", f, NSEQT);
+        num_s((uint32_t)wv_pat(trk) + 1u, s_cat(wt, "P"));
+        kv(&k[1], "WITH", f ? wt : "-", wv_pat(trk), NPATT - 1);
+        kname(&k[2], "RULE", WEAVE_NAME, wv_rule(trk), NWV);
+        break;
+    }
     case P_THROWS: {
         static const char *const LATCH[2] = {"off", "on"};
         kname(&k[0], "LATCH", LATCH, proj.trk[AUX_PUNCH].par[TP_E1] & 1u, 2);
@@ -1177,7 +1211,7 @@ static void page_tag(char *t)
 static void draw_tag(void)
 {
     char t[80], *v = t;
-    int g = page_group(ui.page), n = group_n(g), d = ui.page - PAGE_BTN[g].first;
+    int g = page_group(ui.page), n = group_n(g), d = grp_index(ui.page);
     int32_t r = 232, x, w;
     uint32_t h;
     page_tag(t);
@@ -1285,6 +1319,9 @@ static void page_footer(char *t)
         break;
     case P_THROWS:
         s_cat(t, "KEYS throw: low drums, high melodic|REC held: record");
+        break;
+    case P_WEAVE:
+        s_cat(t, "BLACK the track woven in|WHITE its pattern");
         break;
     case P_MASTER3:
         s_cat(t, "SEL pump by, level");
@@ -1567,7 +1604,7 @@ static const struct { uint8_t btn; uint32_t pages; const char *title, *l1, *l2; 
     {B_FX, PG_ANY, "Effects", "The track's character, its sends, FX I and FX II, then Throws: the keys fire effects.",
      "PRESETS: the character's type; on FX I and FX II the effect, SEL its filter."},
     {B_LFO, PG_ANY, "LFO", "Type, then its first three knobs.", "Page 2 has the type's fourth and fifth."},
-    {B_ARP, PG_ANY, "Players", "Arp, strum or hold on the track's keys.",
+    {B_ARP, PG_ANY, "Players", "Arp, strum or hold on the track's keys; the last page, Weave.",
      "Strum: a key strums the chord from that key; keys held together become the chord."},
     {B_ARP, PG(P_STEPS), "Tricks", "With a step held, ARP: KNOB 1 and 3 pick its two tricks,",
      "KNOB 2 and 4 their values. Let go of the step when done."},
@@ -1692,7 +1729,8 @@ static void list_build(void)
     }
     if (PAGE_BTN[g].btn == B_FX)                     /* (FX I and FX II each their own effect: the page's list) */
         f = keep, n = 1;
-    for (int p = f; p < f + n; p++) {
+    for (int gi = 0; gi < n; gi++) {
+        int p = PAGE_BTN[g].btn == B_FX ? f : grp_page(g, gi);
         ui.page = (uint8_t)p;
         page_knobs(k);
         for (int i = 0; i < 4; i++) {
@@ -1712,12 +1750,13 @@ static void list_build(void)
             list_add(ACTION_NAME[A_COPY_PAT], 0, LK_ACTION, A_COPY_PAT);
             if (clip_ok)
                 list_add(ACTION_NAME[A_PASTE_PAT], 0, LK_ACTION, A_PASTE_PAT);
-            if (clip_ok)
-                list_add(ACTION_NAME[A_WEAVE], WEAVE_NAME[ui.pick_weave % NWV], LK_PICK, A_WEAVE);
             list_add(ACTION_NAME[A_ROT_FWD], 0, LK_ACTION, A_ROT_FWD);
             list_add(ACTION_NAME[A_ROT_BACK], 0, LK_ACTION, A_ROT_BACK);
             list_add(ACTION_NAME[A_DUP_BAR], 0, LK_ACTION, A_DUP_BAR);
         }
+    } else if (keep == P_WEAVE) {
+        if (wv_from(trk))
+            list_add(ACTION_NAME[A_WEAVE], 0, LK_ACTION, A_WEAVE);
     } else if (keep == P_ARRANGE || keep == P_SONG) {   /* HOME's one list: the projects, the song, the scenes */
         static char save_t[24], nm_t[NAME_LEN + 1];
         proj_slot_text(ui.pick_slot % NPROJ, slot_t);
@@ -3786,6 +3825,46 @@ static void draw_naming(void)
     naming_paint(MAIN_H);
     cv_blit(0, LIST_Y + MAIN_H);
 }
+/* ARP's Weave page: what the track weaves with and how, and its first bar woven (the steps that change bright) */
+static void draw_weave(void)
+{
+    static const char *const ABOUT[NWV] = {"the bars in turn: its, then the other's", "the steps in turn: its, then the other's",
+                                           "its rhythm, the other's notes", "the other's rhythm, its notes"};
+    int trk = sel_trk(), f = wv_from(trk);
+    uint32_t h = hash_u(hash_u(2166136261u, 0x57u), (uint32_t)trk | (uint32_t)f << 4 | (uint32_t)wv_pat(trk) << 8 |
+                                          (uint32_t)wv_rule(trk) << 12 | (uint32_t)cur_pat(trk) << 16);
+    char t[48], *e;
+    if (f)
+        h = hash_pat(hash_pat(h, tpat(trk)), &pats.pat[f - 1][wv_pat(trk)]);
+    if (!begin_main(h))
+        return;
+    if (!f) {
+        text_c(120, 30, &FONT_B, "No weave yet", K_TEXT);
+        text_c(120, 54, &FONT_S, "black key: the track to weave in", K_DIM);
+        text_c(120, 72, &FONT_S, "white key: its pattern", K_DIM);
+        cv_blit(0, MAIN_Y);
+        return;
+    }
+    e = num_s((uint32_t)cur_pat(trk) + 1u, s_cat(s_cat(t, TRACK_NAME[trk]), " P"));
+    e = s_cat(s_cat(e, " with "), TRACK_NAME[f - 1]);
+    num_s((uint32_t)wv_pat(trk) + 1u, s_cat(e, " P"));
+    cv_text(12, 4, &FONT_B, t, K_TEXT);
+    s_cat(s_cat(t, "by "), WEAVE_NAME[wv_rule(trk)]);
+    cv_text(12, 26, &FONT_S, t, K_NOW);
+    cv_text(12, 44, &FONT_XS, ABOUT[wv_rule(trk)], K_DIM);
+    {   /* the first bar as it plays woven: a cell a step, filled where it sounds, bright where it is not the track's own */
+        const tpat_t *a = tpat(trk), *b = &pats.pat[f - 1][wv_pat(trk)];
+        for (int i = 0; i < 16; i++) {
+            step_t w;
+            const step_t *own = &a->st[i % (a->len ? a->len : 1)];
+            int32_t x = 8 + i * 14;
+            weave_step(a, wv_kind(trk), b, wv_kind(f - 1), wv_rule(trk), (uint32_t)i, &w);
+            cv_round(x, 64, 12, 30, 3, step_empty(&w) ? K_PANEL : memcmp(&w, own, sizeof w) ? K_NOW : K_PANEL2);
+        }
+    }
+    cv_text(12, 100, &FONT_XS, "the WEAVE track plays it", K_DIM);
+    cv_blit(0, MAIN_Y);
+}
 static void draw_page(void)
 {
     int trk = sel_trk();
@@ -3837,6 +3916,7 @@ static void draw_page(void)
         break;
     case P_MIX: draw_mix(); break;
     case P_THROWS: draw_punch(); break;
+    case P_WEAVE: draw_weave(); break;
     case P_MASTER: case P_MASTER3: draw_master(); break;
     case P_SETUP: draw_setup(); break;
     default: draw_status(); break;

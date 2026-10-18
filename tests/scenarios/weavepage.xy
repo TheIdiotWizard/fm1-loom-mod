@@ -1,0 +1,35 @@
+# ARP's Weave page: T2 woven with T1's beat by rhythm (the kit's sounds as notes), KEEP AS PATTERN into P2; COND's ARP
+# opens on Weave
+wait 300
+hits 1 1 1 x...x...x...x...
+hits 1 1 3 ..x...x...x...x.
+notes 2 1 1 1 100 C4
+notes 2 1 3 1 100 E4
+notes 2 1 5 1 100 G4
+notes 2 1 7 1 100 B4
+turn ALGO 1
+tap ARP
+turn SELECT 2
+wait 50
+expect page Weave
+shot wv_empty.png
+tapkey b0
+wait 50
+turn K3 2
+wait 100
+shot wv_set.png
+tap SEL
+wait 50
+shot wv_list.png
+tap SEL
+wait 100
+steps 2 2
+expect note 2 2 1 48
+expect note 2 2 3 53
+expect trk 2
+turn ALGO 7
+expect trk 9
+tap ARP
+wait 50
+expect page Weave
+shot wv_cond.png
