@@ -39,7 +39,7 @@ knob 1 d9.k1 50
 knob 1 d9.volume 62
 knob 1 d8.volume 64
 knob 1 res 30
-knob 1 level 88
+knob 1 level 92
 knob 1 send2 10
 # T2 tines "felt bass": round, a fat low end, ducked by the kick (pump)
 preset 2 felt_bass tines
@@ -47,11 +47,11 @@ knob 2 brain diatonic
 knob 2 ltype pump
 knob 2 lspeed track_1
 knob 2 lamt 44
-knob 2 level 122
+knob 2 level 107
 # T3 tines "felt piano": the minor-ninth stabs, warm, into the dotted echo
 preset 3 felt_piano tines
 knob 3 brain diatonic
-knob 3 level 70
+knob 3 level 89
 knob 3 send1 44
 knob 3 send2 28
 knob 3 cut 92
@@ -63,7 +63,7 @@ knob 4 brain diatonic
 knob 4 ltype pump
 knob 4 lspeed track_1
 knob 4 lamt 100
-knob 4 level 66
+knob 4 level 87
 knob 4 send2 40
 # T5 the sesame break, high-passed: the top
 knob 5 engine slice
@@ -73,7 +73,7 @@ knob 5 e4 127
 knob 5 ftype hp12
 knob 5 cut 88
 knob 5 brain no
-knob 5 level 92
+knob 5 level 97
 # T6 "hey" (user 2) through the echo
 knob 6 engine sample
 knob 6 e1 u2
@@ -90,7 +90,7 @@ knob 6 send2 36
 preset 7 hand_drum cane
 knob 7 brain no
 knob 7 pan 88
-knob 7 level 66
+knob 7 level 87
 knob 7 send2 20
 # FX I a dotted-eighth echo, darker repeats; FX II a long dark hall (its high-pass keeps the bass and kick dry)
 knob 11 engine delay

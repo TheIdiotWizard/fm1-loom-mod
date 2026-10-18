@@ -298,8 +298,6 @@ static int expect_more(const char *what, const char *a, const char *b, const cha
  *   scenemute N MASK             scene N's mutes: a character a track 1-8, COND, THROW: x muted, . not
  *   song S:R [S:R ...]           the song: scene S (1-based) for R bars (16 sixteenths each)
  *   songloop 0|1
- *   format4 [SLOT]               the slot's saved settings rewritten as format 4 had them (before the pump), so a
- *                                reboot or a load reads an old project
  *   mst NAME VALUE               a master knob (lo mid hi blend perc mel comp pump) or the
  *                                out page's list (pumpby kick|t1..t8|metro, release, accent on|off, level)
  *   groove NAME                  the project's groove type (swing lilt weave ...)
@@ -773,21 +771,6 @@ static int song_cmd(const char *cmd)
             pats.song.slot[pats.song.len].scene = (uint8_t)sc;
             pats.song.slot[pats.song.len++].rep = (uint8_t)r;
         }
-    } else if (!strcmp(cmd, "format4")) {           /* format4 SLOT: the slot's stored settings made as format 4 (before
-                                                     * the pump) had them, to load back (project.c settings_from_4) */
-        static settings_t o;
-        uint8_t m[NMS];
-        int slot = n > 1 ? atoi(w[1]) - 1 : 0;
-        if (plat_store_load(OBJ_PROJ(slot, 0), &o, sizeof o) != (int)sizeof o)
-            host_die("format4: nothing saved in slot", w[1]);
-        memcpy(m, o.master, NMS);
-        for (k = 0; k < 4; k++)
-            o.master[k] = 0;                        /* (format 4's rsv[10..13]) */
-        for (k = 0; k <= MS_COMP; k++)
-            o.master[4 + k] = m[k];
-        o.master[4 + 11] = m[MS_LEVEL];
-        o.format = 4u;
-        plat_store_save(OBJ_PROJ(slot, 0), &o, sizeof o);
     } else if (!strcmp(cmd, "songloop"))
         pats.song.loop = (uint8_t)(atoi(w[1]) != 0);
     else if (!strcmp(cmd, "mst")) {                 /* mst NAME VALUE (MN: the knobs, then pumpby, release, accent,

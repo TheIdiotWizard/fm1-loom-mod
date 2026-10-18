@@ -499,8 +499,8 @@ static int tp_page_param(int p, int k, int trk)
     if (p == P_CHARACTER)                            /* (a kit's voices are not synth voices: none) */
         return is_aux(trk) || is_drum(trk) ? -1 : M[p - P_ENGINE][k];
     if (is_aux(trk)) {
-        if (p == P_MIX)
-            return k == 3 ? TP_LEVEL : -1;
+        if (p == P_MIX)                              /* (the conductor and the throws: no sound, no fader) */
+            return k == 3 && is_fx(trk) ? TP_LEVEL : -1;
         if (p == P_ENGINE)
             return trk == AUX_PUNCH && k ? -1 : TP_E1 + k;
         if (p == P_PLAY && is_fx(trk)) {             /* an FX track's page 2: high-pass, low-pass, the feed into FX II */
@@ -980,9 +980,9 @@ static void page_knobs(knob_t *k)
                 ktp(&k[i], trk, tp_page_param(p, i, trk));
         break;
     case P_MIX:
-        if (is_aux(trk))
+        if (is_fx(trk))
             ktp(&k[3], trk, TP_LEVEL);
-        else {
+        else if (!is_aux(trk)) {                     /* (the conductor and the throws: no sound, no knobs) */
             ktp(&k[0], trk, TP_SEND1);
             ktp(&k[1], trk, TP_SEND2);
             ktp(&k[2], trk, TP_PAN);
@@ -3370,29 +3370,74 @@ static void draw_players(void)
     }
     cv_blit(0, MAIN_Y);
 }
+/* the Mix page: a strip a track, its meter (after the fader, eng_peak) and its fader on one scale in dB, +6 at the
+ * top, -48 at the foot, a line at 0 dB. The meter falls 24 dB a second; its peak holds a second, then falls too.
+ * The conductor and the throws make no sound: their name alone */
+#define MIX_TOP 6
+#define MIX_H 80
+#define MIX_DB_HI 6.0f
+#define MIX_DB_LO (-48.0f)
+static int32_t mix_y(float db)                   /* a level in dB: its height in the well, 0 .. MIX_H */
+{
+    db = db > MIX_DB_HI ? MIX_DB_HI : db < MIX_DB_LO ? MIX_DB_LO : db;
+    return (int32_t)((db - MIX_DB_LO) * (float)MIX_H / (MIX_DB_HI - MIX_DB_LO) + 0.5f);
+}
+static float lin_db(float g) { return g > 1e-6f ? fm_log2f(g) * 6.0206f : -120.0f; }
 static void draw_mix(void)
 {
+    static float m_db[NALLTRK], m_hold[NALLTRK];
+    static uint32_t m_hold_ms[NALLTRK], m_last;
+    static const char *const SHORT_NM[NALLTRK] = {"1", "2", "3", "4", "5", "6", "7", "8", "CO", "TH", "F1", "F2"};
+    uint32_t now = plat_ms(), dt = now - m_last;
     int sel = sel_trk();
     uint32_t h = hash_u(hash_u(2166136261u, 0x3Cu), (uint32_t)sel | (uint32_t)seq.mute << 4 | (uint32_t)ui.solo << 20);
-    static const char *const SHORT_NM[NALLTRK] = {"1", "2", "3", "4", "5", "6", "7", "8", "CO", "TH", "F1", "F2"};
-    for (int t = 0; t < NALLTRK; t++)
-        h = hash_u(h, eng_peak[t] >> 9);
+    float fall = (float)(dt > 1000u ? 1000u : dt) * 0.024f;
+    m_last = now;
+    for (int t = 0; t < NALLTRK; t++) {          /* the engine's loudest since the last look, then the fall */
+        float db = lin_db((float)eng_peak[t] * (1.0f / 16383.5f));
+        eng_peak[t] = 0;
+        if (dt > 250u)                           /* (back on the page: what piled up meanwhile is old) */
+            m_db[t] = m_hold[t] = MIX_DB_LO - 1.0f;
+        m_db[t] = fm_maxf(db, m_db[t] - fall);
+        if (db >= m_hold[t]) {
+            m_hold[t] = db;
+            m_hold_ms[t] = now;
+        } else if (now - m_hold_ms[t] > 1000u) {
+            m_hold[t] -= fall;
+        }
+        h = hash_u(h, (uint32_t)mix_y(m_db[t]) | (uint32_t)mix_y(m_hold[t]) << 8 |
+                      (uint32_t)proj.trk[t].par[TP_LEVEL] << 16);
+    }
     if (!begin_main(h))
         return;
+    int32_t y0 = MIX_TOP + MIX_H;                /* the wells' foot */
+    static const int8_t MARK[3] = {0, -12, -24};
+    static const char *const MARK_NM[3] = {"0", "-12", "-24"};
+    for (int i = 0; i < 3; i++)                  /* the scale, at the right */
+        text_r(236, y0 - mix_y((float)MARK[i]) - 4, &FONT_XS, MARK_NM[i], K_FAINT);
     for (int t = 0; t < NALLTRK; t++) {
-        int32_t x = 4 + t * 18, lvl = (int32_t)eng_peak[t] * 80 / 32768;
-        int muted = t < NSEQT && (seq.mute >> t & 1u);
-        cv_round(x, 6, 14, 84, 3, K_PANEL);
-        if (lvl > 0)
-            cv_round(x, 90 - lvl, 14, lvl, 3, muted ? K_LINE : trk_ink(t));
-        if (t == sel) {
-            cv_frame(x - 1, 5, 16, 86, 4, K_SEL, K_PANEL);
-            if (lvl > 0)
-                cv_round(x + 1, 90 - lvl, 12, lvl - 1, 2, muted ? K_LINE : trk_ink(t));
-        }
-        text_c(x + 7, 94, &FONT_XS, SHORT_NM[t], t == sel ? K_TEXT : muted ? K_FAINT : K_DIM);
+        int32_t x = 4 + t * 18;
+        int muted = t < NSEQT && (seq.mute >> t & 1u), sound = t < NTRK || is_fx(t);
+        uint16_t ink = muted ? K_LINE : trk_ink(t);
+        text_c(x + 7, 94, &FONT_XS, SHORT_NM[t], t == sel ? K_TEXT : muted || !sound ? K_FAINT : K_DIM);
         if (muted)
             cv_rect(x + 2, 108, 10, 2, K_FAINT);
+        if (t == sel)
+            cv_frame(x - 2, MIX_TOP - 2, 18, MIX_H + 4, 4, K_SEL, K_BG);
+        if (!sound)
+            continue;
+        int32_t lv = mix_y(m_db[t]), pk = mix_y(m_hold[t]);
+        int v = proj.trk[t].par[TP_LEVEL];
+        int32_t fy = v ? mix_y(lin_db(tp_level_gain(v))) : 0;
+        cv_round(x, MIX_TOP, 14, MIX_H, 3, K_PANEL);
+        for (int i = 0; i < 3; i++)              /* 0, -12, -24 dB */
+            cv_rect(x + (i ? 4 : 0), y0 - mix_y((float)MARK[i]), i ? 6 : 14, 1, K_PANEL2);
+        if (lv > 0)
+            cv_round(x + 3, y0 - lv, 8, lv, 2, ink);
+        if (pk > 1)
+            cv_rect(x + 3, y0 - pk, 8, 1, ink);
+        cv_round(x - 1, y0 - fy - 2, 16, 4, 1, t == sel ? K_SEL : K_DIM);   /* the fader */
+        cv_rect(x + 1, y0 - fy, 12, 1, K_BG);
     }
     if (ui.solo)
         text_r(236, 108, &FONT_XS, "solo", K_TEXT);

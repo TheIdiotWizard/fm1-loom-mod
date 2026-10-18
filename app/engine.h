@@ -63,7 +63,8 @@ void engine_scene(int scene, int cued);                  /* a scene: now (seq_se
 
 /* state for the screen (written by the interrupt) */
 extern volatile uint8_t eng_step[NSEQT];                 /* playheads */
-extern volatile uint16_t eng_peak[NALLTRK];              /* meters, Q15, decaying */
+extern volatile uint16_t eng_peak[NALLTRK];              /* meters after the faders, Q14 (to +6 dB): the loudest
+                                                          * since the UI took it (and set it to 0) */
 extern volatile uint8_t eng_drum_hit[NDRUM];             /* the selected drum track's last hits (255 = full) */
 extern volatile uint8_t eng_voices, eng_voices_max;      /* sounding, and the guard's cap */
 extern volatile uint32_t eng_guard_count;

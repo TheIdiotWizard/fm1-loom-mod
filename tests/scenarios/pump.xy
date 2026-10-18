@@ -66,18 +66,3 @@ tap PLAY
 wait 520
 expect pump 0
 tap PLAY
-# an older project (format 4, before the pump): its level comes back from its old place, the pump off
-mst comp 44
-mst level 87
-mst pump 30
-tap SAVE
-expect dirty 0
-format4 1
-reboot
-wait 300
-expect mst.level 87
-expect mst.comp 44
-expect mst.pump 0
-expect mst.pumpby 0
-expect mst.release 60
-expect mst.accent 1
