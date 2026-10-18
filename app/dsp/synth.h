@@ -71,6 +71,9 @@ enum {
     TP_LX2,                                         /* a fifth LFO value: shape (wave, wobble) or envelope (drift) */
     TP_CTYPE, TP_CAMT, TP_CTONE, TP_CMIX,           /* Character: the voice's own effect after the filter (CT_*),
                                                      * its amount, tone (per type, below) and mix (dry .. wet) */
+    TP_X1, TP_X2, TP_X3, TP_X4,                     /* the engine's second page (its names per engine: tp_info; "-"
+                                                     * where unused, as on every engine but brocade): brocade's Sub,
+                                                     * level (0 off) and offset (52..40: -12..-24 semitones, PK_BIPST) */
     TP_PLAYER, TP_P1, TP_P2, TP_P3, TP_P4,          /* Players: off / arp / strum / hold and its four knobs */
     TP_AP1, TP_AP2, TP_AP3, TP_AP4,                 /* the arp's second page: length, style, glide, stereo */
     TP_LEVEL, TP_PAN,                               /* Mix */
@@ -81,7 +84,9 @@ enum {
 };
 _Static_assert(NTP <= 255, "a parameter's index is a byte (the engine's queue, the lock lanes)");
 #define TP_DRUM(s, k) (TP_DRUM0 + (s) * DP_N + (k))
-#define NTP_SOUND TP_PLAYER                          /* a preset keeps par[0..TP_PLAYER): the character too */
+#define NTP_SOUND TP_PLAYER                          /* a preset keeps par[0..TP_PLAYER): the character, the engine's
+                                                      * second page (TP_X1..X4) too */
+#define BR_SUB_DEF 52                                /* brocade's sub offset by default: -12 semitones (64 = 0) */
 
 enum { VM_POLY, VM_MONO, VM_LEGATO };
 /* filter types: lp24 (two state-variable stages, 24 dB, aggressive), ladder (Moog-like, saturating feedback),
@@ -227,12 +232,12 @@ int synth_voices_used(const synth_t *s);
  * the sample; 0 when none plays. Called from the main loop: a racy read of the voices, for the screen only */
 int synth_slice_now(const synth_t *s, int trk, int *slice, int32_t *pos);
 void synth_limit(synth_t *s, int max_voices);                  /* the overload guard: fewer voices */
-/* brocade (EG_BROCADE), the supersaw after NuSaw: up to seven saws a voice (E1), and at most six of its voices in
- * the pool (five at seven saws: synth.c br_cap) */
+/* brocade (EG_BROCADE), the supersaw after NuSaw: up to seven saws a voice (E1) and NuSaw's sine sub (TP_X1 level,
+ * TP_X2 offset), and at most six of its voices in the pool (five at seven saws: synth.c br_cap) */
 int synth_brocade_voices(const synth_t *s);                    /* brocade's voices sounding */
 /* what voice vi costs to render, in rough units for the cores' split (engine.c split_at): 0 silent, 4 an
- * ordinary voice (weft, stack and organ 5), brocade 4 + its saws; the Braids engines by their model (braids.h:
- * 3 .. 8, cane's bell the most) */
+ * ordinary voice (weft, stack and organ 5), brocade 4 + its saws (+ 1 the sub); the Braids engines by their model
+ * (braids.h: 3 .. 8, cane's bell the most) */
 int synth_voice_cost(const synth_t *s, int vi);
 extern volatile uint16_t synth_peak[NTRK];                     /* per track meters, Q14, decaying (UI) */
 /* the profiler (samples.c SB_PROF, tools/perf_read.py): the time each voice took, by its engine, in synth_clock's

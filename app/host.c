@@ -3,7 +3,8 @@
  * extras as the simulator has them, its checks and its commands. Included by app.c, inside plat_host.c (its statics:
  * now_ms, enc_acc, store, run_ms ...). Tracks, patterns, steps and scenes count from 1 in a script, as the screen
  * shows them; "expect step" reports the playhead 0-based (eng_step).
- *   param T P V                  parameter P (synth.h TP_*) of track T set to V, as a knob would
+ *   param T P V                  parameter P (synth.h TP_*: a number or a knob's name, as the knob command's) of track
+ *                                T set to V, as a knob would
  *   load N                       every block costs N % (the overload guard's input); -1 = measured
  *   meter MS                     run MS ms; print the modelled load's mean and peak (the model: load_model below)
  *   steps T PAT                  print track T's pattern PAT: each step's notes, component, condition
@@ -24,7 +25,8 @@
  *                                share of a project slot, %), model_avg /
  *                                model_peak (the last meter's, %), tempo, trk, user / userbytes / rateN (the user bank's
  *                                samples, its data's bytes, user N's rate), punch_drum / punch_mel (the masks in effect,
- *                                PX_* bits), parT.P, mst.NAME (a master value, the mst command's names), pump (the
+ *                                PX_* bits), parT.P (P a number or a name: par2.x1, par1.d3.decay), mst.NAME (a
+ *                                master value, the mst command's names), pump (the
  *                                pump's duck now, tenths of a dB); and with more words: step T VALUE, page NAME, comp T S VALUE (prints
  *                                both components; checks the first), note T PAT S VALUE
  * The demos' stems and taps (tools/demos/render.sh --stems), from the environment:
@@ -150,6 +152,7 @@ static void steps_print(int t, int p)
 
 static int isnum(const char *s);
 static int ieq(const char *a, const char *b);
+static int param_of(const char *s);
 static const char *const MN[NMS] = {"lo", "mid", "hi", "blend", "-", "-", "-", "-", "perc", "mel",
                                     "comp", "pump", "pumpby", "release", "accent", "level"};
 /* fm1-base's expect, for LOOM-8's own state with one value */
@@ -202,7 +205,7 @@ int app_expect(const char *what, int *got)
         *got = proj.master[k];
     }
     else if (!strncmp(what, "par", 3) && strchr(what, '.')) {   /* parT.P: parameter P of track T */
-        int t = atoi(what + 3) - 1, p = atoi(strchr(what, '.') + 1);
+        int t = atoi(what + 3) - 1, p = param_of(strchr(what, '.') + 1);
         if (t < 0 || t >= NALLTRK || p < 0 || p >= NTP)
             return 0;
         *got = proj.trk[t].par[p];
@@ -314,8 +317,9 @@ static int expect_more(const char *what, const char *a, const char *b, const cha
 static const char *const TPN[TP_DRUM0] = {
     "engine", "e1", "e2", "e3", "e4", "vmode", "porta", "bend", "volume", "a", "d", "s", "r", "fa", "fd", "fs", "fr",
     "cut", "res", "fenv", "ktrk", "ftype", "send1", "send2", "ltype", "lspeed", "lamt", "ldest", "lx", "lx2",
-    "ctype", "camt", "ctone", "cmix", "player", "p1", "p2", "p3", "p4", "ap1", "ap2", "ap3", "ap4", "level", "pan",
-    "brain", "chan"};
+    "ctype", "camt", "ctone", "cmix", "x1", "x2", "x3", "x4", "player", "p1", "p2", "p3", "p4", "ap1", "ap2", "ap3",
+    "ap4", "level", "pan", "brain", "chan"};
+_Static_assert(TP_X1 == 34 && TP_PLAYER == 38 && TP_CHAN == TP_DRUM0 - 1, "TPN: a name for every TP_* in its place");
 static const char *const DPN[DP_N] = {"model", "k1", "k2", "k3", "k4", "random", "pan", "volume", "mode", "attack",
                                       "hold", "decay", "lag", "cut", "res", "fenv", "drive", "ftype"};
 static int ieq(const char *a, const char *b)       /* names alike: case and '_' for ' ' */
@@ -847,7 +851,7 @@ int app_host_cmd(const char *cmd, const char *a, const char *b, const char *c, c
     if (!strcmp(cmd, "expect"))
         return expect_more(a, b, c, d);
     if (!strcmp(cmd, "param")) {                    /* param T P V */
-        int t = atoi(a) - 1, p = atoi(b), v = atoi(c);
+        int t = atoi(a) - 1, p = param_of(b), v = atoi(c);
         if (t < 0 || t >= NALLTRK || p < 0 || p >= NTP) {
             printf("no param %s %s\n", a, b);
             exit(2);

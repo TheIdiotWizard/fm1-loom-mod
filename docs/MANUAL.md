@@ -161,7 +161,7 @@ press…" means keep **HOME** down while you press the next thing.
 | **SEL** | Opens a list of this page's settings and actions. With a step held, its notes. When LOOM-8 asks a question, **SEL** means yes. |
 | **HOME** | Opens Arrange. On Arrange, it opens the Song page. Held, it is the shift key: tricks, throws, undo and redo, the fine tempo, scenes, mutes on Mix. When LOOM-8 asks a question, **HOME** means no. |
 | **SEQ** | Opens Steps. Its page 2 is Bar. Hold it on Steps and the keys play the track and set what a step writes. |
-| **EDIT** | Opens Engine. Its page 2 is Play; on a drum track, the key's model, random, pan and volume. |
+| **EDIT** | Opens Engine. Its page 2 is Play; on a drum track, the key's model, random, pan and volume. Brocade has a page 3, Sub. |
 | **ENV** | Opens Envelope (a drum track: lag, attack, random, length), then Filter, then the filter's envelope. |
 | **FX** | Opens Character, the track's own effect. Then Sends, the track's sends to FX I and FX II. Then FX I and FX II, the two effects. |
 | **LFO** | Opens LFO. Its page 2 has the type's fourth and fifth knobs. |
@@ -393,6 +393,9 @@ are NuSaw's. **saws** sets how many, from one to seven: a centre saw and pairs e
 their pitches, fine at first and wide at the end. **mix** sets the side saws against the centre one: low, one
 saw with a shimmer; high, a wall. **spread** opens the pairs across the stereo field. The filter, the envelopes
 and the LFO work on it as on any engine; an LFO on detune makes it swirl.
+
+Brocade has a third page under **EDIT**, Sub: a sine under the saws, NuSaw's. **sub** sets its level (0 is off)
+and **offset** how far under the note it plays, from an octave (-12) to two octaves (-24), -19 a fifth below the octave.
 
 Seven saws cost about two and a half ordinary voices. So brocade plays at most six voices, five with seven saws;
 a new note past that takes its oldest. Its saws stay as you set them, however busy the FM-1 is.

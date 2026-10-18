@@ -122,7 +122,7 @@ typedef struct {
     float pitch_off;                  /* cents added to the note (bend, perf, vibrato, an LFO on pitch) */
     float e[4];                       /* the engine knobs 0..1 */
     float ek[4];                      /* the same, raw (the discrete knobs: 1..8, a table index) */
-    float ex[20];                     /* the engine's derived values (eng_prep) */
+    float ex[23];                     /* the engine's derived values (eng_prep; brocade's sub: ex[20..22]) */
     float cx[8];                      /* the character stage's values for the chunk (char_prep) */
     float cin[3];                     /* what cx[0..5] were made from (amount, tone, the ring's frequency) */
     uint8_t cin_type;                 /* and the type (0xFF: none yet) */
@@ -1031,6 +1031,12 @@ static void dis_run(voice_t *v, float *xl, float *xr, int m)
  * band, L then R). ex[0] the increment, ex[1] the detune's, ex[2] the knob's count, ex[3] the offsets' row,
  * ex[4] the side gain, ex[5..10] the pairs' L and R gains (x sqrt 2: the centre at 1), ex[11] the high-pass's coefficient, ex[12], ex[13], ex[15..19] the seven saws' 1 / increment (BR_IDT:
  * the PolyBLEP's, a division a saw once a prepare, not once a sub-block), ex[14] the count to sound (the knob's).
+ * The sub (the Sub page, TP_X1 / TP_X2): NuSaw's, a sine at the note plus the offset (-12 .. -24 semitones),
+ * added into both sides after the saws' high-pass (NuSaw's order: the high-pass keeps out of the sub), before
+ * the voice's filter, at NuSaw's level (its sub_level x 0.7071 against a centre saw panned at 0.7071; here the
+ * pans are x sqrt 2, so the level as it is: the sub against the saws as NuSaw's). Not computed at level 0.
+ * ex[20] its gain, ex[21] its offset in semitones (both voice_chunk's, every chunk), ex[22] its increment
+ * (br_prep's, from the frequency the saws take: glide, bend, the LFO); o[14] its phase (eng_init's 1: from 0).
  *
  * The saws' sample loop: a sample whose phase is at most 1 - increment needs no wrap and no PolyBLEP (the wrap
  * leaves the phase under the increment, and no phase without a wrap is), so one compare takes it, and the
@@ -1088,6 +1094,8 @@ static void br_prep(voice_t *v)
         top = v->o[9] < (float)BR_SAWS ? (int)v->o[9] + ((float)(int)v->o[9] < v->o[9]) : BR_SAWS;
     for (k = 0; k < top; k++)
         c->ex[BR_IDT(k)] = 1.0f / br_dt(c, co, k);
+    if (c->ex[20] > 0.0f)                        /* the sub's increment (voice_chunk prepares again when it starts) */
+        c->ex[22] = fm_minf(f * fm_exp2f(c->ex[21] * (1.0f / 12.0f)), 0.45f);
     c->stereo = w > 0.001f && n > 1;
 }
 /* a PolyBLEP saw's next sample; hi = 1 - dt */
@@ -1210,6 +1218,18 @@ SY_INLINE void br_loop(voice_t *v, float *xl, float *xr, int m, const int stereo
     br_hp(xl, &v->o[10], &v->o[11], c->ex[11], m);
     if (stereo)
         br_hp(xr, &v->o[12], &v->o[13], c->ex[11], m);
+    if (c->ex[20] > 0.0f) {                      /* the sub: a sine, the same into both sides */
+        float p = v->o[14], d = c->ex[22], gb = c->ex[20];
+        for (j = 0; j < m; j++) {
+            float x;
+            p = step1(p, d);                     /* (fm_sin_turns without its floor: p is in [0, 1)) */
+            x = fm_sin_pi((p < 0.5f ? p : p - 1.0f) * FM_TWO_PI) * gb;
+            xl[j] += x;
+            if (stereo)
+                xr[j] += x;
+        }
+        v->o[14] = p;
+    }
 }
 static void br_run(voice_t *v, float *xl, float *xr, int m)
 {
@@ -1999,7 +2019,7 @@ int synth_voice_cost(const synth_t *s, int vi)
     if (v->engine != EG_BROCADE)
         return 4;
     /* on the FM-1 (measure_load.sh, 2026-10-18): 4 + a unit a saw (11 at seven: an ordinary voice's two and a half) */
-    return 4 + (int)(v->o[9] < 0.0f ? v->c.ex[14] : v->o[9] + 0.99f);
+    return 4 + (int)(v->o[9] < 0.0f ? v->c.ex[14] : v->o[9] + 0.99f) + (v->c.ex[20] > 0.0f);   /* (+1: the sub) */
 }
 void synth_duck_trigger(synth_t *s, int src)
 {
@@ -2474,9 +2494,16 @@ static void voice_chunk(synth_t *s, voice_t *v)
     if (dest == LD_PITCH)
         c->pitch_off += off * (1200.0f / 127.0f);
     {   /* the frequency and the engine's increments: when the pitch or a knob moved (or every 4th
-         * chunk: the organ's pitch wobble and phasor trim) */
+         * chunk: the organ's pitch wobble and phasor trim); brocade's sub: when it starts or its offset moved */
         float pin = v->pitch_cur + c->pitch_off * 0.01f;
         int moved = pin != v->pitch_in || v->fresh || (v->nchunk & 3) == 0;
+        if (v->engine == EG_BROCADE) {
+            float lv = (float)P(s, trk, TP_X1) * (1.0f / 127.0f);
+            float st = fm_clampf((float)P(s, trk, TP_X2) - 64.0f, -24.0f, -12.0f);
+            moved |= (lv > 0.0f && c->ex[20] <= 0.0f) || st != c->ex[21];
+            c->ex[20] = fm_minf(lv, 1.0f);
+            c->ex[21] = st;
+        }
         for (i = 0; i < 4 && !moved; i++)
             moved = c->e[i] != v->e_in[i];
         if (moved) {
@@ -2959,6 +2986,8 @@ static const tp_info_t FIXED[NTP_SOUND + 13] = {
     /* the character stage: its amount and tone print per type (tp_text_par) */
     {"type", 0, NCT - 1, CT_OFF, PK_NAMES, CTYPE_N},    {"amount", 0, 127, 64, PK_PCT, 0},
     {"tone", 0, 127, 64, PK_BIP, 0},                    {"mix", 0, 127, 127, PK_PCT, 0},
+    /* TP_X1 .. TP_X4: the engine's second page: none but an engine's own (tp_info: brocade's BR_SUB_P) */
+    {"-", 0, 0, 0, PK_NUM, 0}, {"-", 0, 0, 0, PK_NUM, 0}, {"-", 0, 0, 0, PK_NUM, 0}, {"-", 0, 0, 0, PK_NUM, 0},
     /* TP_PLAYER .. TP_CHAN */
     {"player", 0, NPL - 1, PL_OFF, PK_NAMES, PLAYER_N}, {"speed", 0, 8, 4, PK_NAMES, ARPSPD_N},
     {"pattern", 0, 5, 0, PK_NAMES, ARPPAT_N},           {"range", 1, 4, 1, PK_NUM, 0},
@@ -2985,6 +3014,11 @@ static const tp_info_t DRUMENV[4] = {{"lag", 0, 127, 0, PK_PCT, 0}, {"attack", 0
 static const tp_info_t DRUMFLT[4] = {{"lowcut", 0, 127, 0, PK_HZ, 0}, {"comp", 0, 127, 0, PK_PCT, 0},
                                      {"drive", 0, 127, 0, PK_PCT, 0}, {"hicut", 0, 127, 127, PK_HZ, 0}};
 static const tp_info_t NONE_P = {"-", 0, 0, 0, PK_NUM, 0};
+/* an engine's second page (TP_X1..X4; the Sub page in pages.c): brocade's sub, its level ("sub": the SEL list shows it
+ * among the engine's) and its offset (-24 .. -12 semitones about 64, -12 by default: NuSaw's sub tune) */
+static const tp_info_t BR_SUB_P[4] = {{"sub", 0, 127, 0, PK_PCT, 0}, {"offset", 40, 52, BR_SUB_DEF, PK_BIPST, 0},
+                                      {"-", 0, 0, 0, PK_NUM, 0}, {"-", 0, 0, 0, PK_NUM, 0}};
+_Static_assert(BR_SUB_DEF >= 40 && BR_SUB_DEF <= 52, "the sub's offset by default in its range");
 static const tp_info_t STRUM_P[4] = {{"roll", 0, 63, 30, PK_NUM, 0}, {"pattern", 0, 3, 0, PK_NAMES, MPAT_N},
                                        {"-", 0, 0, 0, PK_NUM, 0}, {"hold", 0, 1, 0, PK_SWITCH, 0}};
 /* the LFO's knobs per type (synth.h): speed / amount / dest / x / x2 */
@@ -3088,6 +3122,8 @@ const tp_info_t *tp_info(int p, int engine)
             engine = EG_WEFT;
         return &eknob[engine][p - TP_E1];
     }
+    if (p >= TP_X1 && p <= TP_X4)                /* the engine's second page: brocade's sub, else none */
+        return engine == EG_BROCADE ? &BR_SUB_P[p - TP_X1] : &NONE_P;
     if (engine == EG_DRUMLINE) {
         if (p >= TP_A && p <= TP_R)
             return &DRUMENV[p - TP_A];
@@ -3348,9 +3384,10 @@ void sound_default(uint8_t *par, int engine)
 /* -------------------------------------------------------------- presets --- */
 /* ENGINE E1 E2 E3 E4 | MODE PORTA BEND VOL | A D S R | FA FD FS FR | CUT RES FENV KTRK TYPE | S1 S2 |
  * LTYPE LSPEED LAMT LDEST LX LX2 | CTYPE CAMT CTONE CMIX (the character: every preset a whole sound, its own
- * effect in it), and the role (RL_*). Sixteen an engine, the first of each the engine's sound in a new project
- * (and what choosing the engine loads), the rest by role: basses, leads, keys, plucks and bells, stabs and brass,
- * strings, pads and voices, chords, then the moving ones and effects. Each after a classic where the engine can
+ * effect in it) | X1..X4 (the engine's second page: X_, the defaults), and the role (RL_*). Sixteen an engine,
+ * the first of each the engine's sound in a new project (and what choosing the engine loads), the rest by role:
+ * basses, leads, keys, plucks and bells, stabs and brass, strings, pads and voices, chords, then the moving ones
+ * and effects. Each after a classic where the engine can
  * (the comment above each engine's says which; docs/superpowers/presets-archetypes.md the map), each its own:
  * percussive, plucked, gated, swelling or ringing; dark, open, nasal, hollow or metallic; still or moving; and
  * most of them dry or nearly (the reverb for the sounds that want the room). The LFO fields follow synth.h: wave / drift:
@@ -3366,7 +3403,9 @@ void sound_default(uint8_t *par, int engine)
 #define CH_(ct, ca, cto, cm) ct, ca, cto, cm
 #define PR(nm, rl, eng, e1, e2, e3, e4, vm, po, vol, a, d, su, r, fa, fd, fs, fr, cut, res, fenv, kt, ft, s1, s2, lfo, ch) \
     {nm, {eng, e1, e2, e3, e4, vm, po, 2, vol, a, d, su, r, fa, fd, fs, fr, cut, res, fenv, kt, ft, s1, s2, LFO_ lfo, \
-          CH_ ch}, rl}
+          CH_ ch, X_(eng)}, rl}
+/* the engine's second page (TP_X1..X4) as sound_default leaves it: brocade's sub off at -12 semitones, else none */
+#define X_(eng) 0, (eng) == EG_BROCADE ? BR_SUB_DEF : 0, 0, 0
 #define NOLFO (LT_OFF, 3, 64, LD_FILTER, 0, 1)
 #define NOCH (CT_OFF, 64, 64, 127)                         /* the character stage: off (type, amount, tone, mix) */
 #define VIB(fade) (LT_WOBBLE, 92, 74, 64, fade, 0)          /* a vibrato of about 16 cents at 5.6 Hz */

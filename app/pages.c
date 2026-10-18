@@ -60,17 +60,18 @@ static uint16_t trk_tint(int t) { return ink_mix(trk_ink(t), theme->tint); }
  * (a drum track: the shown key's knobs) and Play (a drum track: the key's model, random, pan, volume); ENV: the
  * envelope, the filter, the filter envelope (a drum track: the shown key's envelope and filter, then the kit's
  * envelope and the kit's bus filter: four pages); FX: the instrument's character stage (a kit track has none:
- * the page says so), its sends and the two effects; ARP three with the arp (its page 2, then hold) */
-enum { P_ARRANGE, P_SONG, P_STEPS, P_BAR, P_ENGINE, P_PLAY, P_ENV, P_FILTER, P_ENV2, P_KITF, P_CHARACTER, P_SENDS,
+ * the page says so), its sends and the two effects; ARP three with the arp (its page 2, then hold). EDIT has a
+ * third page where the engine has a second page of knobs (TP_X1..X4): brocade's Sub */
+enum { P_ARRANGE, P_SONG, P_STEPS, P_BAR, P_ENGINE, P_PLAY, P_SUB, P_ENV, P_FILTER, P_ENV2, P_KITF, P_CHARACTER, P_SENDS,
        P_FX1, P_FX2, P_LFO, P_LFO2, P_PLAYERS, P_PLAYERS2, P_PLAYERS3, P_MIX, P_MASTER, P_MASTER3, P_SETUP,
        P_STATUS, NPAGES };
-static const char *const PAGE_NAME[NPAGES] = {"Arrange", "Song", "Steps", "Bar", "Engine", "Play", "Envelope",
+static const char *const PAGE_NAME[NPAGES] = {"Arrange", "Song", "Steps", "Bar", "Engine", "Play", "Sub", "Envelope",
                                               "Filter", "Filter env", "Kit filter", "Character", "Sends", "FX I",
                                               "FX II", "LFO", "LFO 2", "Players", "Players 2", "Hold", "Mix",
                                               "Master EQ", "Master out", "Setup", "Status"};
 static int mst_base(int p) { return p == P_MASTER ? MS_EQ_LO : MS_PERC; }   /* a master page's first knob */
 static const struct { uint8_t btn, first, n; } PAGE_BTN[] = {
-    {B_HOME, P_ARRANGE, 2}, {B_SEQ, P_STEPS, 2}, {B_EDIT, P_ENGINE, 2}, {B_ENV, P_ENV, 4}, {B_FX, P_CHARACTER, 4},
+    {B_HOME, P_ARRANGE, 2}, {B_SEQ, P_STEPS, 2}, {B_EDIT, P_ENGINE, 3}, {B_ENV, P_ENV, 4}, {B_FX, P_CHARACTER, 4},
     {B_LFO, P_LFO, 2}, {B_ARP, P_PLAYERS, 3}, {B_GLO, P_MIX, 5}};
 #define NPAGE_BTN (sizeof PAGE_BTN / sizeof PAGE_BTN[0])
 static int page_group(int p)
@@ -468,11 +469,15 @@ static int page_trk(int p)
 {
     return p == P_FX1 ? AUX_FX1 : p == P_FX2 ? AUX_FX2 : p == P_SENDS || p == P_CHARACTER ? inst_trk() : sel_trk();
 }
+static int x_page(int t)                             /* the engine has a second page of knobs (TP_X1..X4) */
+{
+    return t < NTRK && proj.trk[t].par[TP_ENGINE] == EG_BROCADE;
+}
 static int group_n(int g)
 {
     int trk = sel_trk(), b = PAGE_BTN[g].btn;
-    if (b == B_EDIT)
-        return trk == AUX_PUNCH ? 1 : 2;
+    if (b == B_EDIT)                                 /* brocade: its Sub page third */
+        return trk == AUX_PUNCH ? 1 : x_page(trk) ? 3 : 2;
     if (b == B_ARP)
         return pl_type(trk) == PL_ARP ? 3 : 2;
     if (b == B_ENV)
@@ -483,7 +488,8 @@ static int group_n(int g)
 static int tp_page_param(int p, int k, int trk)
 {
     static const int8_t M[][4] = {
-        {TP_E1, TP_E2, TP_E3, TP_E4}, {TP_VMODE, TP_PORTA, TP_BEND, TP_VOLUME}, {TP_A, TP_D, TP_S, TP_R},
+        {TP_E1, TP_E2, TP_E3, TP_E4}, {TP_VMODE, TP_PORTA, TP_BEND, TP_VOLUME}, {TP_X1, TP_X2, TP_X3, TP_X4},
+        {TP_A, TP_D, TP_S, TP_R},
         {TP_CUT, TP_RES, TP_FENV, TP_KTRK}, {TP_FA, TP_FD, TP_FS, TP_FR}, {TP_CUT, TP_RES, TP_FENV, TP_KTRK},
         {TP_CTYPE, TP_CAMT, TP_CTONE, TP_CMIX},
         {TP_SEND1, TP_SEND2, TP_PAN, TP_LEVEL},
@@ -528,6 +534,8 @@ static int tp_page_param(int p, int k, int trk)
         if (p == P_ENV2)                             /* the kit's envelope: lag, attack, random, length */
             return M[P_ENV - P_ENGINE][k];
     }
+    if (p == P_SUB && !x_page(trk))
+        return -1;
     if (p == P_PLAYERS2 && pl_type(trk) != PL_ARP)
         return k == 0 ? TP_P4 : -1;
     if (p == P_PLAYERS3 && pl_type(trk) != PL_ARP)
@@ -1114,7 +1122,7 @@ static void page_tag(char *t)
         } else if (ui.held || ui.cstep)
             num_s((uint32_t)step_shown(ui.held_first) + 1u, s_cat(t + s_len(t), ">step "));
         break;
-    case P_ENGINE: case P_PLAY: case P_ENV: case P_FILTER: case P_ENV2: case P_KITF: case P_LFO: case P_LFO2:
+    case P_ENGINE: case P_PLAY: case P_SUB: case P_ENV: case P_FILTER: case P_ENV2: case P_KITF: case P_LFO: case P_LFO2:
         track_crumb(t);
         if (is_drum(sel_trk()))                      /* the key the knobs edit (the kit's own pages: the whole kit) */
             s_cat(s_cat(t + s_len(t), ">"), ui.page == P_ENV2 || ui.page == P_KITF ? "all keys"
@@ -1523,15 +1531,15 @@ static void draw_footer(void)
 #define PG(p) (1u << (p))
 #define PG_ANY 0xFFFFFFFFu
 #define PG_STEPS (PG(P_STEPS) | PG(P_BAR))
-#define PG_SOUND (PG(P_ENGINE) | PG(P_PLAY) | PG(P_ENV) | PG(P_ENV2) | PG(P_KITF) | PG(P_FILTER) | PG(P_CHARACTER) | \
-                  PG(P_LFO) | PG(P_LFO2))
+#define PG_SOUND (PG(P_ENGINE) | PG(P_PLAY) | PG(P_SUB) | PG(P_ENV) | PG(P_ENV2) | PG(P_KITF) | PG(P_FILTER) | \
+                  PG(P_CHARACTER) | PG(P_LFO) | PG(P_LFO2))
 static const struct { uint8_t btn; uint32_t pages; const char *title, *l1, *l2; } CARD[] = {
     {B_SEQ, PG_ANY, "Steps", "The bar's 16 steps on the white keys. Hold SEQ and play the notes,",
      "then press steps to write them. HOME + a step: tricks."},
     {B_EDIT, PG(P_STEPS), "Lock", "With a step held, EDIT, ENV, FX or LFO show that module's knobs.",
      "Turn one to lock it on the step; SELECT turns pages. SAVE clears."},
     {B_EDIT, PG_ANY, "Engine", "The track's engine and its four knobs. PRESETS: its next sound.",
-     "SEL changes the engine. Page 2: Play. Drums: black keys pick a key."},
+     "SEL changes the engine. Page 2: Play; brocade's 3: Sub. Drums: black keys pick a key."},
     {B_ENV, PG_ANY, "Envelope", "The amp's envelope, then the filter, then the filter's envelope.",
      "PRESETS on Filter: its type. A kit: the key's envelope and filter, then the kit's."},
     {B_FX, PG_ANY, "Effects", "The track's own character: drive, fold, crush and more. Then its sends, FX I and FX II.",
@@ -2963,6 +2971,37 @@ static void draw_play(void)
     cv_text(12, 66, &FONT_XS, t, K_DIM);
     cv_blit(0, MAIN_Y);
 }
+/* brocade's Sub page: the interval under the note, the centre saw (faint) and the sub's sine under it at its
+ * level (off: a flat line) */
+static void draw_sub(void)
+{
+    static const char *const IV[13] = {"", "a semitone", "a tone", "a minor third", "a third", "a fourth", "a tritone",
+                                       "a fifth", "a minor sixth", "a sixth", "a minor seventh", "a seventh", ""};
+    int trk = sel_trk();
+    const uint8_t *p = proj.trk[trk].par;
+    int lv = p[TP_X1], st = clampi((int)p[TP_X2] - 64, -24, -12), d = -st - 12;
+    uint32_t h = hash_u(hash_u(2166136261u, 0x5Bu), (uint32_t)trk | (uint32_t)lv << 4 | (uint32_t)(st + 64) << 12);
+    float ratio = fm_exp2f((float)st * (1.0f / 12.0f)), amp = 30.0f * (float)lv / 127.0f, cy = 80.0f;
+    pen_t ps = {0, 0, 0}, pw = {0, 0, 0};
+    char t[48], *e;
+    if (!begin_main(h))
+        return;
+    e = num_i(st, t);
+    s_cat(e, " st");
+    cv_text(12, 6, &FONT_B, lv ? t : "off", K_TEXT);
+    e = s_cat(t, d == 12 ? "two octaves" : "an octave");
+    if (d > 0 && d < 12)
+        e = s_cat(s_cat(e, " and "), IV[d]);
+    s_cat(e, " under the note");
+    text_fit(12, 26, &FONT_XS, t, 216, K_DIM);
+    cv_rect(12, (int32_t)cy, 216, 1, K_LINE);
+    for (int32_t x = 0; x <= 216; x++) {             /* six cycles of the note's saw; the sub's under them */
+        float ph = (float)x * (6.0f / 216.0f), fr = ph - fm_floorf(ph);
+        pen_to(&pw, (float)(12 + x), cy - 14.0f + (1.0f - 2.0f * fr) * 6.0f, K_FAINT);
+        pen_to(&ps, (float)(12 + x), cy - amp * fm_sin_turns(ph * ratio), lv ? K_NOW : K_DIM);
+    }
+    cv_blit(0, MAIN_Y);
+}
 /* a drum key's own envelope: its lag (flat), the attack's rise, the hold, the decay's fall (or, off, the level
  * held to the right edge: the sound's own length rules), the key's colour under it */
 static void draw_key_env(void)
@@ -3613,7 +3652,7 @@ static void draw_page(void)
     case P_SENDS: draw_sends(); break;
     case P_FX1: draw_fxtrack(AUX_FX1); break;
     case P_FX2: draw_fxtrack(AUX_FX2); break;
-    case P_ENGINE: case P_PLAY: case P_ENV: case P_ENV2: case P_KITF: case P_FILTER: case P_LFO:
+    case P_ENGINE: case P_PLAY: case P_SUB: case P_ENV: case P_ENV2: case P_KITF: case P_FILTER: case P_LFO:
     case P_LFO2: case P_PLAYERS: case P_PLAYERS2: case P_PLAYERS3:
         if (trk == AUX_BRAIN)
             draw_brain();
@@ -3625,6 +3664,8 @@ static void draw_page(void)
             draw_engine();
         else if (ui.page == P_PLAY)
             draw_play();
+        else if (ui.page == P_SUB)
+            draw_sub();
         else if (ui.page == P_ENV && is_drum(trk))
             draw_key_env();
         else if (ui.page == P_ENV || ui.page == P_ENV2)

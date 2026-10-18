@@ -142,6 +142,22 @@ static double off_harmonic(const float *x, int n, double f)
     return off / on;
 }
 
+/* a sine's frequency from its rising zero crossings (interpolated), the first to the last */
+static double zc_hz(const float *x, int n)
+{
+    double first = -1.0, last = -1.0;
+    int i, cycles = -1;
+    for (i = 1; i < n; i++)
+        if (x[i - 1] < 0.0f && x[i] >= 0.0f) {
+            double t = (double)(i - 1) + (double)x[i - 1] / ((double)x[i - 1] - (double)x[i]);
+            if (first < 0.0)
+                first = t;
+            last = t;
+            cycles++;
+        }
+    return cycles > 0 ? (double)cycles * SR / (last - first) : 0.0;
+}
+
 #define NB 64                                    /* 16384 samples, 0.37 s */
 static float A[NB * N], B[NB * N], C[NB * N];
 
@@ -283,6 +299,89 @@ int main(void)
         check("other engines beside it keep their voices", synth_voices_used(S) == 8);
     }
 
+    /* the sub (the Sub page: TP_X1 level, TP_X2 offset): NuSaw's sine at the note plus the offset, the same into both
+     * sides, added before the filter. Level 0 renders exactly as no sub (whatever the offset); the sub alone (the
+     * render with it less the render without: the same saws, the filter wide open) is a sine at the note's
+     * frequency x 2^(offset / 12), as loud against one saw as NuSaw's (its sine's peak at the saw's: rms 1.22 x
+     * the saw's); it follows the bend, and it starts when its level comes up mid-note */
+    {
+        static const int OFF[3] = {-24, -19, -12};
+        static float D[NB * N], E[NB * N];
+        int i, same = 1, mid_ok;
+        double f_note = 220.0, r_saw, r_sub = 0.0;
+        reset(7, 60, 100, 127);
+        held(57, 8, NB, A, B);
+        reset(7, 60, 100, 127);
+        for (n = 0; n < NTRK; n++)
+            par[n][TP_X2] = 40;                  /* an offset, the level 0: nothing changes */
+        held(57, 8, NB, C, D);
+        for (i = 0; i < NB * N; i++)
+            same &= A[i] == C[i] && B[i] == D[i];
+        check("sub level 0: the same samples as no sub, at any offset", same);
+        reset(1, 0, 0, 0);                       /* one saw alone, for the level */
+        held(57, 8, NB, A, 0);
+        r_saw = rms(A, NB * N);
+        for (k = 0; k < 3; k++) {
+            double f_want = f_note * pow(2.0, OFF[k] / 12.0), f_got, lr = 0.0;
+            reset(1, 0, 0, 0);
+            held(57, 8, NB, A, B);
+            reset(1, 0, 0, 0);
+            par[0][TP_X1] = 127;
+            par[0][TP_X2] = (uint8_t)(64 + OFF[k]);
+            held(57, 8, NB, C, D);
+            for (i = 0; i < NB * N; i++) {
+                D[i] -= B[i];
+                C[i] -= A[i];
+                lr = fmax(lr, fabs((double)C[i] - (double)D[i]));
+            }
+            f_got = zc_hz(C, NB * N);
+            if (OFF[k] == -12)
+                r_sub = rms(C, NB * N);
+            printf("    sub %+d st: %.2f Hz (want %.2f), |L - R| %.1e\n", OFF[k], f_got, f_want, lr);
+            check(OFF[k] == -24 ? "the sub at -24 st: two octaves under the note"
+                  : OFF[k] == -19 ? "the sub at -19 st: an octave and a fifth under"
+                                  : "the sub at -12 st: an octave under", fabs(f_got / f_want - 1.0) < 0.002);
+            check("  the same on both sides", lr < 1e-4);
+            check("  a sine (no harmonics: the 2nd and 3rd 50 dB under)",
+                  bin(C, NB * N, 2.0 * f_want) < 1e-5 * bin(C, NB * N, f_want) &&
+                  bin(C, NB * N, 3.0 * f_want) < 1e-5 * bin(C, NB * N, f_want));
+        }
+        printf("    sub rms / one saw's rms: %.3f (NuSaw's: 1.22)\n", r_sub / r_saw);
+        check("the sub as loud against a saw as NuSaw's", fabs(r_sub / r_saw / 1.2247 - 1.0) < 0.1);
+        /* the bend: an octave up takes the sub with it */
+        reset(1, 0, 0, 0);
+        held(57, 8, NB, A, 0);
+        reset(1, 0, 0, 0);
+        par[0][TP_X1] = 127;
+        par[0][TP_X2] = 64 - 19;
+        synth_bend(S, 0, 1200);
+        held(57, 8, NB, C, 0);
+        reset(1, 0, 0, 0);                       /* (the saw bent as well, without the sub) */
+        synth_bend(S, 0, 1200);
+        held(57, 8, NB, A, 0);
+        for (i = 0; i < NB * N; i++)
+            C[i] -= A[i];
+        printf("    bent an octave up, -19 st: %.2f Hz (want %.2f)\n", zc_hz(C, NB * N), 2.0 * f_note * pow(2.0, -19.0 / 12.0));
+        check("the sub follows the bend", fabs(zc_hz(C, NB * N) / (2.0 * f_note * pow(2.0, -19.0 / 12.0)) - 1.0) < 0.002);
+        /* the level up mid-note: the sub starts (its increment made then) */
+        reset(1, 0, 0, 0);
+        held(57, 8, NB, A, 0);
+        reset(1, 0, 0, 0);
+        synth_note_on(S, 0, 57, 127, 0, 1);
+        for (b = 0; b < 8; b++)
+            block();
+        par[0][TP_X1] = 127;
+        for (b = 0; b < NB; b++) {
+            block();
+            memcpy(E + b * N, L, sizeof L);
+        }
+        for (i = 0; i < NB * N; i++)
+            E[i] -= A[i];
+        mid_ok = fabs(zc_hz(E, NB * N) / (f_note * 0.5) - 1.0) < 0.002;
+        printf("    the level up mid-note: %.2f Hz\n", zc_hz(E, NB * N));
+        check("the sub starts when its level comes up mid-note", mid_ok);
+    }
+
     /* the cost: one voice held, lp24, its instructions a sample */
     {
         double base = 0.0, c1 = 0.0, c9 = 0.0;
@@ -328,6 +427,21 @@ int main(void)
                 printf("  brocade %d saw%s %s %6.1f  (%.2f x the ordinary voice)\n", n, n > 1 ? "s" : " ",
                        st ? "stereo" : "mono  ", c, base > 0.0 ? c / base : 0.0);
             }
+        {                                       /* the sub on: seven saws, stereo */
+            uint64_t t0, t;
+            reset(7, 64, 100, 70);
+            par[0][TP_FTYPE] = FT_LP24;
+            par[0][TP_X1] = 100;
+            synth_note_on(S, 0, 57, 100, 0, 1);
+            for (b = 0; b < 10; b++)
+                block();
+            t0 = instr_now();
+            for (b = 0; b < 400; b++)
+                block();
+            t = instr_now() - t0;
+            printf("  brocade 7 saws stereo + the sub %6.1f  (the sub %+.1f; the split counts it a unit)\n",
+                   (double)t / (400.0 * N), (double)t / (400.0 * N) - c9);
+        }
         if (base > 0.0) {
             double per = (c9 - c1) / 6.0;   /* (c9: seven saws', the most) */
             printf("  a saw costs %.1f (stereo); in the split's units (an ordinary voice 4): %.2f + %.2f a saw\n", per,
