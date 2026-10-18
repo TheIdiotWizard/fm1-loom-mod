@@ -99,11 +99,12 @@ static const uint16_t DRUM_DS[6] = {65083, 64715, 64715, 64715, 64715, 62312};
 /* the outputs' gains: each model's raw note near LOOM-8's engines' (a cycle peaking near 1) */
 static const float CN_GAIN[NCANE] = {2.6f, 2.7f, 1.45f, 0.8f, 2.0f, 1.2f};
 
-/* what a voice of each model costs in the cores' split's units (an ordinary voice 4; tests/host/braids_test:
- * instructions a sample of one voice against weft's and stack's) */
-static const uint8_t CN_COST[NCANE] = {4, 5, 4, 5, 8, 5};
-static const uint8_t VO_COST[NVOILE] = {4, 4, 4, 4};
-static const uint8_t GH_COST[NGINGHAM] = {5, 5, 5, 5, 5, 3};
+/* what a voice of each model costs in the cores' split's units (an ordinary voice 4): as the FM-1 measured them
+ * (tools/measure_load.sh, one core: a voice's share of the audio load against weft's, 7 % a voice = 4; weft, stack,
+ * tines and organ 3.4..4); tests/host/braids_test's instruction counts had them a third to a half higher */
+static const uint8_t CN_COST[NCANE] = {3, 3, 3, 4, 5, 4};
+static const uint8_t VO_COST[NVOILE] = {3, 3, 4, 3};
+static const uint8_t GH_COST[NGINGHAM] = {3, 4, 4, 3, 3, 2};
 static inline float bd_mtof(float n) { return 440.0f * fm_exp2f((n - 69.0f) * (1.0f / 12.0f)); }
 static inline float bd_note(float hz) { return 69.0f + 12.0f * fm_log2f(hz * (1.0f / 440.0f)); }
 /* a one-pole's coefficient k at 96 kHz moved to 44.1 kHz (the same cutoff) */

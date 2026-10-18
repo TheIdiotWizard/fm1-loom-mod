@@ -416,7 +416,7 @@ static step_t *step_or_die(tpat_t *tp, const char *s)
 /* the peaks, every simulated millisecond: the voices, and the load the FM-1's Status page would show by a model
  * of its measurements (the user's: idle ~13 %, a synth voice ~3.5 %, a kit playing ~+27 % over idle, the master
  * tape ~+12 %). A voice counts by its cost (synth_voice_cost, 4 an ordinary one: brocade's by its saws, up to
- * twice, cane's bell twice). The second core renders voices [0, k) (engine.c split_at), the first the rest, the
+ * twice, cane's bell 5). The second core renders voices [0, k) (engine.c split_at), the first the rest, the
  * kits, the FX, the tape and the mix, then waits for the second: the load is the longer of the two */
 static uint32_t st_ms, st_syn, st_drum, st_guard0, st_hi_ms;
 static float st_load, st_load_sum;

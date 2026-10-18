@@ -2493,6 +2493,21 @@ static void sp_main(void)
         sp_int((int)plat_cpu_pct());
         sp_cat(" percent, voices ");
         sp_int(eng_voices);
+        if (eng_voices_max < NVOICE) {           /* the rest of the page: the guard's limits, the peak since last said */
+            sp_cat(" of ");
+            sp_int(eng_voices_max);
+        }
+        if (eng_saws_max < 9) {
+            sp_cat(", saws ");
+            sp_int(eng_saws_max);
+        }
+        sp_cat(", peak ");
+        sp_int((int)status_peak);
+        status_peak = 0;
+        sp_cat(" percent, guard trips ");
+        sp_int((int)eng_guard_count);
+        sp_cat(", dropouts ");
+        sp_int((int)plat_xruns());
     }
 }
 static int sp_list(void) { return lst.open && lst.n && !ui.card; }
