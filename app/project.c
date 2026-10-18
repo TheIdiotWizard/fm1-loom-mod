@@ -171,15 +171,13 @@ void project_defaults(void)
         tr->par[TP_CHAN] = 0;
     }
     aux_defaults();
-    /* the master: the EQ's blend off (neutral), the tape out of the path (MS_TP_COLOR_DEF 0: a project turns
-     * it on where it wants it), the groups at unity, a touch of compression */
+    /* the master: the EQ's blend off (neutral), the groups at unity, a touch of compression (4..7, the tape's that
+     * was: 0, and ignored) */
     for (k = 0; k < NMS; k++)
         proj.master[k] = 64;
     proj.master[MS_EQ_BLEND] = 0;
-    proj.master[MS_TP_DRIVE] = 0;
-    proj.master[MS_TP_COLOR] = MS_TP_COLOR_DEF;
-    proj.master[MS_TP_WOBBLE] = 0;
-    proj.master[MS_TP_NOISE] = 0;
+    for (k = MS_RSV4; k <= MS_RSV7; k++)
+        proj.master[k] = 0;
     proj.master[MS_PERC] = 100;
     proj.master[MS_MEL] = 100;
     proj.master[MS_COMP] = 30;

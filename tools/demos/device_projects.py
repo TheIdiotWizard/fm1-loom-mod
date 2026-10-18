@@ -82,7 +82,7 @@ wait 300
 listen
 tap GLO
 wait 300
-turn SELECT 5
+turn SELECT 4
 wait 300
 tap SEL
 wait 300

@@ -15,7 +15,7 @@ groove swing
 
 # ---- the sounds (UK garage: crisp and skippy. The kit short and bright, shuffled hats and shaker up front, a
 # bouncing weft bass, the organ stabs short, the voice chopped and
-# pitched up through a moving filter and a dotted echo; a medium room; the master clean, no tape)
+# pitched up through a moving filter and a dotted echo; a medium room; the master clean)
 # T1 the kit: a short punchy kick, a snare pitched up and cut short, a tight clap, hats between closed and open
 knob 1 d1.k1 86
 knob 1 d1.k2 42
@@ -105,7 +105,7 @@ knob 11 e3 64
 knob 11 e4 84
 knob 12 engine studio_M
 knob 12 e3 72
-# the master: no tape, a little air, the compressor light
+# the master: a little air, the compressor light
 mst blend 127
 mst hi 74
 mst lo 64
@@ -177,18 +177,18 @@ notes 2 2 49 15 100 G1
 
 # ---- T3 the organ stabs: Cm9 | Abmaj7 | Fm9 | G7sus
 pat 3 1 64 1 50 50
-notes 3 1 3 0.5 100 Eb4 G4 Bb4 D5
-notes 3 1 8 0.5 90 Eb4 G4 Bb4 D5
-notes 3 1 11 0.5 95 Eb4 G4 Bb4 D5
-notes 3 1 19 0.5 100 Eb4 G4 Ab4 C5
-notes 3 1 24 0.5 90 Eb4 G4 Ab4 C5
-notes 3 1 27 0.5 95 Eb4 G4 Ab4 C5
-notes 3 1 35 0.5 100 Ab3 C4 Eb4 G4
-notes 3 1 40 0.5 90 Ab3 C4 Eb4 G4
-notes 3 1 43 0.5 95 Ab3 C4 Eb4 G4
-notes 3 1 51 0.5 100 F3 G3 C4 D4
-notes 3 1 56 0.5 90 F3 G3 C4 D4
-notes 3 1 59 0.5 95 F3 G3 B3 D4
+notes 3 1 3 0.5 100 Eb4 G4 D5
+notes 3 1 8 0.5 90 Eb4 G4 D5
+notes 3 1 11 0.5 95 Eb4 G4 D5
+notes 3 1 19 0.5 100 Eb4 G4 C5
+notes 3 1 24 0.5 90 Eb4 G4 C5
+notes 3 1 27 0.5 95 Eb4 G4 C5
+notes 3 1 35 0.5 100 Ab3 C4 G4
+notes 3 1 40 0.5 90 Ab3 C4 G4
+notes 3 1 43 0.5 95 Ab3 C4 G4
+notes 3 1 51 0.5 100 F3 G3 D4
+notes 3 1 56 0.5 90 F3 G3 D4
+notes 3 1 59 0.5 95 F3 G3 D4
 chance 3 1 11 1:2
 chance 3 1 27 2:2
 
@@ -271,10 +271,10 @@ notes 5 1 16 0 110 68
 
 # ---- T6 the pad (the choir)
 pat 6 1 64
-notes 6 1 1 16 80 C3 G3 Bb3 D4
-notes 6 1 17 16 80 Ab2 Eb3 G3 C4
-notes 6 1 33 16 80 F2 C3 Eb3 Ab3
-notes 6 1 49 16 80 G2 D3 F3 B3
+notes 6 1 1 16 80 C3 G3 D4
+notes 6 1 17 16 80 Ab2 Eb3 C4
+notes 6 1 33 16 80 F2 C3 Ab3
+notes 6 1 49 16 80 G2 D3 B3
 
 # ---- T7 voile's "doo wop": the answer at the end of each bar, swung with the rest
 pat 7 1 64 1 50 50

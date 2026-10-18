@@ -145,10 +145,11 @@ typedef struct {
     float steal_gain, sg_step;
     float glc, grc, gl_step, gr_step; /* the dry gains, ramped */
     float a1, a2, a3, b1, b2, b3;     /* the filter's coefficients (TPT SVF, lp24's second stage; the ladder's g and k) */
+    float fhz, fkq, fkres;            /* what they were made from (a held note's are its last sub-block's: kept) */
+    float fco, flv, ffe;              /* and what fhz was (the cutoff, the filter envelope's level and reach) */
+    uint8_t fty;
     float f[8];                       /* filter: ic1 ic2 jc1 jc2 of L, then R (the ladder: its four poles a side) */
     float peak;
-    float tcost;                      /* what it took to render, synth_clock's units for 256 frames (a running mean;
-                                       * 0: not measured yet) */
     float tsec;                       /* seconds since the note (the LFO's fade envelope counts on it) */
     uint32_t rng;
     cfg_t c;
@@ -186,7 +187,6 @@ struct synth {
     uint32_t counter;                 /* voice ages */
     uint16_t pos;                     /* chunk phase at the next prepare */
     uint8_t nck, max_voices;
-    uint8_t saw_cap;                  /* brocade's saws at most (the guard's thinning: synth_saws) */
     trk_t t[NTRK];
     voice_t v[NVOICE];
 };
@@ -839,21 +839,21 @@ static void dis_run(voice_t *v, float *xl, float *xr, int m)
     v->o[3] = n1;
 }
 
-/* brocade: the supersaw, after NuSaw (the NuSaw plugin, MIT, and its FM-1 port fm1-nusaw): up to nine
- * PolyBLEP saws a voice, free-running from random phases. saws (1..9): a centre saw and pairs either side,
+/* brocade: the supersaw, after NuSaw (the NuSaw plugin, MIT, and its FM-1 port fm1-nusaw): up to seven
+ * PolyBLEP saws a voice, free-running from random phases (nine cost the FM-1 a third more: a voice there took 13 %
+ * of a block; an older project's 8 or 9 plays 7). saws (1..7): a centre saw and pairs either side,
  * detuned by NuSaw's offsets (the JP-8000's own table at six or seven, k(k+1) / M(M+1) of the widest pair
  * otherwise; an even count leaves its outer pair's lower saw out); detune: NuSaw's curve, the widest pair up
  * to +-11 % of the note (about two semitones); mix: the side saws against the centre one (NuSaw's mix^1.5 x
  * 0.667, the sum kept at one saw's power); spread: the pairs across the field, the outer ones furthest. Then
  * NuSaw's keytracked high-pass (12 dB at a third of the note, the JP-8000's), which keeps the beating out of
  * the bass. The filter, the envelopes and the LFO are the voice's own, not NuSaw's.
- * Under load (synth_saws, the engine's guard) the outer saws fade out one at a time, 12 ms each, the rest made
- * up to the same power; the detune offsets stay where the knob set them.
  * o[0..8] the phases, o[9] the saws sounding (fractional while one fades; -1: the note's first sub-block),
  * o[10..13] the high-pass (low and band, L then R). ex[0] the increment, ex[1] the detune's, ex[2] the knob's
  * count, ex[3] the offsets' row, ex[4] the side gain, ex[5..12] the pairs' L and R gains (x sqrt 2: the centre
- * at 1), ex[13] the high-pass's coefficient, ex[14] the count to sound (the knob's under the guard's cap). */
-#define BR_MAX 9
+ * at 1), ex[13] the high-pass's coefficient, ex[14] the count to sound (the knob's). */
+#define BR_MAX 9                                 /* (the offsets' table and the phases still hold nine) */
+#define BR_SAWS 7                                /* the knob's top */
 #define BR_FADE (1.0f / (0.012f * SY_SR))        /* a saw in or out over 12 ms */
 static const float BR_COEF[5][BR_MAX] = {        /* the saws' detune offsets, by pairs (count / 2) */
     {0.0f},
@@ -861,7 +861,7 @@ static const float BR_COEF[5][BR_MAX] = {        /* the saws' detune offsets, by
     {0.0f, 1.0f / 3.0f, -1.0f / 3.0f, 1.0f, -1.0f},
     {0.0f, 128.0f / 720.0f, -128.0f / 720.0f, 408.0f / 720.0f, -412.0f / 720.0f, 704.0f / 720.0f, -1.0f},
     {0.0f, 0.1f, -0.1f, 0.3f, -0.3f, 0.6f, -0.6f, 1.0f, -1.0f}};
-static inline int knob9(float raw) { int k = (int)(raw + 0.5f); return k < 1 ? 1 : k > BR_MAX ? BR_MAX : k; }
+static inline int knob9(float raw) { int k = (int)(raw + 0.5f); return k < 1 ? 1 : k > BR_SAWS ? BR_SAWS : k; }
 static inline float br_detune(float x)           /* NuSaw's detune curve: fine at first, wide at the end */
 {
     if (x < 0.1f)
@@ -1372,13 +1372,13 @@ static int track_voices(const synth_t *s, int trk)
 }
 
 /* brocade's cap: at most br_cap() of its voices in the pool, by the saws of the track that wants one
- * (BR_VOICES at six or fewer, then fewer: its voice costs about two ordinary ones at nine saws). A voice
+ * (BR_VOICES at six or fewer, five at seven: its voice costs about two and a half ordinary ones there). A voice
  * counts as what it will play (a steal's pending note: its track's engine). */
 #define BR_VOICES 6
 static int br_cap(const synth_t *s, int trk)
 {
     int n = knob9((float)P(s, trk, TP_E1));
-    return n >= 9 ? 4 : n >= 7 ? 5 : BR_VOICES;
+    return n >= 7 ? 5 : BR_VOICES;
 }
 static int br_voice(const synth_t *s, const voice_t *v)
 {
@@ -1760,10 +1760,6 @@ void synth_limit(synth_t *s, int max_voices)
 {
     s->max_voices = (uint8_t)(max_voices < 1 ? 1 : max_voices > NVOICE ? NVOICE : max_voices);
 }
-void synth_saws(synth_t *s, int max_saws)
-{
-    s->saw_cap = (uint8_t)(max_saws < 1 ? 1 : max_saws > BR_MAX ? BR_MAX : max_saws);
-}
 int synth_voice_cost(const synth_t *s, int vi)
 {
     const voice_t *v = &s->v[vi];
@@ -1774,16 +1770,12 @@ int synth_voice_cost(const synth_t *s, int vi)
         return v->engine == EG_CANE ? CN_COST[md < NCANE ? md : 0] : v->engine == EG_VOILE ? VO_COST[md < NVOILE ? md : 0]
                                                                                           : GH_COST[md < NGINGHAM ? md : 0];
     }
+    if (v->engine == EG_WEFT || v->engine == EG_STACK || v->engine == EG_ORGAN)
+        return 5;                                /* (the FM-1, tools/measure_load.sh 2026-10-18: a quarter above the rest) */
     if (v->engine != EG_BROCADE)
         return 4;
-    /* tests/host/brocade_test's cost: 3 + half a unit a saw (stereo, lp24), so (7 + saws) / 2 */
-    return (7 + (int)(v->o[9] < 0.0f ? v->c.ex[14] : v->o[9] + 0.99f)) / 2;
-}
-int synth_voice_track(const synth_t *s, int vi) { return s->v[vi].trk; }
-float synth_voice_time(const synth_t *s, int vi)
-{
-    const voice_t *v = &s->v[vi];
-    return !v_sounding(v) ? 0.0f : v->tcost > 0.0f ? v->tcost : -1.0f;
+    /* on the FM-1 (measure_load.sh, 2026-10-18): 4 + a unit a saw (11 at seven: an ordinary voice's two and a half) */
+    return 4 + (int)(v->o[9] < 0.0f ? v->c.ex[14] : v->o[9] + 0.99f);
 }
 void synth_duck_trigger(synth_t *s, int src)
 {
@@ -1804,7 +1796,6 @@ void synth_init(synth_t *s, uint8_t (*par)[NTP])
     s->par = par;
     s->bpm = 120.0f;
     s->max_voices = NVOICE;
-    s->saw_cap = BR_MAX;
     for (i = 0; i < NTRK; i++) {
         trk_t *t = &s->t[i];
         for (j = 0; j < NTP_LOCK; j++)
@@ -2263,7 +2254,7 @@ static void voice_chunk(synth_t *s, voice_t *v)
         }
     }
     if (v->engine == EG_BROCADE)                 /* the saws to sound: the knob's, under the guard's cap */
-        c->ex[14] = fm_minf(c->ex[2], (float)s->saw_cap);
+        c->ex[14] = c->ex[2];
     eng_chunk(v);
     char_prep(s, v, dest, off);
 }
@@ -2305,9 +2296,18 @@ static void voice_subblock(synth_t *s, voice_t *v, int aligned)
         env_step(&v->amp, c->amp_ar, c->amp_dc, c->amp_sl, c->amp_rc);
         env_step(&v->flt, c->flt_ar, c->flt_dc, c->flt_sl, c->flt_rc);
     }
-    hz = 50.0f * fm_exp2f(c->cut_oct + v->flt.level * c->fenv_oct);
-    hz = hz > 20000.0f ? 20000.0f : hz < 50.0f ? 50.0f : hz;
-    if (c->ftype == FT_LADDER) {                 /* four one-poles: g per pole, k the feedback */
+    if (c->cut_oct == v->fco && v->flt.level == v->flv && c->fenv_oct == v->ffe && v->fhz > 0.0f) {
+        hz = v->fhz;
+    } else {
+        hz = 50.0f * fm_exp2f(c->cut_oct + v->flt.level * c->fenv_oct);
+        hz = hz > 20000.0f ? 20000.0f : hz < 50.0f ? 50.0f : hz;
+        v->fco = c->cut_oct;
+        v->flv = v->flt.level;
+        v->ffe = c->fenv_oct;
+    }
+    if (hz == v->fhz && c->kq == v->fkq && c->kres == v->fkres && c->ftype == v->fty) {
+        /* the same as the last sub-block's (a settled envelope, no LFO on the cutoff): the coefficients stand */
+    } else if (c->ftype == FT_LADDER) {          /* four one-poles: g per pole, k the feedback */
         v->b1 = fm_minf(1.0f - fm_expf(-FM_TWO_PI * hz * INV_SR), 0.9f);
         v->b2 = c->kres;
     } else {
@@ -2321,6 +2321,10 @@ static void voice_subblock(synth_t *s, voice_t *v, int aligned)
             v->b3 = g * v->b2;
         }
     }
+    v->fhz = hz;
+    v->fkq = c->kq;
+    v->fkres = c->kres;
+    v->fty = c->ftype;
     v->amp_step = (v->amp.level - v->amp_cur) * (1.0f / (float)SUB);
     if (v->steal_phase == 1) {
         v->sg_step = v->steal_gain > STEAL_RATE * (float)SUB ? -STEAL_RATE : -v->steal_gain * (1.0f / (float)SUB);
@@ -2592,12 +2596,6 @@ void synth_render(synth_t *s, int v0, int v1, float *l, float *r, float *s1, flo
                 synth_vworst[1] = v->engine;
                 synth_vworst[2] = n;
             }
-            if (v_sounding(v)) {
-                float c = (float)tk * (256.0f / (float)n);
-                v->tcost = v->tcost > 0.0f ? v->tcost + (c - v->tcost) * 0.25f : c;
-            } else {
-                v->tcost = 0.0f;
-            }
         }
     }
 }
@@ -2724,9 +2722,9 @@ static void eknob_init(void)
                 i->hi = 8;
                 i->kind = PK_NUM;              /* stack's ratio prints "N:1" (tp_text) */
             }
-            if (e == EG_BROCADE && k == 0) {   /* the saws, 1..9 */
+            if (e == EG_BROCADE && k == 0) {   /* the saws, 1..7 */
                 i->lo = 1;
-                i->hi = BR_MAX;
+                i->hi = BR_SAWS;
                 i->kind = PK_NUM;
             }
             if ((e == EG_CANE || e == EG_VOILE || e == EG_GINGHAM) && k == 0) {   /* the Braids models */
@@ -3141,14 +3139,14 @@ const preset_t PRESETS[] = {
     PR("selvedge", EG_SLICE, SMP_BREAK, 1, 64, 100, VM_POLY, 0, 113, 0, 80, 127, 80, 0, 60, 0, 40, 70, 20, 64, 0, FT_HP12, 10, 40, NOLFO, (CT_TILT, 60, 100, 127)),
     PR("warp beam", EG_SLICE, SMP_BREAK, 1, 59, 127, VM_LEGATO, 0, 127, 0, 80, 127, 90, 0, 60, 0, 40, 85, 30, 64, 0, FT_LP24, 10, 25, (LT_WAVE, 2, 90, LD_FILTER, 0, 1), (CT_CRUSH, 50, 30, 127)),
     /* brocade: the rich cloth, woven with many threads, after NuSaw's supersaw. saws (1..9), detune, mix, spread */
-    PR("gold thread", EG_BROCADE, 9, 46, 100, 80, VM_LEGATO, 22, 91, 2, 70, 100, 60, 0, 60, 60, 50, 112, 15, 80, 64, FT_LP24, 30, 35, VIB(40), (CT_DRIVE, 30, 110, 127)),
+    PR("gold thread", EG_BROCADE, 7, 46, 100, 80, VM_LEGATO, 22, 91, 2, 70, 100, 60, 0, 60, 60, 50, 112, 15, 80, 64, FT_LP24, 30, 35, VIB(40), (CT_DRIVE, 30, 110, 127)),
     PR("damask", EG_BROCADE, 7, 40, 110, 127, VM_POLY, 0, 72, 92, 90, 100, 100, 80, 90, 60, 90, 78, 10, 74, 50, FT_LP12, 10, 85, (LT_WAVE, 25, 84, LD_FILTER + LD_FREE, 0, 1), NOCH),
-    PR("chenille", EG_BROCADE, 9, 110, 127, 100, VM_MONO, 60, 114, 0, 70, 100, 50, 0, 60, 50, 40, 92, 30, 80, 64, FT_LADDER, 20, 30, (LT_WOBBLE, 88, 90, 64, 40, 0), (CT_FOLD, 35, 70, 100)),
+    PR("chenille", EG_BROCADE, 7, 110, 127, 100, VM_MONO, 60, 114, 0, 70, 100, 50, 0, 60, 50, 40, 92, 30, 80, 64, FT_LADDER, 20, 30, (LT_WOBBLE, 88, 90, 64, 40, 0), (CT_FOLD, 35, 70, 100)),
     PR("sequin", EG_BROCADE, 7, 50, 100, 90, VM_POLY, 0, 105, 0, 84, 30, 56, 0, 66, 10, 44, 76, 22, 100, 64, FT_LP24, 30, 40, NOLFO, (CT_DRIVE, 50, 110, 127)),
     PR("tweed bass", EG_BROCADE, 5, 30, 80, 30, VM_MONO, 0, 107, 0, 75, 90, 35, 0, 62, 20, 30, 62, 20, 96, 40, FT_LADDER, 0, 5, NOLFO, (CT_DRIVE, 60, 60, 127)),
-    PR("velvet", EG_BROCADE, 9, 34, 90, 70, VM_POLY, 0, 69, 40, 90, 100, 85, 30, 80, 60, 80, 50, 5, 70, 64, FT_LP24, 5, 70, NOLFO, (CT_TILT, 60, 40, 127)),
-    PR("shot silk", EG_BROCADE, 9, 70, 110, 100, VM_POLY, 0, 65, 60, 90, 100, 90, 40, 80, 60, 80, 90, 10, 70, 64, FT_LP12, 10, 75, (LT_WAVE, 22, 88, LD_SYNTH + LD_FREE, 1, 1), NOCH),
-    PR("organza", EG_BROCADE, 9, 56, 127, 110, VM_POLY, 0, 81, 10, 80, 90, 80, 0, 60, 0, 60, 45, 5, 64, 64, FT_HP12, 15, 60, NOLFO, (CT_TILT, 64, 100, 127)),
+    PR("velvet", EG_BROCADE, 7, 34, 90, 70, VM_POLY, 0, 69, 40, 90, 100, 85, 30, 80, 60, 80, 50, 5, 70, 64, FT_LP24, 5, 70, NOLFO, (CT_TILT, 60, 40, 127)),
+    PR("shot silk", EG_BROCADE, 7, 70, 110, 100, VM_POLY, 0, 65, 60, 90, 100, 90, 40, 80, 60, 80, 90, 10, 70, 64, FT_LP12, 10, 75, (LT_WAVE, 22, 88, LD_SYNTH + LD_FREE, 1, 1), NOCH),
+    PR("organza", EG_BROCADE, 7, 56, 127, 110, VM_POLY, 0, 81, 10, 80, 90, 80, 0, 60, 0, 60, 45, 5, 64, 64, FT_HP12, 15, 60, NOLFO, (CT_TILT, 64, 100, 127)),
     /* cane: rattan, reed and bamboo, the woven and the blown; Braids' physical models. model (pluck, bow, reed,
      * flute, bell, drum), timbre, color, damp */
     PR("wicker harp", EG_CANE, 0, 72, 50, 10, VM_POLY, 0, 115, 0, 100, 100, 70, 0, 60, 0, 60, 110, 0, 64, 64, FT_LP12, 20, 40, NOLFO, NOCH),

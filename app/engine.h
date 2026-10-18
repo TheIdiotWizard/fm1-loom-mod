@@ -21,9 +21,14 @@ extern seq_t seq;                      /* the sequencer (its pattern pointer is 
  * performance state, the synth's prepare, the split), the halves' sum and meters, the output's conversion, the whole
  * render; PR_SUBS counts the stretches; PR_NOTE: the notes, hits and locks the sequencer sends (inside PR_SEQ). eng_prof_worst: the stages of the slowest block since eng_prof_reset was set */
 enum { PR_SEQ, PR_SYNTH0, PR_SYNTH1, PR_DRUM, PR_FX, PR_MST, PR_WAIT, PR_FX2, PR_PREP, PR_MIX, PR_OUT, PR_ALL, PR_SUBS,
-       PR_NOTE, PR_SIX, PR_STEP, PR_SUB, PR_FXJ, ENG_PROF_N };
+       PR_NOTE, PR_SIX, PR_STEP, PR_SUB, PR_COMP, PR_LOCKS, PR_NOTES, PR_FIRE, PR_DRAIN, PR_FXJ, ENG_PROF_N };
 extern volatile uint32_t eng_prof[ENG_PROF_N], eng_prof_frames, eng_prof_worst[ENG_PROF_N];
 extern volatile uint8_t eng_prof_reset;
+/* the blocks around the slowest one since eng_prof_reset (the oldest first; it is the 8th, 4 follow): each its whole render, the synth on each
+ * core, the sequencer, the drums, the notes (permille of the block's budget), its stretches, its voices */
+#define TRACE_N 12
+#define TRACE_K 8
+extern uint16_t trace_worst[TRACE_N][TRACE_K];
 extern volatile uint32_t eng_prof_drum[NTRK];          /* each drum track's time (in PR_DRUM) */
 
 void engine_init(patterns_t *P, uint8_t (*par)[NTP]);    /* par: NALLTRK arrays (the project's) */
@@ -62,7 +67,6 @@ extern volatile uint16_t eng_peak[NALLTRK];              /* meters, Q15, decayin
 extern volatile uint8_t eng_drum_hit[NDRUM];             /* the selected drum track's last hits (255 = full) */
 extern volatile uint8_t eng_voices, eng_voices_max;      /* sounding, and the guard's cap */
 extern volatile uint32_t eng_guard_count;
-extern volatile uint8_t eng_saws_max;                    /* brocade's saws at most: the guard's thinning (9 = none) */
 extern volatile uint32_t eng_punch_drum, eng_punch_mel;  /* the FX in effect */
 extern volatile float eng_pump_db;                       /* the master's pump: its duck now, dB (the Master out page) */
 extern volatile uint8_t eng_scene_now, eng_scene_cue;

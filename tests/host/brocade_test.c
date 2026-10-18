@@ -2,8 +2,7 @@
 /* brocade, the supersaw engine (dsp/synth.c, its saw bank after NuSaw, MIT), on its own: bounded and finite at
  * every saw count, knob corner and note; the saw count changes the sound, one saw being one saw; detune 0
  * keeps every partial on the note's harmonics (the saws in unison), detune up spreads them; spread makes it
- * stereo and 0 leaves it mono; the guard's thinning (synth_saws) fades the outer saws in steps, no click, the
- * level kept; the pool keeps to brocade's voice cap (six, five at seven or eight saws, four at nine). Then the
+ * stereo and 0 leaves it mono; the pool keeps to brocade's voice cap (six, five at seven saws). Then the
  * cost: instructions a sample of one voice (lp24, the whole voice) by saw count, mono and stereo, against an
  * ordinary engine's, and what that makes the cores' split units (synth_voice_cost).
  *   tests/host/brocade_test.sh */
@@ -38,7 +37,7 @@ static void check(const char *what, int ok)
 #define N 256
 #define SR 44100
 static uint8_t par[NTRK][NTP];
-static _Alignas(16) uint8_t mem[SYNTH_BYTES], mem2[SYNTH_BYTES];
+static _Alignas(16) uint8_t mem[SYNTH_BYTES];
 static synth_t *S = (synth_t *)mem;
 static float L[N], R[N], S1[N], S2[N];
 static int finite_ok = 1;
@@ -155,7 +154,7 @@ int main(void)
     {
         float worst = 0.0f;
         int c;
-        for (n = 1; n <= 9; n++)
+        for (n = 1; n <= 7; n++)
             for (c = 0; c < 16; c++) {
                 static const int NOTES[4] = {0, 36, 84, 127};
                 int nt;
@@ -173,7 +172,7 @@ int main(void)
                 }
             }
         printf("    the loudest corner (one note, full volume): %.2f\n", (double)worst);
-        check("bounded and finite: saws 1..9, knobs at the ends, notes 0..127", finite_ok && worst < 4.0f && worst > 0.1f);
+        check("bounded and finite: saws 1..9 (8, 9: played as 7), knobs at the ends, notes 0..127", finite_ok && worst < 4.0f && worst > 0.1f);
     }
 
     /* the saw count changes the sound (each count a wave of its own, and more saws more energy off the
@@ -181,7 +180,7 @@ int main(void)
     {
         double r[10], spread_[10], corr_max = 0.0;
         int ok = 1, more = 1;
-        for (n = 1; n <= 9; n++) {
+        for (n = 1; n <= 7; n++) {
             reset(n, 60, 100, 0);
             held(45, 8, NB, n == 1 ? C : A, 0);   /* 110 Hz */
             r[n] = rms(n == 1 ? C : A, NB * N);
@@ -200,15 +199,15 @@ int main(void)
             }
             memcpy(B, n == 1 ? C : A, sizeof A);
         }
-        for (n = 2; n <= 9; n++)
+        for (n = 2; n <= 7; n++)
             ok &= r[n] > 0.25 * r[1] && r[n] < 2.0 * r[1];
-        for (n = 2; n <= 9; n++)                 /* (not in order: three saws hold one pair, at the widest offset) */
+        for (n = 2; n <= 7; n++)                 /* (not in order: three saws hold one pair, at the widest offset) */
             more &= spread_[n] > 1000.0 * spread_[1];
-        printf("    rms by saws 1..9:");
-        for (n = 1; n <= 9; n++)
+        printf("    rms by saws 1..7:");
+        for (n = 1; n <= 7; n++)
             printf(" %.3f", r[n]);
-        printf("\n    off the harmonics by saws 1..9:");
-        for (n = 1; n <= 9; n++)
+        printf("\n    off the harmonics by saws 1..7:");
+        for (n = 1; n <= 7; n++)
             printf(" %.1e", spread_[n]);
         printf("\n    the most alike neighbours: %.3f\n", corr_max);
         check("each saw count its own wave (neighbours differ)", corr_max < 0.99);
@@ -222,13 +221,13 @@ int main(void)
         }
     }
 
-    /* detune 0: nine saws in unison, every partial on the note's harmonics; detune up: between them too */
+    /* detune 0: seven saws in unison, every partial on the note's harmonics; detune up: between them too */
     {
         double r0, r1;
-        reset(9, 0, 127, 0);
+        reset(7, 0, 127, 0);
         held(45, 8, NB, A, 0);
         r0 = off_harmonic(A, NB * N, 110.0);
-        reset(9, 64, 127, 0);
+        reset(7, 64, 127, 0);
         held(45, 8, NB, B, 0);
         r1 = off_harmonic(B, NB * N, 110.0);
         printf("    off the harmonics / on them: detune 0 %.2e, detune 64 %.2e\n", r0, r1);
@@ -240,11 +239,11 @@ int main(void)
     {
         double d0, d1, l1, r1;
         int i;
-        reset(9, 60, 100, 0);
+        reset(7, 60, 100, 0);
         held(57, 8, 16, A, B);
         for (i = 0, d0 = 0.0; i < 16 * N; i++)
             d0 += fabs((double)A[i] - (double)B[i]);
-        reset(9, 60, 100, 127);
+        reset(7, 60, 100, 127);
         held(57, 8, 16, A, B);
         for (i = 0, d1 = 0.0; i < 16 * N; i++)
             d1 += fabs((double)A[i] - (double)B[i]);
@@ -255,52 +254,9 @@ int main(void)
         check("spread 127 is stereo, the sides within 1.5 dB", d1 > 0.05 * 16 * N * l1 && fabs(20.0 * log10(l1 / r1)) < 1.5);
     }
 
-    /* the guard's thinning: 9 -> 3 saws. The same voice rendered with and without (a copy of the synth):
-     * their difference rises gradually (no step), takes the six saws' 72 ms, and the level holds */
-    {
-        static float D[NB * N];
-        double first, later, before, after;
-        int i;
-        reset(9, 64, 110, 80);
-        held(48, 20, 0, 0, 0);
-        memcpy(mem2, mem, sizeof mem);
-        synth_saws(S, 3);
-        for (b = 0; b < NB; b++) {
-            block();
-            memcpy(A + b * N, L, sizeof L);
-        }
-        {
-            synth_t *S2_ = (synth_t *)mem2;
-            for (b = 0; b < NB; b++) {
-                block_of(S2_, N);
-                memcpy(B + b * N, L, sizeof L);
-            }
-        }
-        for (i = 0; i < NB * N; i++)
-            D[i] = A[i] - B[i];
-        first = rms(D, 44);                      /* the first millisecond */
-        later = rms(D + 4410, 441);              /* at 100 ms: the six gone */
-        before = rms(B + 4410, 8820);
-        after = rms(A + 4410, 8820);
-        printf("    thinning 9 -> 3: the difference %.4f in the first ms, %.4f at 100 ms; level %.1f dB\n", first, later,
-               20.0 * log10(after / before));
-        check("thinning: no step (the first ms under 10 % of the full change)", first < 0.1 * later);
-        {   /* how far it has gone: 0..10 ms, 30..40 ms, 90..110 ms (a saw every 12 ms) */
-            double w1 = rms(D, 441), w2 = rms(D + 1323, 441), w3 = rms(D + 3969, 882);
-            printf("    the difference over 0..10 ms %.4f, 30..40 ms %.4f, 90..110 ms %.4f\n", w1, w2, w3);
-            check("thinning: gradual (the first 10 ms under half the change)", w1 < 0.5 * (w2 > w3 ? w2 : w3));
-        }
-        check("thinning: the level held (within 2 dB)", fabs(20.0 * log10(after / before)) < 2.0);
-        synth_saws(S, 9);                        /* back: the saws fade in */
-        peak = 0.0f;
-        for (b = 0; b < 16; b++)
-            block();
-        check("thinning undone: bounded", finite_ok && peak < 4.0f);
-    }
-
     /* the voice cap: eight notes at once on one track, then another track's */
     {
-        static const int SAWS[3] = {9, 7, 5}, CAP[3] = {4, 5, 6};
+        static const int SAWS[3] = {7, 5, 9}, CAP[3] = {5, 6, 5};   /* (9: an old project's, played as 7) */
         int ok = 1;
         for (k = 0; k < 3; k++) {
             reset(SAWS[k], 64, 100, 60);
@@ -315,8 +271,8 @@ int main(void)
             printf("    %d saws: %d voices sounding (cap %d)\n", SAWS[k], synth_voices_used(S), CAP[k]);
             ok &= synth_voices_used(S) == CAP[k];
         }
-        check("brocade keeps to its cap (6, 5 at 7..8 saws, 4 at 9)", ok);
-        reset(9, 64, 100, 60);                   /* other engines are not held to it */
+        check("brocade keeps to its cap (6, 5 at seven saws)", ok);
+        reset(7, 64, 100, 60);                   /* other engines are not held to it */
         par[1][TP_ENGINE] = EG_WEFT;
         for (n = 0; n < 4; n++)
             synth_note_on(S, 0, 48 + 3 * n, 100, 0, (uint32_t)n + 1);
@@ -335,7 +291,7 @@ int main(void)
         for (k = 0; k < 2; k++) {               /* an ordinary engine's, for scale: weft and stack */
             uint64_t t0, t;
             int e = k ? EG_STACK : EG_WEFT;
-            reset(9, 64, 100, 60);
+            reset(7, 64, 100, 60);
             sound_default(par[0], e);
             par[0][TP_FTYPE] = FT_LP24;
             par[0][TP_S] = 127;
@@ -350,7 +306,7 @@ int main(void)
             base += (double)t / (800.0 * N);
         }
         for (st = 0; st < 2; st++)
-            for (n = 1; n <= 9; n++) {
+            for (n = 1; n <= 7; n++) {
                 uint64_t t0, t;
                 double c;
                 reset(n, 64, 100, st ? 70 : 0);
@@ -366,14 +322,14 @@ int main(void)
                 if (st) {
                     if (n == 1)
                         c1 = c;
-                    if (n == 9)
+                    if (n == 7)
                         c9 = c;
                 }
                 printf("  brocade %d saw%s %s %6.1f  (%.2f x the ordinary voice)\n", n, n > 1 ? "s" : " ",
                        st ? "stereo" : "mono  ", c, base > 0.0 ? c / base : 0.0);
             }
         if (base > 0.0) {
-            double per = (c9 - c1) / 8.0;
+            double per = (c9 - c1) / 6.0;   /* (c9: seven saws', the most) */
             printf("  a saw costs %.1f (stereo); in the split's units (an ordinary voice 4): %.2f + %.2f a saw\n", per,
                    4.0 * (c1 - per) / base, 4.0 * per / base);
         }

@@ -21,7 +21,7 @@
  *   upload FILE                  an upload's SysEx frames (tools/loom_samples.py syx), each through samples.c as from
  *                                USB; a frame not answered, or answered with an error, fails the run
  *   expect WHAT VALUE            besides fm1-base's: playing, scene, voices, guard, cores, dirty, mem (the last save's
- *                                share of a project slot, %), saws (the guard's cap on brocade's saws), model_avg /
+ *                                share of a project slot, %), model_avg /
  *                                model_peak (the last meter's, %), tempo, trk, user / userbytes / rateN (the user bank's
  *                                samples, its data's bytes, user N's rate), punch_drum / punch_mel (the masks in effect,
  *                                PX_* bits), parT.P, mst.NAME (a master value, the mst command's names), pump (the
@@ -29,11 +29,11 @@
  *                                both components; checks the first), note T PAT S VALUE
  * The demos' stems and taps (tools/demos/render.sh --stems), from the environment:
  *   LOOM_SOLO=1,3,fx1,fx2        only these tracks (dry and their sends) and FX returns sound
- *   LOOM_MST=raw|eq|tape|comp    the master's output taken after that stage (raw: the groups summed, the level;
+ *   LOOM_MST=raw|eq|comp         the master's output taken after that stage (raw: the groups summed, the level;
  *                                comp: the compressor and the level, no limiter); unset: all of it
  *   LOOM_LOAD=N                  the overload guard sees N % (the host's own timing, which varies with what else
  *                                runs, out of the result: render.sh sets 0)
- *   LOOM_MSTSET=color=0,drive=0  master knobs held at these values whatever the script sets (at each "mst" and at
+ *   LOOM_MSTSET=comp=0,pump=0    master knobs held at these values whatever the script sets (at each "mst" and at
  *                                "stats reset", which every song has before its "wav")
  * LOOM_THEME=N: the screenshots in theme N (ui.c). The layout audit (gfx_loom.c): its findings fail the run. */
 #include <time.h>
@@ -149,7 +149,7 @@ static void steps_print(int t, int p)
 
 static int isnum(const char *s);
 static int ieq(const char *a, const char *b);
-static const char *const MN[NMS] = {"lo", "mid", "hi", "blend", "drive", "color", "wobble", "noise", "perc", "mel",
+static const char *const MN[NMS] = {"lo", "mid", "hi", "blend", "-", "-", "-", "-", "perc", "mel",
                                     "comp", "pump", "pumpby", "release", "accent", "level"};
 /* fm1-base's expect, for LOOM-8's own state with one value */
 int app_expect(const char *what, int *got)
@@ -162,8 +162,6 @@ int app_expect(const char *what, int *got)
         *got = eng_voices;
     else if (!strcmp(what, "guard"))
         *got = eng_voices_max;
-    else if (!strcmp(what, "saws"))                 /* the guard's cap on brocade's saws (9: none) */
-        *got = eng_saws_max;
     else if (!strcmp(what, "model_avg"))            /* the last "meter": the model's mean and peak load, % */
         *got = (int)(meter_avg + 0.5f);
     else if (!strcmp(what, "model_peak"))
@@ -302,7 +300,7 @@ static int expect_more(const char *what, const char *a, const char *b, const cha
  *   songloop 0|1
  *   format4 [SLOT]               the slot's saved settings rewritten as format 4 had them (before the pump), so a
  *                                reboot or a load reads an old project
- *   mst NAME VALUE               a master knob (lo mid hi blend drive color wobble noise perc mel comp pump) or the
+ *   mst NAME VALUE               a master knob (lo mid hi blend perc mel comp pump) or the
  *                                out page's list (pumpby kick|t1..t8|metro, release, accent on|off, level)
  *   groove NAME                  the project's groove type (swing lilt weave ...)
  *   play T NOTE on|off [VEL]     a key on track T (through its player and the conductor), at any octave
@@ -424,34 +422,43 @@ static step_t *step_or_die(tpat_t *tp, const char *s)
 }
 
 /* the peaks, every simulated millisecond: the voices, and the load the FM-1's Status page would show, by a model
- * fitted to its measurements (tools/measure_load.sh, two cores; tests/scenarios/loadmodel.xy checks the fit). A
- * block is a serial part on the first core (the sequencer, the mix, the master: idle 12.5 %; the master tape, on
- * when a knob is: 9.5 % at colour alone, up to 3.5 more by drive, wobble and noise; the FX tracks, once either is
- * awake: 15 %, as a send hears anything or a line still rings, fx_awake) and a parallel part: the second core renders
- * voices [0, k) (engine.c split_at), the first the rest and the drum tracks, and waits for the second. The parallel
- * part costs by split_at's units (synth_voice_cost: an ordinary voice 4 = 6.5 % of a core, brocade by its saws up
- * to 8, cane's bell 5; a drum voice 2, a drum track sounding 1). A drum hit costs 7 % more on the first core for the
- * block it starts in (its sound's setup, before the render: the kit's peaks, ~+20 % for a kick, snare and hat
- * together, whatever else plays). With one core both halves are on the first. */
+ * of its stages (tools/perf_read.py: what each took on the FM-1, 2026-10-18; tests/scenarios/loadmodel.xy checks the
+ * fit to tools/measure_load.sh, tools/demos/device_load.py the songs'). A block is a serial part on the first core
+ * (the sequencer, a stretch's set-up, the mix, the master: idle LOAD_IDLE, a little more playing; the lofi and
+ * the phaser, which run in time there) and a parallel part: the second core renders the effects a block behind
+ * (the delay, the reverbs, the chorus: each its cost awake, a little asleep: fx_awake) and voices [0, k) (engine.c
+ * split_at), the first the rest and the drum tracks, and waits for the second. The voices cost by split_at's units
+ * (synth_voice_cost: an ordinary voice 4, LOAD_UNIT % of a block a unit; a drum voice 2, a drum track sounding 1).
+ * A block where notes start or drums hit costs more on the first core (their set-up, in the sequencer's stage:
+ * LOAD_HIT a hit, LOAD_NOTE a note). With one core both halves are on the first. */
 static uint32_t st_ms, st_syn, st_drum, st_guard0, st_hi_ms;
 static float st_load, st_load_sum;
-#define LOAD_IDLE 12.5f
-#define LOAD_UNIT (6.5f / 4.0f)                            /* a cost unit, % of a core: an ordinary voice is 4 */
-#define LOAD_FX 15.0f
-#define LOAD_TAPE 9.5f
-#define LOAD_TAPE_MORE 3.5f
+#define LOAD_IDLE 9.5f
+#define LOAD_PLAY 1.5f
+#define LOAD_UNIT 1.1f                                      /* a cost unit, % of a block: an ordinary voice is 4 */
+#define LOAD_SYNCFX 3.0f                                   /* the lofi or the phaser, in time on the first core */
 #define LOAD_DRUM_VOICE 2
 #define LOAD_DRUM_TRACK 1
-#define LOAD_HIT 4.75f
+#define LOAD_HIT 4.5f
+#define LOAD_NOTE 1.5f
 #define LOAD_HIT_MS 6                                      /* a block, 5.8 ms */
+static float fx_cost(int k)                                /* an effect a block behind, on the second core (%) */
+{
+    int pick = fx_type[k], type = fx_pick_type(pick);
+    if (!fx_lags(FXS(k)))
+        return 0.0f;
+    if (!fx_awake(FXS(k)))
+        return 0.7f;
+    return type == FXT_DELAY ? 3.9f : type == FXT_CHORUS ? 3.0f : pick == FXT_REVERB ? 10.4f : 7.5f;
+}
 static float load_model(int *nsyn, int *ndrum)
 {
-    static uint32_t hits0;
+    static uint32_t hits0, notes0;
     static float hit_pct;
     static int hit_ms;
-    int k = (int)split_at(0), v0 = 0, v1 = 0, n = 0, t;
-    float serial = LOAD_IDLE, c0, c1;
-    const uint8_t *ms = proj.master;
+    int lag = fx_lags(FXS(0)) || fx_lags(FXS(1));
+    int k = (int)split_at(lag ? fx_job_units(256) : 0), v0 = 0, v1 = 0, n = 0, t;
+    float serial = LOAD_IDLE + (seq.playing ? LOAD_PLAY : 0.0f), c0, c1;
     *ndrum = 0;
     for (int i = 0; i < NVOICE; i++)
         if (synth_sounding(SY, i, i + 1)) {
@@ -465,24 +472,23 @@ static float load_model(int *nsyn, int *ndrum)
             *ndrum += nv;
         }
     }
-    if (host_drum_hits != hits0) {                  /* hits since the last millisecond: in this block's cost */
-        hit_pct = (hit_ms > 0 ? hit_pct : 0.0f) + LOAD_HIT * (float)(host_drum_hits - hits0);
+    if (host_drum_hits != hits0 || host_note_ons != notes0) {   /* hits and notes since the last millisecond */
+        hit_pct = (hit_ms > 0 ? hit_pct : 0.0f) + LOAD_HIT * (float)(host_drum_hits - hits0) +
+                  LOAD_NOTE * (float)(host_note_ons - notes0);
         hit_ms = LOAD_HIT_MS;
         hits0 = host_drum_hits;
+        notes0 = host_note_ons;
     }
     if (hit_ms > 0) {
         serial += hit_pct;
         hit_ms--;
     }
     *nsyn = n;
-    if (ms[MS_TP_DRIVE] || ms[MS_TP_COLOR] || ms[MS_TP_WOBBLE] || ms[MS_TP_NOISE]) {
-        float more = (float)(ms[MS_TP_DRIVE] + ms[MS_TP_WOBBLE] + ms[MS_TP_NOISE]) * (1.0f / 192.0f);
-        serial += LOAD_TAPE + LOAD_TAPE_MORE * (more > 1.0f ? 1.0f : more);
-    }
-    if (fx_awake(FXS(0)) || fx_awake(FXS(1)))
-        serial += LOAD_FX;
+    for (t = 0; t < 2; t++)
+        if (!fx_lags(FXS(t)) && fx_awake(FXS(t)))
+            serial += LOAD_SYNCFX;
     c0 = LOAD_UNIT * (float)v0;
-    c1 = LOAD_UNIT * (float)v1;
+    c1 = LOAD_UNIT * (float)v1 + fx_cost(0) + fx_cost(1);
     return serial + (engine_core2_state() == 1 ? (c0 > c1 ? c0 : c1) : c0 + c1);
 }
 /* the model's load over MS milliseconds of the device, its mean and peak (the "meter" command; expect model_avg,
@@ -562,7 +568,7 @@ static void host_env(void)                          /* LOOM_SOLO, LOOM_MST (once
     if ((e = getenv("LOOM_LOAD")) && *e)            /* the guard's input fixed (a script's "load N" still wins) */
         load_force = atoi(e);
     if ((e = getenv("LOOM_MST")) && *e)
-        fx_host_stage = !strcmp(e, "raw") ? 0 : !strcmp(e, "eq") ? 1 : !strcmp(e, "tape") ? 2 : !strcmp(e, "comp") ? 3 : 9;
+        fx_host_stage = !strcmp(e, "raw") ? 0 : !strcmp(e, "eq") ? 1 : !strcmp(e, "comp") ? 3 : 9;
 }
 static void mst_override(void)                      /* LOOM_MSTSET: knobs held where it says */
 {

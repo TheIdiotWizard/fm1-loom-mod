@@ -136,7 +136,7 @@ knob 12 engine plate
 knob 12 e1 70
 knob 12 e3 64
 knob 12 e4 40
-# the master: no tape (it would round the top off: the genre wants it sharp), the top lifted, the bottom firm,
+# the master: the top lifted (the genre wants it sharp), the bottom firm,
 # the bus compressor hard and the level up: the limiter at work, as these records are
 mst blend 127
 mst hi 96
@@ -243,32 +243,32 @@ trick 2 2 25 bend 5
 
 # ---- T3 the supersaws: 3 + 3 + 4 + 3 + 3 on every bar
 pat 3 1 64 1 90
-notes 3 1 1 2 110 F3 A3 C4 E4
-notes 3 1 4 2 90 F3 A3 C4 E4
-notes 3 1 7 2 100 F3 A3 C4 E4
-notes 3 1 11 2 90 F3 A3 C4 E4
-notes 3 1 14 2 95 F3 A3 C4 E4
-notes 3 1 17 2 110 G3 B3 D4 A4
-notes 3 1 20 2 90 G3 B3 D4 A4
-notes 3 1 23 2 100 G3 B3 D4 A4
-notes 3 1 27 2 90 G3 B3 D4 A4
-notes 3 1 30 2 95 G3 B3 D4 A4
-notes 3 1 33 2 110 A3 C4 E4 G4
-notes 3 1 36 2 90 A3 C4 E4 G4
-notes 3 1 39 2 100 A3 C4 E4 G4
-notes 3 1 43 2 90 A3 C4 E4 G4
-notes 3 1 46 2 95 A3 C4 E4 G4
-notes 3 1 49 2 110 E3 G3 B3 D4
-notes 3 1 52 2 90 E3 G3 B3 D4
-notes 3 1 55 2 100 E3 G3 B3 D4
-notes 3 1 59 2 90 E3 G3 B3 D4
-notes 3 1 62 2 95 E3 G3 B3 D4
+notes 3 1 1 2 110 F3 A3 E4
+notes 3 1 4 2 90 F3 A3 E4
+notes 3 1 7 2 100 F3 A3 E4
+notes 3 1 11 2 90 F3 A3 E4
+notes 3 1 14 2 95 F3 A3 E4
+notes 3 1 17 2 110 G3 B3 A4
+notes 3 1 20 2 90 G3 B3 A4
+notes 3 1 23 2 100 G3 B3 A4
+notes 3 1 27 2 90 G3 B3 A4
+notes 3 1 30 2 95 G3 B3 A4
+notes 3 1 33 2 110 A3 C4 G4
+notes 3 1 36 2 90 A3 C4 G4
+notes 3 1 39 2 100 A3 C4 G4
+notes 3 1 43 2 90 A3 C4 G4
+notes 3 1 46 2 95 A3 C4 G4
+notes 3 1 49 2 110 E3 G3 D4
+notes 3 1 52 2 90 E3 G3 D4
+notes 3 1 55 2 100 E3 G3 D4
+notes 3 1 59 2 90 E3 G3 D4
+notes 3 1 62 2 95 E3 G3 D4
 # P2 held, for the intro and the builds
 pat 3 2 64 1 90
-notes 3 2 1 16 80 F3 A3 C4 E4
-notes 3 2 17 16 80 G3 B3 D4 A4
-notes 3 2 33 16 80 A3 C4 E4 G4
-notes 3 2 49 16 80 E3 G3 B3 D4
+notes 3 2 1 16 80 F3 A3 E4
+notes 3 2 17 16 80 G3 B3 A4
+notes 3 2 33 16 80 A3 C4 G4
+notes 3 2 49 16 80 E3 G3 D4
 
 # ---- T4 the voice: P1 as sung, P2 the chops (an octave up, a fifth, repeats and stutters)
 pat 4 1 16 1 100

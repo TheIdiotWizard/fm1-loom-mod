@@ -62,15 +62,16 @@ static uint16_t trk_tint(int t) { return ink_mix(trk_ink(t), theme->tint); }
  * envelope and the kit's bus filter: four pages); FX: the instrument's character stage (a kit track has none:
  * the page says so), its sends and the two effects; ARP three with the arp (its page 2, then hold) */
 enum { P_ARRANGE, P_SONG, P_STEPS, P_BAR, P_ENGINE, P_PLAY, P_ENV, P_FILTER, P_ENV2, P_KITF, P_CHARACTER, P_SENDS,
-       P_FX1, P_FX2, P_LFO, P_LFO2, P_PLAYERS, P_PLAYERS2, P_PLAYERS3, P_MIX, P_MASTER, P_MASTER2, P_MASTER3, P_SETUP,
+       P_FX1, P_FX2, P_LFO, P_LFO2, P_PLAYERS, P_PLAYERS2, P_PLAYERS3, P_MIX, P_MASTER, P_MASTER3, P_SETUP,
        P_STATUS, NPAGES };
 static const char *const PAGE_NAME[NPAGES] = {"Arrange", "Song", "Steps", "Bar", "Engine", "Play", "Envelope",
                                               "Filter", "Filter env", "Kit filter", "Character", "Sends", "FX I",
                                               "FX II", "LFO", "LFO 2", "Players", "Players 2", "Hold", "Mix",
-                                              "Master EQ", "Master tape", "Master out", "Setup", "Status"};
+                                              "Master EQ", "Master out", "Setup", "Status"};
+static int mst_base(int p) { return p == P_MASTER ? MS_EQ_LO : MS_PERC; }   /* a master page's first knob */
 static const struct { uint8_t btn, first, n; } PAGE_BTN[] = {
     {B_HOME, P_ARRANGE, 2}, {B_SEQ, P_STEPS, 2}, {B_EDIT, P_ENGINE, 2}, {B_ENV, P_ENV, 4}, {B_FX, P_CHARACTER, 4},
-    {B_LFO, P_LFO, 2}, {B_ARP, P_PLAYERS, 3}, {B_GLO, P_MIX, 6}};
+    {B_LFO, P_LFO, 2}, {B_ARP, P_PLAYERS, 3}, {B_GLO, P_MIX, 5}};
 #define NPAGE_BTN (sizeof PAGE_BTN / sizeof PAGE_BTN[0])
 static int page_group(int p)
 {
@@ -990,9 +991,9 @@ static void page_knobs(knob_t *k)
             k[1].name = "FX II";
         }
         break;
-    case P_MASTER: case P_MASTER2: case P_MASTER3:
+    case P_MASTER: case P_MASTER3:
         for (int i = 0; i < 4; i++) {
-            int m = (p - P_MASTER) * 4 + i;
+            int m = mst_base(p) + i;
             if (m == MS_PUMP) {
                 char t[12];
                 pump_text(proj.master[m], t);
@@ -1134,7 +1135,7 @@ static void page_tag(char *t)
             s_cat(s_cat(e, ">"), fx_pick_name(pick));
         break;
     }
-    case P_MASTER: case P_MASTER2: case P_MASTER3: case P_SETUP: case P_STATUS:
+    case P_MASTER: case P_MASTER3: case P_SETUP: case P_STATUS:
         s_cat(t, "all tracks");
         break;
     default:
@@ -1256,7 +1257,7 @@ static void page_footer(char *t)
     case P_MASTER3:
         s_cat(t, "SEL pump by, level");
         break;
-    case P_MASTER: case P_MASTER2: case P_SETUP: case P_STATUS:
+    case P_MASTER: case P_SETUP: case P_STATUS:
         break;
     case P_SENDS:
         s_cat(t, "KEYS play");
@@ -3399,7 +3400,7 @@ static void draw_mix(void)
 }
 static void draw_master(void)
 {
-    int pg = ui.page - P_MASTER;
+    int pg = ui.page == P_MASTER ? 0 : 2;
     const uint8_t *m = proj.master;
     uint32_t h = hash_u(hash_u(2166136261u, 0x3Au), (uint32_t)pg);
     int32_t x0 = 16, y0 = 12, w = 208, hh = 84, cy = y0 + hh / 2;
@@ -3426,19 +3427,6 @@ static void draw_master(void)
                    K_NOW);
         }
         cv_text(x0, y0 + hh + 3, &FONT_XS, "low  mid  high, by the blend", K_DIM);
-    } else if (pg == 1) {                            /* the tape: a sine through it, squashed by drive and colour,
-                                                      * wavering with wobble, hiss on it with noise */
-        pen_t pn = {0, 0, 0};
-        float k = 0.3f + 4.0f * (float)(m[MS_TP_DRIVE] + m[MS_TP_COLOR]) * (1.0f / 254.0f), nk = 1.0f / fm_tanhf(k);
-        float wob = (float)m[MS_TP_WOBBLE] * (0.05f / 127.0f), nz = (float)m[MS_TP_NOISE] * (6.0f / 127.0f);
-        uint32_t rn = 777u;
-        for (int32_t x = 0; x <= w; x++) {
-            float u = (float)x / (float)w, ph = u * 2.0f + wob * fm_sin_turns(u * 1.5f), y;
-            rn = rn * 1664525u + 1013904223u;
-            y = fm_tanhf(k * fm_sin_turns(ph)) * nk * (float)(hh / 2 - 10) + nz * ((float)(rn >> 24) - 127.5f) / 127.5f;
-            pen_to(&pn, (float)(x0 + x), (float)cy - y, K_NOW);
-        }
-        cv_text(x0, y0 + hh + 3, &FONT_XS, "tape: drive, color, wobble, noise", K_DIM);
     } else {
         static const char *const NM[4] = {"drums", "melodic", "comp", "pump"};
         for (int i = 0; i < 4; i++) {
@@ -3488,7 +3476,7 @@ static void draw_status(void)
     if (peak > status_peak)
         status_peak = peak;
     uint32_t h = hash_u(2166136261u, 0x57A00u | cpu | peak << 8 | (uint32_t)eng_voices << 16 | (uint32_t)eng_voices_max << 24);
-    h = hash_u(h, xr ^ eng_guard_count << 8 ^ (uint32_t)engine_core2_state() << 28 ^ (uint32_t)eng_saws_max << 24);
+    h = hash_u(h, xr ^ eng_guard_count << 8 ^ (uint32_t)engine_core2_state() << 28);
     if (!begin_main(h))
         return;
     e = num_s(cpu, t);
@@ -3500,10 +3488,6 @@ static void draw_status(void)
     e = num_s((uint32_t)eng_voices, t);
     e = s_cat(e, " of ");
     e = num_s((uint32_t)eng_voices_max, e);
-    if (eng_saws_max < 9) {                          /* the guard has thinned brocade's saws */
-        e = s_cat(e, ", saws ");
-        num_s((uint32_t)eng_saws_max, e);
-    }
     setup_row(40, "voices", t);
     setup_row(58, "second core", CORE2_NAME[engine_core2_state() & 3]);
     num_s(eng_guard_count, t);
@@ -3600,7 +3584,7 @@ static void draw_page(void)
             draw_players();
         break;
     case P_MIX: draw_mix(); break;
-    case P_MASTER: case P_MASTER2: case P_MASTER3: draw_master(); break;
+    case P_MASTER: case P_MASTER3: draw_master(); break;
     case P_SETUP: draw_setup(); break;
     default: draw_status(); break;
     }

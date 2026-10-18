@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-only
-# Renders of the master's tape and the reverb's modes, for listening: build/fx_renders/*.wav and index.txt
+# Renders of the reverb's modes, for listening: build/fx_renders/*.wav and index.txt
 # (tests/host/fx_render.c; nothing is played).
 #   tools/fx_renders.sh
 set -eu

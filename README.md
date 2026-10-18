@@ -4,8 +4,8 @@ LOOM-8 turns the M-VAVE FM-1 into a pocket groovebox: eight instrument tracks, e
 eight synth engines, a sample player, a break slicer and a drum kit; a 64-step sequencer with step tricks and parameter locks; players (arp,
 strum, hold); weave, which crosses two patterns (bar by bar, step by step, or one's rhythm with the other's
 notes); throws (momentary effects); a conductor track that moves the song through a progression; two
-send-effect tracks (the reverb with the PlayStation's reverbs among its modes), a mixer with EQ, a tape
-(TapeScam) and a compressor on the master, scenes and a song. Built on
+send-effect tracks (the reverb with the PlayStation's reverbs among its modes), a mixer with EQ
+and a compressor on the master, scenes and a song. Built on
 [fm1-base](https://github.com/charlesvestal/fm1-base) and [felucca-bsp](https://github.com/hugelton/felucca-bsp),
 from [Felucca](https://github.com/hugelton/Felucca) by Leo Kuroshita (Hügelton Instruments), with X0X's sequencer
 discipline, NuSaw's second core and Polly's menu paradigm.
@@ -32,7 +32,7 @@ where the code comes from.
 ## Credits
 
 The platform: fm1-base and felucca-bsp (MPL-2.0), from Felucca by Leo Kuroshita (Hügelton Instruments), with his
-permission (felucca-bsp#4). The master's tape: TapeScam; the reverb's PlayStation modes: PSXVerb (both MIT). The
+permission (felucca-bsp#4). The reverb's PlayStation modes: PSXVerb (MIT). The
 fonts: Barlow and Terminus (SIL OFL 1.1). The second core's lessons: Melodee (keremimo) and Jangada (zednaked).
 The idea of a browser emulator: Groove OS.
 

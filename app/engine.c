@@ -25,6 +25,8 @@ volatile uint32_t eng_prof[ENG_PROF_N], eng_prof_frames, eng_prof_worst[ENG_PROF
 volatile uint8_t eng_prof_reset;
 volatile uint32_t eng_prof_drum[NTRK];
 static uint32_t prof_block0[ENG_PROF_N];
+uint16_t trace[TRACE_N][TRACE_K], trace_worst[TRACE_N][TRACE_K];   /* (engine.h) */
+static uint32_t trace_w, trace_take;
 #define PROF_T(v) uint32_t v = plat_cycles()
 #define PROF_ADD(k, t0) (eng_prof[k] += plat_cycles() - (t0))
 
@@ -75,14 +77,13 @@ static void dl_drop(int t)
 }
 #define FXS(k) ((fxslot_t *)(void *)fx_mem[k])
 #define MST ((master_t *)(void *)mst_mem)
-/* the lines (the memory plan, docs/superpowers/specs: one delay, one reverb, the master tape's). FX I has
+/* the lines (the memory plan, docs/superpowers/specs: one delay, one reverb). FX I has
  * the delay lines, FX II the reverb line: the notebook's default project (FX I delay, FX II reverb) and the
  * classic delay-into-reverb (FX I's return feeds FX II). A second delay pair (88 KB) or reverb line (64 KB:
  * the SPU modes at the console's size) does not fit beside the canvas and the patterns; fx_has() tells the
  * UI which effects a slot can do. */
 static int16_t dly1_l[FX_DLY_LEN] POOL, dly1_r[FX_DLY_LEN] POOL;
 static int16_t rv2_line[FX_RV_LEN] POOL;
-static float mst_tape[2][MST_TAPE_DLY] POOL;
 
 /* the engine's parameter copy (drumlines, FX read it; locks override it) and the project's
  * contiguous array (app.h proj_par: the synth and the sequencer read that one) */
@@ -137,59 +138,13 @@ int engine_core2_state(void)
 #define GUARD_OFF 70u
 #define GUARD_STEP_FRAMES 44100u
 #define GUARD_VOICES 8
-/* before that, brocade's saws thin (synth_saws), and only while a brocade voice sounds: on sustained load, not
- * on one block's spike (a chord's note-ons, a kit's hit pass 80 % for a block while the average stays in the 60s,
- * as brocade and a kit run on the FM-1). A pair of saws goes (9 -> 7 -> 5 -> 3, a step every 50 ms while it lasts)
- * when the average (guard_avg: sixteen blocks, ~90 ms) passes 76 %, or four blocks in a row pass 86 % (a load
- * rising too fast for the average); both under the overload guard's 85 % / 92 %, so the saws go first. A pair comes
- * back once the average has stayed 8 points under (68 %) with no block over 86 % for half a second, and another
- * after each further half second; between 68 and 76 % the saws stay as they are. Each saw fades out or in over
- * 12 ms: no click. With no brocade voice sounding the cap is lifted at once: nothing thins, Status shows no saws. */
-#define THIN_ON_AVG 76u
-#define THIN_ON_RUN 86u
-#define THIN_RUN 4u
-#define THIN_OFF_AVG (THIN_ON_AVG - 8u)
-#define THIN_STEP_FRAMES (44100u / 20u)
-#define THIN_CALM_FRAMES (44100u / 2u)
-#define THIN_FEWEST 3
 static uint8_t guard_on, guard_applied, guard_cap = NVOICE, guard_run;
 static uint32_t guard_avg_q8, guard_calm, guard_frames;
-volatile uint8_t eng_saws_max = 9, eng_saws_applied = 9;
-static uint32_t thin_wait, thin_calm, thin_run;
-static void thin_load(uint32_t pct, uint32_t frames, int brocade)
-{
-    thin_run = pct > THIN_ON_RUN ? thin_run + 1u : 0u;
-    if (!brocade) {                                  /* nothing to thin: the cap lifted, the timers at rest */
-        eng_saws_max = 9;
-        thin_wait = thin_calm = 0;
-        return;
-    }
-    if (guard_avg_q8 > THIN_ON_AVG * 256u || thin_run >= THIN_RUN) {
-        thin_calm = 0;
-        if (thin_wait > frames) {
-            thin_wait -= frames;
-        } else {
-            thin_wait = THIN_STEP_FRAMES;
-            if (eng_saws_max > THIN_FEWEST)
-                eng_saws_max = (uint8_t)(eng_saws_max - 2);
-        }
-    } else if (guard_avg_q8 < THIN_OFF_AVG * 256u && pct <= THIN_ON_RUN) {
-        thin_wait = 0;
-        if (eng_saws_max < 9 && (thin_calm += frames) >= THIN_CALM_FRAMES) {
-            thin_calm = 0;
-            eng_saws_max = (uint8_t)(eng_saws_max + 2);
-        }
-    } else {
-        thin_wait = 0;
-        thin_calm = 0;
-    }
-}
 void engine_load(uint32_t pct)
 {
     uint32_t frames = guard_frames;
     guard_frames = 0;
     guard_avg_q8 = (guard_avg_q8 * 15u + pct * 256u) / 16u;
-    thin_load(pct, frames, synth_brocade_voices(SY) > 0);
     guard_run = pct > GUARD_ON_LAST ? (uint8_t)(guard_run < 255u ? guard_run + 1u : 255u) : 0u;
     if (guard_run >= GUARD_ON_RUN || guard_avg_q8 > GUARD_ON_AVG * 256u) {
         if (!guard_on || guard_cap > GUARD_VOICES)
@@ -212,10 +167,6 @@ void engine_load(uint32_t pct)
 }
 static void guard_apply(void)
 {
-    if (eng_saws_max != eng_saws_applied) {
-        eng_saws_applied = eng_saws_max;
-        synth_saws(SY, eng_saws_applied);
-    }
     {
         uint8_t cap = guard_on ? guard_cap : NVOICE;
         if (cap == guard_applied)
@@ -482,7 +433,7 @@ static void pump_drum(int trk, int sound, int vel)
     master_key(MST, PB_T1 + trk, vel);
 }
 #ifdef PLAT_HOST
-static uint32_t host_drum_hits;
+static uint32_t host_drum_hits, host_note_ons;
 #endif
 static void s_note_on(void *x, int trk, int note, int vel, int glide_ms, uint32_t tag)
 {
@@ -491,6 +442,9 @@ static void s_note_on(void *x, int trk, int note, int vel, int glide_ms, uint32_
     if (trk < 0 || trk >= NTRK || eng_drum[trk])
         return;
     synth_note_on(SY, trk, note, vel, glide_ms, tag);
+#ifdef PLAT_HOST
+    host_note_ons++;                                   /* (the host's load model: a note's set-up) */
+#endif
     master_key(MST, PB_T1 + trk, vel);
     PROF_ADD(PR_NOTE, pn);
 }
@@ -791,9 +745,10 @@ static void fx_job(void)
                 DSP_FAR(fx_process_lag)(FXS(k), snd_acc[k], fx_ret[k][0], fx_ret[k][1], snd_n, (int)snd_n);
         }
 }
+static volatile uint32_t c2_took;                          /* the last job's time (plat_cycles) */
 static void core2_job(uint32_t arg)
 {
-    uint32_t n = arg & 0xFFu ? arg & 0xFFu : 256u, pt = plat_cycles();   /* (the clock: a timer both cores read) */
+    uint32_t n = arg & 0xFFu ? arg & 0xFFu : 256u, pt = plat_cycles(), p0 = pt;   /* (the clock: a timer both cores read) */
     if (arg & 0x200u) {                                    /* the block's first stretch: the effects first */
         fx_job();
         PROF_ADD(PR_FXJ, pt);
@@ -805,6 +760,7 @@ static void core2_job(uint32_t arg)
     zerof(c2_s2, n);
     synth_render(SY, 0, (int)(arg >> 16 & 31u), c2_l, c2_r, c2_s1, c2_s2, n);
     PROF_ADD(PR_SYNTH1, pt);
+    c2_took = plat_cycles() - p0;
 }
 
 /* where the pool splits between the cores: the second renders voices [0, k), the first [k, NVOICE) and
@@ -867,86 +823,38 @@ static void metro_tick(uint32_t n)
 #endif
 /* one stretch: the upper half of the voices and the drumlines here while the second core renders the
  * lower half; then the halves are summed in the order one core always used, the FX tracks, the master */
-#ifdef PLAT_HOST
-/* the effects' cost on the second core in split_at's units (a voice 4: ~4.5 % of a block), for a whole block (the
- * FX job's) over a stretch of n frames: the delay 3.9 %, the reverbs 9 %, the chorus ~3 % on the FM-1 */
+/* the effects' cost on the second core in split_at's units (a unit ~1.1 % of a block on the FM-1), for a whole block
+ * (the FX job's) over a stretch of n frames: the delay 3.9 %, the plate 10.4, an SPU mode 7.5, the chorus ~3 */
 static int fx_job_units(uint32_t n)
 {
     int u = 0, k;
     for (k = 0; k < 2; k++)
         if (fx_lag_on[k])
-            u += fx_type[k] >= FXT_REVERB ? 8 : fx_type[k] == FXT_DELAY ? 4 : 3;
+            u += fx_type[k] > FXT_REVERB ? 7 : fx_type[k] == FXT_REVERB ? 9 : fx_type[k] == FXT_DELAY ? 4 : 3;
     return n ? (int)((uint32_t)u * 256u / n) : u;
 }
-#endif
-/* on the FM-1 the split goes by what each part took, measured (the simulator's stays split_at's model: its samples
- * the same every run; the split only changes the order of the halves' sum): each voice's time (synth_voice_time; a
- * voice not measured yet by its units at what a unit has been taking), each drum track's, the effects' job; for a
- * stretch of n frames, the k whose larger side is the smallest (of those, the one nearest the middle) */
+/* the split's correction, learnt on the FM-1 from the two cores' times (split_at's units on the second core's side:
+ * a stretch whose second core took longer than the first core's part moves a unit to the first, and back; one for
+ * the stretches with the effects' job, one for the rest), held within three voices' worth either way: the model stays
+ * in charge (a split by each voice's measured time misjudged the blocks where notes start, the ones that matter).
+ * The simulator's split stays the model's alone (its samples the same every run; the split only changes the order
+ * of the halves' sum) */
+static int split_bias[2];
+#define SPLIT_BIAS_MAX 12
+static void split_learn(int fxj, uint32_t t0, uint32_t t1)
+{
 #ifndef PLAT_HOST
-static float dl_time[NTRK], fxj_time, unit_time = 1500.0f;    /* (plat_cycles for 256 frames; the job: a block's) */
-static uint32_t dl_t0[NTRK], fxj_t0;
-static float trk_vtime[NTRK];                              /* a voice of the track lately (its voices' mean) */
-static uint32_t split_measured(uint32_t n, int fxj)
-{
-    float c[NVOICE], pre[NVOICE + 1], drum = 0.0f, best_c = 1e30f, fr = (float)n * (1.0f / 256.0f), mt = 0.0f;
-    float tsum[NTRK] = {0};
-    int i, k, t, best = NVOICE / 2, mu = 0, tn[NTRK] = {0};
-    for (i = 0; i < NVOICE; i++) {
-        float m = synth_voice_time(SY, i);
-        if (m > 0.0f) {
-            int vt = synth_voice_track(SY, i);
-            mt += m;
-            mu += synth_voice_cost(SY, i);
-            if (vt >= 0 && vt < NTRK) {
-                tsum[vt] += m;
-                tn[vt]++;
-            }
-        }
-        c[i] = m;
-    }
-    if (mu > 0)                                            /* what a unit takes, from the voices measured */
-        unit_time += (mt / (float)mu - unit_time) * 0.05f;
-    for (t = 0; t < NTRK; t++)
-        if (tn[t])
-            trk_vtime[t] = tsum[t] / (float)tn[t];
-    pre[0] = 0.0f;
-    for (i = 0; i < NVOICE; i++) {                         /* a voice not measured yet: as its track's, else by units */
-        float m = c[i];
-        if (m < 0.0f) {
-            int vt = synth_voice_track(SY, i);
-            m = vt >= 0 && vt < NTRK && trk_vtime[vt] > 0.0f ? trk_vtime[vt] : unit_time * (float)synth_voice_cost(SY, i);
-        }
-        pre[i + 1] = pre[i] + m * fr;
-    }
-    for (t = 0; t < NTRK; t++)
-        if (eng_drum[t] && drumline_sounding(DL(t)))
-            drum += dl_time[t] * fr;
-    for (k = 0; k <= NVOICE; k++) {
-        float a = pre[k] + (fxj ? fxj_time : 0.0f), b = pre[NVOICE] - pre[k] + drum, m = a > b ? a : b;
-        int dk = k > NVOICE / 2 ? k - NVOICE / 2 : NVOICE / 2 - k, db = best > NVOICE / 2 ? best - NVOICE / 2 : NVOICE / 2 - best;
-        if (m < best_c - 1.0f || (m < best_c + 1.0f && dk < db)) {
-            best_c = m;
-            best = k;
-        }
-    }
-    return (uint32_t)best;
-}
-static void split_learn(uint32_t n)                       /* after a stretch: the drum tracks' and the job's times */
-{
-    int t;
-    for (t = 0; t < NTRK; t++) {
-        uint32_t d = eng_prof_drum[t] - dl_t0[t];
-        dl_t0[t] = eng_prof_drum[t];
-        if (eng_drum[t] && d)
-            dl_time[t] += ((float)d * (256.0f / (float)n) - dl_time[t]) * 0.25f;
-    }
-    if (eng_prof[PR_FXJ] != fxj_t0) {
-        fxj_time += ((float)(eng_prof[PR_FXJ] - fxj_t0) - fxj_time) * 0.25f;
-        fxj_t0 = eng_prof[PR_FXJ];
-    }
-}
+    uint32_t dz = (t0 + t1) >> 4;                          /* (a dead band: 6 % of the two) */
+    if (t1 > t0 + dz && split_bias[fxj] < SPLIT_BIAS_MAX)
+        split_bias[fxj]++;
+    else if (t0 > t1 + dz && split_bias[fxj] > -SPLIT_BIAS_MAX)
+        split_bias[fxj]--;
+#else
+    (void)fxj;
+    (void)t0;
+    (void)t1;
 #endif
+}
 static void render_sub(uint32_t n, uint32_t at)
 {
     uint32_t arg = n & 0xFFu, pt, split;
@@ -961,11 +869,7 @@ static void render_sub(uint32_t n, uint32_t at)
     zerof(s2, n);
     perf_tick(n);
     synth_prepare(SY, n);                                 /* the shared per-chunk values, before either core renders */
-#ifdef PLAT_HOST
-    split = split_at(fxj ? fx_job_units(n) : 0);
-#else
-    split = split_measured(n, fxj);
-#endif
+    split = split_at((fxj ? fx_job_units(n) : 0) + split_bias[fxj]);
     arg |= split << 16 | (fxj ? 0x200u : 0u);
     on2 = c2_run ? c2_run(core2_job, arg | 0x100u) : 0;
     PROF_ADD(PR_PREP, pp);
@@ -1005,10 +909,8 @@ static void render_sub(uint32_t n, uint32_t at)
         core2_job(arg);                                   /* one core (or the second failed): here */
     } else {
         PROF_ADD(PR_WAIT, pt);                            /* what the first core waited for the second */
+        split_learn(fxj, pt - ps, c2_took);
     }
-#ifndef PLAT_HOST
-    split_learn(n);
-#endif
     pt = plat_cycles();
     add_in(mel_l, c2_l, n);
     add_in(mel_r, c2_r, n);
@@ -1069,6 +971,7 @@ void engine_render(int32_t *out_lr, uint32_t n, uint32_t gain_q12)
         PROF_T(pt);
         float bpm;
         drain();
+        PROF_ADD(PR_DRAIN, pt);
         bpm = seq_tempo(&seq);
         synth_tempo(SY, bpm);
         fx_tempo(FXS(0), bpm);
@@ -1125,6 +1028,21 @@ void engine_render(int32_t *out_lr, uint32_t n, uint32_t gain_q12)
             eng_prof_reset = 0;
             eng_prof_worst[PR_ALL] = 0;
         }
+        {   /* the trace: each block's main stages in permille of its budget, the last TRACE_N */
+            static const uint8_t K[TRACE_K - 2] = {PR_ALL, PR_SYNTH0, PR_SYNTH1, PR_SEQ, PR_DRUM, PR_NOTE};
+            uint32_t bud = n * 544u, w = trace_w % TRACE_N, j;   /* (24 MHz / 44.1 kHz = 544.2 ticks a frame) */
+            for (j = 0; j < TRACE_K - 2; j++)
+                trace[w][j] = (uint16_t)((eng_prof[K[j]] - prof_block0[K[j]]) * 1000u / bud);
+            trace[w][TRACE_K - 2] = (uint16_t)(eng_prof[PR_SUBS] - prof_block0[PR_SUBS]);
+            trace[w][TRACE_K - 1] = (uint16_t)synth_voices_used(SY);
+            trace_w++;
+            if (d > eng_prof_worst[PR_ALL])          /* the slowest block: the trace around it kept, 4 blocks on */
+                trace_take = trace_w + 4u;
+            if (trace_w == trace_take)
+                for (j = 0; j < TRACE_N; j++)
+                    for (p = 0; p < TRACE_K; p++)
+                        trace_worst[j][p] = trace[(trace_w + j) % TRACE_N][p];
+        }
         if (d > eng_prof_worst[PR_ALL])
             for (p = 0; p < ENG_PROF_N; p++)
                 eng_prof_worst[p] = eng_prof[p] - prof_block0[p];
@@ -1177,14 +1095,13 @@ void engine_init(patterns_t *P, uint8_t (*par)[NTP])
     fx_type[1] = epar[AUX_FX2][TP_ENGINE];
     fx_set(FXS(0), fx_type[0], epar[AUX_FX1] + TP_E1);
     fx_set(FXS(1), fx_type[1], epar[AUX_FX2] + TP_E1);
-    master_init(MST, mst_tape[0], mst_tape[1]);
+    master_init(MST);
     seq_init(&seq, P, par);
     seq.groove_type = (uint8_t)(proj.groove < NGROOVE ? proj.groove : GR_SWING);
     seq.brain_link = (uint8_t)(par[AUX_BRAIN][TP_E4] > NTRK ? NTRK : par[AUX_BRAIN][TP_E4]);
     for (t = 0; t < NSEQT; t++)
         eng_step[t] = 0;
     eng_voices_max = NVOICE;
-    eng_saws_max = eng_saws_applied = 9;
 }
 
 /* the UI asks before offering an effect: FX I has no reverb line, FX II no delay (the memory plan) */

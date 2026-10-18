@@ -41,7 +41,7 @@ SIZE_FILES = ["app/ui.c", "app/pages.c", "app/project.c", "app/lz.c", "app/sampl
               "base/device/storage.c", "base/bsp/chip/ota.c", "base/device/announce.c", "base/device/backup.c"]
 COLD = {
     "dsp/drumline.c": ["start", "knob", "drumline_filter", "drumline_hit", "reso_set", "drumline_init"],
-    "dsp/fx.c": ["fx_derive", "ts_set", "eq_coefs", "fx_filter", "master_set", "master_init", "comp_coefs",
+    "dsp/fx.c": ["fx_derive", "eq_coefs", "fx_filter", "master_set", "master_init", "comp_coefs",
                  "fx_set", "fx_init"],
     "dsp/sample.c": ["smp_user_scan", "fact_init"],
     "dsp/synth.c": ["tp_text_i", "tp_text_par", "tp_info_par", "tp_text", "char_picture", "voice_start",
@@ -54,7 +54,7 @@ COLD = {
 }
 # the two FX slots' and the master's per-sample code, closed under calls (~18 KB; the 24 KB RAMTEXT region holds
 # .ram_text's ~3 KB and the second core's loop besides)
-RAM_DSP = ["fx_process", "fx_process_lag", "do_spu", "spu_interp", "master_process", "ts_side", "ts_wf", "ts_block_pole"]
+RAM_DSP = ["fx_process", "fx_process_lag", "do_spu", "spu_interp", "master_process"]
 RAM_INLINE = ["fx_states", "zero16"]
 RAM_UNITS = ["dsp/fx.c"]
 RAM_SECTION = ".c1_text.dsp"

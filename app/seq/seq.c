@@ -1168,6 +1168,10 @@ static void jump_set(seq_t *s, int t, int cv, int p)
     tr->jump_to = (uint8_t)(((n % len) + len) % len);
 }
 
+uint32_t (*seq_clock)(void);
+volatile uint32_t *seq_prof;                 /* the profiler (engine.c: eng_prof PR_SIX..): [0] six_tick, [1] fire_step, [2] fire_sub */
+#define SQ_T(v) uint32_t v = seq_prof ? seq_clock() : 0
+#define SQ_ADD(k, v) do { if (seq_prof) seq_prof[k] += seq_clock() - (v); } while (0)
 static void fire_step(seq_t *s, int t, const seq_sink_t *o)
 {
     seq_trk_t *tr = &s->t[t];
@@ -1210,10 +1214,18 @@ static void fire_step(seq_t *s, int t, const seq_sink_t *o)
     tr->ratchet = 0;
     tr->ratchets = 1;
     tr->sub_to_next = NEVER;
-    if (retrig)
-        resolve_comps(s, t, st, &trig_ok, &lock_ok);
-    if (retrig && lock_ok)
-        apply_locks(s, t, p, L, o);
+    {
+        SQ_T(qa);
+        if (retrig)
+            resolve_comps(s, t, st, &trig_ok, &lock_ok);
+        SQ_ADD(3, qa);
+    }
+    {
+        SQ_T(qb);
+        if (retrig && lock_ok)
+            apply_locks(s, t, p, L, o);
+        SQ_ADD(4, qb);
+    }
     if (o->step)
         o->step(o->ctx, t, p);
     /* the step happens when its chance (or A:B) and its skip trigger say so: then its tricks run, the jump too
@@ -1246,10 +1258,12 @@ static void fire_step(seq_t *s, int t, const seq_sink_t *o)
             tr->ramp_deg = 0;
         if (tr->act[SC_BEND])
             bend_start(s, t, tr->act[SC_BEND] - 1, L);
+        SQ_T(qc);
         if (t < NTRK)
             fire_notes(s, t, st, p, L, 0, o);
         else
             fire_aux(s, t, st, p, L, o);
+        SQ_ADD(5, qc);
     } else {
         tr->ramp_deg = 0;
         if (happens && t < NTRK && o->ghost && !tr->fill_on && !step_empty(st) &&
@@ -2291,10 +2305,6 @@ static void dec(uint32_t *v, uint32_t dq)
         *v = *v > dq ? *v - dq : 0;
 }
 
-uint32_t (*seq_clock)(void);
-volatile uint32_t *seq_prof;                 /* the profiler (engine.c: eng_prof PR_SIX..): [0] six_tick, [1] fire_step, [2] fire_sub */
-#define SQ_T(v) uint32_t v = seq_prof ? seq_clock() : 0
-#define SQ_ADD(k, v) do { if (seq_prof) seq_prof[k] += seq_clock() - (v); } while (0)
 void seq_advance(seq_t *s, uint32_t k, const seq_sink_t *o)
 {
     uint32_t dq = k << 8;
@@ -2380,6 +2390,7 @@ void seq_advance(seq_t *s, uint32_t k, const seq_sink_t *o)
     if (!s->ext && s->send_clock)
         dec(&s->clk_to_next, dq);
     /* fire what is due */
+    SQ_T(qf);
     for (guard = 0; guard < 8; guard++) {
         int fired = 0;
         if (s->playing && s->six_to_next < 256u) {   /* the sixteenth first: its bar may restart tracks */
@@ -2430,6 +2441,7 @@ void seq_advance(seq_t *s, uint32_t k, const seq_sink_t *o)
         if (!fired)
             break;
     }
+    SQ_ADD(6, qf);
     if (s->playing && !s->ext && s->send_clock && s->clk_to_next < 256u) {
         midi(o, 0xF8, 0, 0);
         s->clk_to_next += six_q8(s) / 6u;           /* 24 ppqn */

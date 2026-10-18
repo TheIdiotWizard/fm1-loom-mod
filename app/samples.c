@@ -39,7 +39,7 @@ enum { SB_INFO = 1, SB_BEGIN = 11, SB_WRITE, SB_END, SB_ERASE, SB_SINFO, SB_HDR,
 #define SB_NPART ((SMP_HDR_USED + SB_PART - 1u) / SB_PART)
 #define SB_INFO_K 12u                                /* SMP_INFO: samples a reply (12 x 18 bytes at most) */
 
-static uint8_t sb_out[288];
+static uint8_t sb_out[320];
 static uint32_t sb_n;
 /* the staged header (1344 bytes used) and a page of data live in project.c's io_buf (3840 B): a project is
  * never loaded or saved between the frames of an upload (a save in the middle spoils the staged header: the
@@ -168,7 +168,7 @@ static int smp_frame(const uint8_t *p, uint32_t n)
             v[nv++] = plat_cpu_pct();
             v[nv++] = eng_voices;
             v[nv++] = eng_voices_max;
-            v[nv++] = eng_saws_max;
+            v[nv++] = 9;                             /* (once brocade's saws under the guard: they no longer thin) */
             v[nv++] = eng_guard_count;
             v[nv++] = plat_xruns();
         } else if (part == 1u) {
@@ -181,6 +181,9 @@ static int smp_frame(const uint8_t *p, uint32_t n)
         } else if (part == 2u) {
             for (i = 0; i < NTRK; i++)
                 v[nv++] = eng_prof_drum[i];
+        } else if (part == 3u) {                     /* the trace up to the slowest block, two values a word */
+            for (i = 0; i < TRACE_N * TRACE_K / 2u; i++)
+                v[nv++] = (uint32_t)trace_worst[0][2u * i] | (uint32_t)trace_worst[0][2u * i + 1u] << 16;
         }
         sb_b(part);
         sb_b(nv);

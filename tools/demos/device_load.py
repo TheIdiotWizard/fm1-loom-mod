@@ -121,20 +121,20 @@ def release_all():
     time.sleep(0.2)
 
 
-GLO = ["Mix", "Master EQ", "Master tape", "Master out", "Setup", "Status"]
+GLO = ["Mix", "Master EQ", "Master out", "Setup", "Status"]
 
 
 def glo(page):
     s = where()
     for _ in range(4):
-        if " of 6." in s and " list." not in s and "?" not in s:
+        if " of 5." in s and " list." not in s and "?" not in s:
             break
         run("tap", "HOME" if (" list." in s or "?" in s) else "GLO", "wait", 400)
         s = where()
     for _ in range(8):
         if s.startswith(page + ","):
             return s
-        m = re.search(r"page (\d) of 6", s)
+        m = re.search(r"page (\d) of 5", s)
         cur = int(m.group(1)) if m else 1
         run("turn", "SELECT", 1 if cur < GLO.index(page) + 1 else -1, "wait", 300)
         s = where()
@@ -293,7 +293,7 @@ def play_song(row, every, overhead_note):
     limit = (pm.get("seconds") or 90) * 1.6 + 20
     reads, stopped_n, g0, x0 = [], 0, None, None
     p_first = p_prev = prof_snap()
-    p_last, worst = p_first, None
+    p_last, worst, worst_trace, worst_t = p_first, None, None, None
     while time.time() - t0 < limit:
         time.sleep(max(0.0, every - 0.3))
         s = where()
@@ -312,6 +312,8 @@ def play_song(row, every, overhead_note):
                 r["worst_all"] = round(dd["worst"]["all"])
                 if r["playing"] and (worst is None or dd["worst"]["all"] > worst["all"]):
                     worst = dict(dd["worst"])
+                    worst_trace = dd.get("trace")
+                    worst_t = r["t"]
             if r["playing"]:
                 p_last = pn
         p_prev = pn or p_prev
@@ -356,6 +358,10 @@ def play_song(row, every, overhead_note):
         print("  stages: " + pr.line(whole))
         if worst:
             print("  slowest block: " + " ".join(f"{k} {v:.0f}" for k, v in worst.items() if v >= 1 or k == "subs"))
+        if worst_trace:
+            res["trace"] = {"t": worst_t, "blocks": worst_trace}
+            print(f"  the blocks up to it (read at {worst_t} s; all/synth0/synth1/seq/drum/note %, stretches, voices): "
+                  + pr.trace_text(worst_trace))
     print(f"  {secs} s, {len(reads)} reads: load mean {res['mean']} %, highest read {res['max_load']} %, peak "
           f"{res['peak']} %, voices {res['voices']} (cap {res['of_min']}), saws {res['saws']}, guard +{res['guard']}, "
           f"dropouts +{res['drop']}, {'ended' if res['ended'] else 'DID NOT END'}, "

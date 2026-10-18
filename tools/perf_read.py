@@ -17,7 +17,7 @@ import time
 
 HDR = [0x7D, 0x46, 0x4C]
 CMD = 26
-STAGES = ["seq", "synth0", "synth1", "drum", "fx1", "master", "wait", "fx2", "prep", "mix", "out", "all", "subs", "note", "six", "step", "sub", "fxj"]
+STAGES = ["seq", "synth0", "synth1", "drum", "fx1", "master", "wait", "fx2", "prep", "mix", "out", "all", "subs", "note", "six", "step", "sub", "comp", "locks", "notes", "fire", "drain", "fxj"]
 ENGINES = ["weft", "stack", "wavetable", "orbit", "tines", "organ", "sync", "swarm", "kit", "sample", "slice",
            "brocade", "cane", "voile", "gingham", "chunk"]
 TICK_HZ = 24e6
@@ -57,6 +57,8 @@ def ask(port, part, timeout=1.0):
 
 def snap(port, reset_worst=True):
     """the running totals: {'t', 'frames', 'stage': {..}, 'worst': {..}, 'load'.., 'eng': [2][16], 'drum': [8]}"""
+    tr = ask(port, 3)                        # (first: the reset below lets the next block overwrite it)
+    flat = [x for w in tr for x in (w & 0xFFFF, w >> 16)]
     a = ask(port, 0 | (64 if reset_worst else 0))
     n = len(STAGES)
     s = {"t": a[0], "frames": a[1], "stage": dict(zip(STAGES, a[2:2 + n])), "worst": dict(zip(STAGES, a[2 + n:2 + 2 * n]))}
@@ -66,6 +68,7 @@ def snap(port, reset_worst=True):
     s["eng"] = [e[:k], e[k:2 * k]]
     s["vworst"] = e[2 * k:2 * k + 3]
     s["drum"] = ask(port, 2)
+    s["trace"] = [flat[i:i + 8] for i in range(0, len(flat), 8)]
     s["wall"] = time.time()
     return s
 
@@ -93,9 +96,16 @@ def diff(a, b):
     out["drum"] = [pct(b["drum"][i] - a["drum"][i]) for i in range(len(b["drum"]))]
     for k in TRAIL:
         out[k] = b[k]
+    out["trace"] = b.get("trace")
     vw = b.get("vworst") or [0, 0, 0]
     out["vworst"] = (100.0 * vw[0] / wb, ENGINES[vw[1]] if vw[1] < len(ENGINES) else "?", vw[2])
     return out
+
+
+def trace_text(tr):
+    """the blocks up to the slowest (all synth0 synth1 seq drum note in %, stretches, voices)"""
+    return " ; ".join("%d=%d/%d/%d/%d/%d/%d s%d v%d" % (i, r[0] // 10, r[1] // 10, r[2] // 10, r[3] // 10, r[4] // 10,
+                                                      r[5] // 10, r[6], r[7]) for i, r in enumerate(tr))
 
 
 def line(d):

@@ -27,8 +27,7 @@
  * schwung-psxverb: MIT), which run on the same line, all of it.
  *
  * Master: the two groups' levels, a 3-band EQ (RBJ shelves and a peak, their gains scaled by blend
- * so blend 0 is a true bypass), the tape (TapeScam-lite, tapescam.h, after schwung-tapescam: MIT; all four
- * knobs at 0 a true bypass), X0X's bus compressor behind its one-knob macro with X0X's PUMP in its gain
+ * so blend 0 is a true bypass), X0X's bus compressor behind its one-knob macro with X0X's PUMP in its gain
  * (a hit of the pump's source ducks the whole mix: the sequencer keys it, so it needs no detector and a
  * muted track keys it too; at 0 the stage is as before, sample for sample), the master level and X0X's
  * lookahead limiter.
@@ -724,10 +723,8 @@ int fx_awake(const fxslot_t *f)
 /* ================================================================ master === */
 /* the master's knob names, short enough for the knob strip: percussion, melodic, compressor
  * and pump are perc, mel, comp, pump; then the out page's list */
-const char *const MS_NAME[NMS] = {"low", "mid", "high", "blend", "drive", "color", "wobble", "noise",
+const char *const MS_NAME[NMS] = {"low", "mid", "high", "blend", "-", "-", "-", "-",
                                   "perc", "mel", "comp", "pump", "pump by", "release", "accent", "level"};
-
-#include "tapescam.h"
 
 typedef struct { float b0, b1, b2, a1, a2; } biq_t;
 typedef struct { float x1, x2, y1, y2; } biqs_t;
@@ -739,9 +736,7 @@ struct master {
     /* EQ */
     biq_t eq[3];
     biqs_t eqs[2][3];
-    uint8_t eq_on, tape_on, comp_on;
-    /* the tape */
-    tscam_t ts;
+    uint8_t eq_on, comp_on;
     /* compressor (X0X's master.c) */
     float thr_db, slope, knee, a_att, a_rel, makeup, gr, ms, a_det, want, g_lin, g_step, gr_view;
     uint8_t cr;
@@ -806,12 +801,6 @@ static void eq_coefs(master_t *m)
                (m->pot[MS_EQ_LO] != 64 || m->pot[MS_EQ_MID] != 64 || m->pot[MS_EQ_HI] != 64);
 }
 
-static void tape_coefs(master_t *m)
-{
-    ts_set(&m->ts, (float)m->pot[MS_TP_DRIVE] * (1.0f / 127.0f), (float)m->pot[MS_TP_COLOR] * (1.0f / 127.0f),
-           (float)m->pot[MS_TP_WOBBLE] * (1.0f / 127.0f), (float)m->pot[MS_TP_NOISE] * (1.0f / 127.0f));
-}
-
 /* X0X's one-knob COMP: the threshold falls (-4 .. -32 dB), the ratio climbs (1.5:1 .. 6:1), the
  * makeup follows (0.85 of the reduction at the threshold); attack 2.6 ms, release 106 ms */
 static void comp_coefs(master_t *m)
@@ -841,7 +830,7 @@ static void comp_coefs(master_t *m)
     }
 }
 
-void master_init(master_t *m, float *tape_l, float *tape_r)
+void master_init(master_t *m)
 {
     static const uint8_t DEF[NMS] = {64, 64, 64, 0, 0, 0, 0, 0, 100, 100, 0, 0, PB_KICK, MS_PUMP_REL_DEF, 1, 100};
     uint32_t i;
@@ -852,9 +841,7 @@ void master_init(master_t *m, float *tape_l, float *tape_r)
         m->pot[i] = DEF[i];
     m->gain = 1.0f;
     m->gp = m->gp_c = m->gm = m->gm_c = m->glev = m->lev_c = 1.0f;
-    ts_init(&m->ts, tape_l, tape_r);
     eq_coefs(m);
-    tape_coefs(m);
     comp_coefs(m);
 }
 
@@ -865,8 +852,8 @@ void master_set(master_t *m, int p, int v)
     m->pot[p] = (uint8_t)(v < 0 ? 0 : v > master_max(p) ? master_max(p) : v);
     if (p <= MS_EQ_BLEND)
         eq_coefs(m);
-    else if (p <= MS_TP_NOISE)
-        tape_coefs(m);
+    else if (p <= MS_RSV7)
+        return;                                           /* (the tape's, gone) */
     else if (p == MS_PERC)
         m->gp = level_lin(v);
     else if (p == MS_MEL)
@@ -916,7 +903,7 @@ static inline float glide1(float cur, float tgt)             /* a level knob: ~1
 }
 
 #ifdef PLAT_HOST
-int fx_host_stage = 9;                        /* the host's taps (host.c LOOM_MST): 0 the groups only, 1 + EQ, 2 + tape,
+int fx_host_stage = 9;                        /* the host's taps (host.c LOOM_MST): 0 the groups only, 1 + EQ, 2 (as 1),
                                                * 3 + comp and level, else all (the limiter) */
 #define STAGE(k) (fx_host_stage >= (k))
 #else
@@ -948,8 +935,8 @@ void master_process(master_t *m, float *perc_l, float *perc_r, float *mel_l, flo
     uint32_t i;
     float gp = m->gp_c, gm = m->gm_c, lev = m->lev_c, grmax = 0.0f, pmax = 0.0f;
     const int eq_on = m->eq_on, comp_on = m->comp_on;
-    /* the groups into the bus, then the EQ a band at a time, then the tape (a block of 32 at a time, in place in
-     * mel). (Every state is a local in its loop: a load from RAM costs this core more than a multiply.) */
+    /* the groups into the bus, then the EQ a band at a time, in place in mel. (Every state is a local in its loop: a
+     * load from RAM costs this core more than a multiply.) */
     {
         const float tgp = m->gp, tgm = m->gm;
         for (i = 0; i < n; i++) {
@@ -965,17 +952,6 @@ void master_process(master_t *m, float *perc_l, float *perc_r, float *mel_l, flo
             biq_block(&m->eq[b], &m->eqs[0][b], mel_l, n);
             biq_block(&m->eq[b], &m->eqs[1][b], mel_r, n);
         }
-    }
-    if (m->ts.on && STAGE(2)) {
-        uint32_t o;
-        if (!m->tape_on) {                    /* the tape comes in: from rest */
-            ts_rest(&m->ts);
-            m->tape_on = 1;
-        }
-        for (o = 0; o < n; o += TS_SUB)
-            ts_block(&m->ts, mel_l + o, mel_r + o, (int)(n - o < TS_SUB ? n - o : TS_SUB));
-    } else {
-        m->tape_on = 0;
     }
     {
         const float glev = m->glev, a_det = m->a_det, a_att = m->a_att, a_rel = m->a_rel, slope = m->slope;

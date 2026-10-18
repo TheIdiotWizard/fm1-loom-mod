@@ -2,7 +2,7 @@
 # and think breaks, is build/demos/jungle.bin: private, never committed.)
 #   T1 slice "chop": the amen, one bar in 16 slices, mono, crushed a little (a sampler's twelve bits); re-cut per
 #      section, rolls by multiply, its pitch turned up by hand through the build
-#   T2 stack "rope sub": the sub          T3 brocade "chenille" as the reese: nine saws, legato, the filter on an LFO
+#   T2 stack "rope sub": the sub          T3 brocade "chenille" as the reese: seven saws, legato, the filter on an LFO
 #   T4 voile "voile choir": the pad       T5 stack "braid stab": dub stabs into the delay
 #   T6 slice "chop": the think break      T7 weft "thread lead" as a dub siren (a square LFO on the pitch)
 # Song: intro 8 bars (the amen through a closed filter, opened by hand), build 4, drop A 8 (a stutter throw at
@@ -14,7 +14,7 @@ bpm 170
 # ---- the sounds (90s jungle: the breaks do the work. The amen sped up and pitched up, a little sampler grit on it
 # (twelve bits or so: an S950's), the think under it; a deep sine sub alone in the lows; the reese on top, its
 # filter swept slowly; dub stabs and a siren into a long dotted echo; a dark hall for the pads; the master medium
-# dark, the breaks crisp, no tape)
+# dark, the breaks crisp)
 # T1 the amen: one bar in 16 slices, mono; driven a little and crushed a little (bits, not rate), the hall a touch
 knob 1 engine slice
 preset 1 chop slice
@@ -32,7 +32,7 @@ knob 1 send2 10
 preset 2 rope_sub stack
 knob 2 brain no
 knob 2 level 84
-# T3 brocade "chenille" as the reese: nine saws, legato, the low-pass at 1 kHz moved by a slow LFO, resonant
+# T3 brocade "chenille" as the reese: seven saws, legato, the low-pass at 1 kHz moved by a slow LFO, resonant
 preset 3 chenille brocade
 knob 3 brain no
 knob 3 e2 40
@@ -87,7 +87,7 @@ knob 11 e3 84
 knob 11 e4 50
 knob 12 engine hall
 knob 12 e2 70
-# the master: no tape (the grit is on the amen); the low end held, the top lifted a little for the breaks
+# the master: the grit is on the amen; the low end held, the top lifted a little for the breaks
 mst blend 127
 mst hi 76
 mst lo 62
@@ -272,10 +272,10 @@ trick 3 2 55 porta 3
 
 # ---- T4 the pad: Am(add9) | Fmaj7 | Dm9 | Em7
 pat 4 1 64
-notes 4 1 1 16 80 A3 C4 E4 B4
-notes 4 1 17 16 80 F3 A3 C4 E4
-notes 4 1 33 16 80 D3 F3 C4 E4
-notes 4 1 49 16 80 E3 G3 B3 D4
+notes 4 1 1 16 80 A3 C4 B4
+notes 4 1 17 16 80 F3 A3 E4
+notes 4 1 33 16 80 D3 F3 E4
+notes 4 1 49 16 80 E3 G3 D4
 
 # ---- T5 the stabs: P1 a bar of offbeat Am stabs (the 2nd one every other bar), P2 the change's, through the progression
 pat 5 1 16
@@ -283,14 +283,14 @@ notes 5 1 3 0.5 110 A3 C4 E4
 notes 5 1 11 0.5 100 A3 C4 E4
 chance 5 1 11 1:2
 pat 5 2 64
-notes 5 2 1 1 110 A3 C4 E4 G4
-notes 5 2 7 0.5 90 A3 C4 E4 G4
-notes 5 2 17 1 110 F3 A3 C4 E4
-notes 5 2 23 0.5 90 F3 A3 C4 E4
-notes 5 2 33 1 110 D3 F3 A3 C4
-notes 5 2 39 0.5 90 D3 F3 A3 C4
-notes 5 2 49 1 110 E3 G3 B3 D4
-notes 5 2 55 0.5 90 E3 G3 B3 D4
+notes 5 2 1 1 110 A3 C4 G4
+notes 5 2 7 0.5 90 A3 C4 G4
+notes 5 2 17 1 110 F3 A3 E4
+notes 5 2 23 0.5 90 F3 A3 E4
+notes 5 2 33 1 110 D3 F3 C4
+notes 5 2 39 0.5 90 D3 F3 C4
+notes 5 2 49 1 110 E3 G3 D4
+notes 5 2 55 0.5 90 E3 G3 D4
 
 # ---- T6 the think break: P1 straight, P2 the change (chopped), P3 drop B (its ghosts and hats only, under the amen)
 pat 6 1 16 1 100
