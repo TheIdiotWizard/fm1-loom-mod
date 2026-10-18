@@ -176,6 +176,12 @@ def load_slot(slot, name):
     for _ in range(8):
         s = where()
         m = re.search(r"LOAD PROJECT (\d)", s)
+        for _ in range(3):                   # (a tap can be missed: the list did not open)
+            if m:
+                break
+            run("tap", "SEL", "wait", 500)
+            s = where()
+            m = re.search(r"LOAD PROJECT (\d)", s)
         if not m:
             raise SystemExit(f"device_load: no LOAD PROJECT in Status's list: {s!r}")
         if int(m.group(1)) == slot:
@@ -330,6 +336,8 @@ def play_song(row, every, overhead_note):
 
 
 def table(results, overhead):
+    order = ["jungle", "garage", "hyperpop", "house", "pop", "hiphop"]
+    results = sorted(results, key=lambda r: order.index(r["song"]) if r["song"] in order else 99)
     lines = ["LOOM-8 demo songs on the FM-1 (Status page every ~0.5 s) against the host's model of the same project",
              f"screen reader idle: polled {overhead['fast_load']} % (peak {overhead['fast_peak']}), "
              f"asked every 5 s {overhead['slow_load']} % (peak {overhead['slow_peak']})" if overhead else "",
@@ -357,6 +365,7 @@ def main():
     ap.add_argument("--no-flash", action="store_true", help="the devtest build is on the FM-1 already")
     ap.add_argument("--no-keep", action="store_true", help="do not back up and put back the FM-1's own projects")
     ap.add_argument("--every", type=float, default=0.5)
+    ap.add_argument("--songs", help="only these songs (e.g. hyperpop,house); the others' rows kept from the last run")
     a = ap.parse_args()
     man = json.loads((DEV / "manifest.json").read_text())
     if a.no_flash:
@@ -382,17 +391,23 @@ def main():
             raise SystemExit(f"device_load: the backup of the FM-1's own projects failed (rc {r.returncode})")
     overhead = reader_overhead()
     results = []
+    if a.songs and (DEV / "device_load.json").exists():   # (the other songs' rows from the last run)
+        results = json.loads((DEV / "device_load.json").read_text())
     try:
         for g in a.groups.split(","):
             grp = man["groups"][g]
             print(f"=== group {g}: bank {grp['bank']}, backup {grp['backup']}")
+            rows = [r for r in grp["songs"] if not a.songs or r["song"] in a.songs.split(",")]
+            if not rows:
+                continue
             stop()
             upload_bank(grp["bank"])
             restore(grp["backup"])
             time.sleep(1.0)
-            for row in grp["songs"]:
+            for row in rows:
                 res = play_song(row, a.every, overhead)
-                results.append(res)
+                results = [r for r in results if r["song"] != res["song"]] + [res]
+                (DEV / "device_load.json").write_text(json.dumps(results, indent=1) + "\n")
                 if res["crash"]:
                     print("!! a crash was recorded:")
                     for ln in res["log"]:
