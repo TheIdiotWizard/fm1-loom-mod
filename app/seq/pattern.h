@@ -148,8 +148,15 @@ void step_clear_locks(lane_t *L, int trk, int pat, int step);
 int step_tune(const lane_t *L, int trk, int pat, int step);       /* a drum step's note: semitones, 0 = none */
 void pattern_clear_locks(lane_t *L, int trk, int pat);
 void cond_ab(int k, int *a, int *b);  /* COND_AB + k -> A:B */
-/* weave two patterns into out (not a or b): WV_BARS alternates their bars (a, b, a, b), WV_STEPS their steps; the
- * shorter one loops to the longer one's length. WV_RHYTHM keeps a's rhythm and plays b's notes on it, in their
- * order, cycled; WV_NOTES the other way: b's rhythm, a's notes. The pattern's settings are always a's. */
+/* a weave: pattern a (the track's) crossed with b (WITH). weave_step: the step the weave plays at pos, the track's
+ * steps since it started (each pattern loops by its own length): WV_BARS the bars in turn (a's, b's, ...), WV_STEPS
+ * the steps in turn, WV_RHYTHM a's steps with b's notes in their order, cycled, WV_NOTES b's steps with a's notes.
+ * The sequencer plays it live; KEEP AS PATTERN writes it */
 enum { WV_BARS, WV_STEPS, WV_RHYTHM, WV_NOTES, NWV };
-void pattern_weave(tpat_t *out, const tpat_t *a, const tpat_t *b, int mode);
+enum { WK_MEL, WK_KIT, WK_FX };       /* a track's kind of steps: notes (synths, the conductor), a kit's sounds, throws */
+/* ak / bk: a's and b's kinds; notes cross between them (pattern.c notes_cross: a kit's sounds as a pentatonic ladder
+ * from C3, notes as sounds by note mod 11, throws only with throws) */
+void weave_step(const tpat_t *a, int ak, const tpat_t *b, int bk, int rule, uint32_t pos, step_t *out);
+/* the weave written whole into out (KEEP AS PATTERN): a's settings, the longer one's length (by bars: two bars at
+ * least), each step weave_step's from the start */
+void pattern_woven(tpat_t *out, const tpat_t *a, int ak, const tpat_t *b, int bk, int rule);

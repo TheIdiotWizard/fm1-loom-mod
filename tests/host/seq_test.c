@@ -1667,6 +1667,32 @@ static void t_kit11(void)            /* a kit step holds all eleven sounds, and 
     printf("ok %s\n", cur);
 }
 
+static void t_weave_live(void)        /* the sequencer weaves live: T1's P1 with T2's P1 by rhythm, and back */
+{
+    cur = "weave-live";
+    reset();
+    note(0, 0, 60, 100);                          /* T1: hits on 1 and 3 */
+    note(0, 2, 60, 100);
+    note(1, 1, 72, 100);                          /* T2 (the one woven in): 72 then 74 */
+    note(1, 5, 74, 100);
+    S.mute = 1u << 1;                             /* (T2 itself silent) */
+    S.wv_from[0] = 2;                             /* T1 weaves with T2's P1, by rhythm */
+    S.wv_pat[0] = 0;
+    S.wv_rule[0] = WV_RHYTHM;
+    S.wv_live = 1u;
+    start();
+    run(4 * L16);
+    CHECK(count(E_ON, 0) == 2 && on_n(0)->a == 72 && nth(E_ON, 0, 1)->a == 74);
+    stop();
+    S.wv_live = 0;                                /* let go: its own notes */
+    nev = 0;
+    start();
+    run(4 * L16);
+    CHECK(count(E_ON, 0) == 2 && on_n(0)->a == 60);
+    stop();
+    printf("ok %s\n", cur);
+}
+
 static void t_ghost(void)
 {
     cur = "ghost";
@@ -1974,23 +2000,46 @@ static void t_weave(void)
     b.len = 16;                                    /* b: 72, 74, 76 on steps 3, 4, 8 of one bar */
     b.st[2].note[0] = 72, b.st[3].note[0] = 74, b.st[7].note[0] = 76;
     b.st[2].vel = b.st[3].vel = b.st[7].vel = 50;
-    pattern_weave(&o, &a, &b, WV_BARS);            /* bar 1 a's, bar 2 b's */
+    pattern_woven(&o, &a, WK_MEL, &b, WK_MEL, WV_BARS);   /* bar 1 a's, bar 2 b's */
     CHECK(o.len == 32 && o.scale == TS_2);
     CHECK(o.st[0].note[0] == 60 && o.st[4].note[0] == 60 && o.st[2].note[0] == 0);
     CHECK(o.st[16].note[0] == 0 && o.st[18].note[0] == 72 && o.st[23].note[0] == 76 && o.st[20].note[0] == 0);
-    pattern_weave(&o, &b, &a, WV_BARS);            /* b loops to a's length: bar 1 b's, bar 2 a's */
+    pattern_woven(&o, &b, WK_MEL, &a, WK_MEL, WV_BARS);   /* b (one bar) twice as long: bar 1 b's, bar 2 a's */
     CHECK(o.len == 32 && o.st[2].note[0] == 72 && o.st[16].note[0] == 60 && o.st[18].note[0] == 0);
-    pattern_weave(&o, &a, &b, WV_STEPS);           /* odd steps a's, even b's */
+    pattern_woven(&o, &a, WK_MEL, &b, WK_MEL, WV_STEPS);  /* odd steps a's, even b's */
     CHECK(o.st[0].note[0] == 60 && o.st[2].note[0] == 0 && o.st[3].note[0] == 74 && o.st[7].note[0] == 76);
     CHECK(o.st[19].note[0] == 74);                 /* b looped: step 20 is b's step 4 */
-    pattern_weave(&o, &a, &b, WV_RHYTHM);          /* a's hits, b's notes in turn, a's velocity */
+    pattern_woven(&o, &a, WK_MEL, &b, WK_MEL, WV_RHYTHM); /* a's hits, b's notes in turn, a's velocity */
     CHECK(o.len == 32 && o.st[0].note[0] == 72 && o.st[4].note[0] == 74 && o.st[8].note[0] == 76);
     CHECK(o.st[12].note[0] == 72 && o.st[0].vel == 90 && o.st[1].note[0] == 0);
-    pattern_weave(&o, &a, &b, WV_NOTES);           /* b's hits, a's notes; a's settings */
-    CHECK(o.len == 16 && o.scale == TS_2 && o.st[2].note[0] == 60 && o.st[3].note[0] == 60);
-    CHECK(o.st[2].vel == 50 && o.st[0].note[0] == 0);
+    pattern_woven(&o, &a, WK_MEL, &b, WK_MEL, WV_NOTES);  /* b's hits (looped to 32), a's notes; a's settings */
+    CHECK(o.len == 32 && o.scale == TS_2 && o.st[2].note[0] == 60 && o.st[3].note[0] == 60);
+    CHECK(o.st[2].vel == 50 && o.st[0].note[0] == 0 && o.st[18].note[0] == 60);
+    {   /* live: the weave carries on across passes: a one-bar a by bars plays b on its second pass */
+        step_t w;
+        weave_step(&b, WK_MEL, &a, WK_MEL, WV_BARS, 16 + 2, &w);
+        CHECK(w.note[0] == 0);
+        weave_step(&b, WK_MEL, &a, WK_MEL, WV_BARS, 2, &w);
+        CHECK(w.note[0] == 72);
+        weave_step(&b, WK_MEL, &a, WK_MEL, WV_RHYTHM, 16 + 2, &w);   /* b's 4th hit (pass 2's first) a's 4th note */
+        CHECK(w.note[0] == 60);
+    }
+    {   /* across kinds: a kit's sounds on a melodic rhythm as the pentatonic ladder; notes onto a kit as sounds */
+        static tpat_t k;
+        step_t w;
+        pattern_init(&k);
+        kit_add(&k.st[0], 1);
+        kit_add(&k.st[4], 3);
+        k.st[0].vel = k.st[4].vel = 100;
+        weave_step(&a, WK_MEL, &k, WK_KIT, WV_RHYTHM, 4, &w);   /* a's 2nd hit: the kit's 2nd (sound 3): F3 */
+        CHECK(w.note[0] == 53 && w.vel == 90);
+        weave_step(&k, WK_KIT, &a, WK_MEL, WV_RHYTHM, 0, &w);   /* the kit's 1st hit: a's 1st note (60) as a sound */
+        CHECK(kit_mask(&w) == 1u << (60 % NDRUM) && w.note[2] == 0);
+        weave_step(&a, WK_MEL, &k, WK_FX, WV_STEPS, 1, &w);     /* a throw's step onto notes: nothing taken */
+        CHECK(step_empty(&w));
+    }
     pattern_init(&b);                              /* no notes to take: the rhythm stays as it was */
-    pattern_weave(&o, &a, &b, WV_RHYTHM);
+    pattern_woven(&o, &a, WK_MEL, &b, WK_MEL, WV_RHYTHM);
     CHECK(o.st[0].note[0] == 60 && o.st[4].note[0] == 60);
     printf("ok %s\n", cur);
 }
@@ -2142,6 +2191,7 @@ int main(void)
     t_cond();
     t_locks();
     t_kit11();
+    t_weave_live();
     t_scene();
     t_ghost();
     t_song();

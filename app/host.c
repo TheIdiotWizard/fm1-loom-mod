@@ -750,7 +750,10 @@ static int song_cmd(const char *cmd)
                 r = k;
         if (r < 0)
             host_die("weave T DST A B bars|steps|rhythm|notes", "");
-        pattern_weave(&out, a, b, r);
+        {
+            int tk = atoi(w[1]) - 1, kd = tk == AUX_PUNCH ? WK_FX : host_kit(tk) ? WK_KIT : WK_MEL;
+            pattern_woven(&out, a, kd, b, kd, r);
+        }
         *d = out;
     } else if (!strcmp(cmd, "chance")) {            /* chance T PAT S PCT|A:B */
         step_t *st = step_or_die(pat_or_die(w[1], w[2]), w[3]);

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* LOOM-8 pattern store: the plain-data helpers of pattern.h (main loop side; the sequencer only reads). */
+#include <string.h>
 #include "pattern.h"
 
 /* the value a component starts with (the notebook p. 139, 0-based): pulse 4, hold 4, multiply 2, velocity 64,
@@ -216,59 +217,98 @@ int kit_first(const step_t *st)
 }
 
 /* ----------------------------------------------------------------- weave --- */
-static const step_t *wrap_step(const tpat_t *p, int i) { return &p->st[p->len ? i % p->len : 0]; }
-
-/* the next step of p with notes, from *k on (wrapping); 0 = p has none */
-static const step_t *next_notes(const tpat_t *p, int *k)
+static int pat_n(const tpat_t *p) { return p->len < 1 ? 1 : p->len > NSTEP ? NSTEP : p->len; }
+static int onsets(const tpat_t *p, int upto)     /* the steps with notes before step upto */
 {
-    for (int n = 0; n < p->len; n++, (*k)++) {
-        const step_t *st = &p->st[*k % p->len];
-        if (!step_empty(st)) {
-            (*k)++;
-            return st;
-        }
-    }
+    int n = 0;
+    for (int i = 0; i < upto && i < NSTEP; i++)
+        n += !step_empty(&p->st[i]);
+    return n;
+}
+static const step_t *onset_at(const tpat_t *p, int k)   /* the k-th step with notes, cycled (0: none) */
+{
+    int len = pat_n(p), n = onsets(p, len);
+    if (!n)
+        return 0;
+    k %= n;
+    for (int i = 0; i < len; i++)
+        if (!step_empty(&p->st[i]) && k-- == 0)
+            return &p->st[i];
     return 0;
 }
-
-/* a's rhythm (which steps play, and how) with b's notes, in their order, cycled */
-static void weave_rhythm(tpat_t *out, const tpat_t *a, const tpat_t *b)
+/* notes from a step of kind fk onto a step of kind tk (WK_*): a kit's sounds as notes on a pentatonic ladder from C3
+ * (sound 1 C3, 2 Eb3, 3 F3 ...), notes as a kit's sounds (note mod 11); a throw's effects only onto a throw's step.
+ * 0: nothing to take (the step keeps its own) */
+static int notes_cross(const step_t *from, int fk, int tk, step_t *out)
 {
-    int k = 0;
-    out->len = a->len;
-    for (int i = 0; i < NSTEP; i++) {
-        const step_t *n;
-        out->st[i] = a->st[i];
-        if (i >= a->len || step_empty(&a->st[i]) || !(n = next_notes(b, &k)))
-            continue;
+    static const uint8_t LADDER[NDRUM] = {0, 3, 5, 7, 10, 12, 15, 17, 19, 22, 24};
+    if (fk == tk) {
         for (int j = 0; j < SN; j++)
-            out->st[i].note[j] = n->note[j];
+            out->note[j] = from->note[j];
+        return 1;
+    }
+    if (fk == WK_FX || tk == WK_FX)
+        return 0;
+    if (fk == WK_KIT) {                          /* sounds to notes: the first four */
+        int n = 0;
+        for (int j = 0; j < SN; j++)
+            out->note[j] = 0;
+        for (int k = 1; k <= NDRUM && n < SN; k++)
+            if (kit_has(from, k))
+                out->note[n++] = (uint8_t)(48 + LADDER[k - 1]);
+        return n > 0;
+    }
+    {                                            /* notes to sounds */
+        uint32_t m = 0;
+        for (int j = 0; j < SN; j++)
+            if (from->note[j])
+                m |= 1u << (from->note[j] % NDRUM);
+        kit_set(out, m);
+        return m != 0;
+    }
+}
+void weave_step(const tpat_t *a, int ak, const tpat_t *b, int bk, int rule, uint32_t pos, step_t *out)
+{
+    int la = pat_n(a), lb = pat_n(b), ia = (int)(pos % (uint32_t)la), ib = (int)(pos % (uint32_t)lb);
+    const step_t *n;
+    switch (rule) {
+    case WV_BARS:                     /* the bars in turn, counted from the start: A's, B's, A's ... */
+    case WV_STEPS:                    /* the steps in turn */
+        *out = a->st[ia];
+        if (rule == WV_BARS ? (pos / 16u) & 1u : pos & 1u) {
+            step_t keep = *out;
+            *out = b->st[ib];         /* B's step, its notes as A's kind (none to take: A's step stays) */
+            if (!step_empty(&b->st[ib]) && !notes_cross(&b->st[ib], bk, ak, out))
+                *out = keep;
+        }
+        break;
+    case WV_RHYTHM:                   /* A's step (its rhythm, velocity, tricks) with B's next notes */
+        *out = a->st[ia];
+        if (!step_empty(out) && (n = onset_at(b, (int)(pos / (uint32_t)la) * onsets(a, la) + onsets(a, ia))))
+            notes_cross(n, bk, ak, out);
+        break;
+    default:                          /* WV_NOTES: B's step (its rhythm) with A's next notes */
+        *out = b->st[ib];
+        if (step_empty(out))
+            break;
+        if (!(n = onset_at(a, (int)(pos / (uint32_t)lb) * onsets(b, lb) + onsets(b, ib))) || !notes_cross(n, ak, ak, out))
+            if (!notes_cross(&b->st[ib], bk, ak, out))
+                *out = a->st[ia];     /* (nothing either way: A's step) */
+        break;
     }
 }
 
-void pattern_weave(tpat_t *out, const tpat_t *a, const tpat_t *b, int mode)
+void pattern_woven(tpat_t *out, const tpat_t *a, int ak, const tpat_t *b, int bk, int rule)
 {
-    int len = a->len > b->len ? a->len : b->len;
-    *out = *a;                        /* scale, groove, quantise, note length: a's */
-    switch (mode) {
-    case WV_BARS:                     /* bars 1 and 3 from a, 2 and 4 from b; the shorter one loops */
-    case WV_STEPS:                    /* odd steps from a, even from b */
-        out->len = (uint8_t)len;
-        for (int i = 0; i < NSTEP; i++) {
-            int from_b = mode == WV_BARS ? (i / 16) & 1 : i & 1;
-            out->st[i] = i < len ? *wrap_step(from_b ? b : a, i) : a->st[i];
-        }
-        break;
-    case WV_RHYTHM:
-        weave_rhythm(out, a, b);
-        break;
-    default:                          /* WV_NOTES: b's rhythm with a's notes */
-        weave_rhythm(out, b, a);
-        out->scale = a->scale;
-        out->groove = a->groove;
-        out->quant = a->quant;
-        out->nlen = a->nlen;
-        out->shape = a->shape;
-        break;
+    int la = pat_n(a), lb = pat_n(b), len = la > lb ? la : lb;
+    if (rule == WV_BARS && len < 32)             /* (the bars in turn need two of them) */
+        len = len * 2 > NSTEP ? NSTEP : len * 2;
+    *out = *a;
+    out->len = (uint8_t)len;
+    for (int i = 0; i < NSTEP; i++) {
+        if (i < len)
+            weave_step(a, ak, b, bk, rule, (uint32_t)i, &out->st[i]);
+        else
+            memset(&out->st[i], 0, sizeof out->st[i]);
     }
 }

@@ -268,6 +268,20 @@ static void midi(const seq_sink_t *o, uint8_t st, uint8_t d1, uint8_t d2)
 
 static tpat_t *tpat(const seq_t *s, int t) { return &s->P->pat[t][s->ppat[t] < NPATT ? s->ppat[t] : 0]; }
 static int pat_len(const tpat_t *p) { return p->len < 1 ? 1 : p->len > NSTEP ? NSTEP : p->len; }
+static int step_kind(const seq_t *s, int t) { return t == AUX_PUNCH ? WK_FX : t < NTRK && s->par[t][TP_ENGINE] == EG_DRUMLINE ? WK_KIT : WK_MEL; }
+/* the step the track plays at p: its own, or (weaving) its pattern crossed with the one it weaves with */
+static const step_t *weave_at(seq_t *s, int t, const tpat_t *tp, int p)
+{
+    seq_trk_t *tr = &s->t[t];
+    int f = s->wv_from[t] - 1, wp = s->wv_pat[t] % NPATT;
+    tr->wv_on = 0;
+    if (!((s->wv_live | s->wv_rec) >> t & 1u) || f < 0 || f >= NSEQT || (f == t && wp == s->ppat[t]))
+        return &tp->st[p];
+    tr->wv_on = 1;
+    weave_step(tp, step_kind(s, t), &s->P->pat[f][wp], step_kind(s, f), s->wv_rule[t] % NWV,
+               (uint32_t)tr->pass * (uint32_t)pat_len(tp) + (uint32_t)p, &tr->wv_st);
+    return &tr->wv_st;
+}
 static int is_drum(const seq_t *s, int t) { return t < NTRK && s->par[t][TP_ENGINE] == EG_DRUMLINE; }
 static int is_slice(const seq_t *s, int t) { return t < NTRK && s->par[t][TP_ENGINE] == EG_SLICE; }
 /* a percussive track for the throws: the kit, or a slice track (a break's parts). A slice track plays notes (a
@@ -1219,7 +1233,7 @@ static void fire_step(seq_t *s, int t, const seq_sink_t *o)
             cl->note[j] = 0;
     }
     s->rec_written[t][p >> 5] &= ~(1u << (p & 31));
-    st = &tp->st[p];
+    st = weave_at(s, t, tp, p);
     tr->pos = (uint8_t)p;
     tr->grid_h = (uint8_t)ts_halves(tp);
     tr->grid_len = (uint8_t)pat_len(tp);
@@ -1315,7 +1329,7 @@ static void fire_step(seq_t *s, int t, const seq_sink_t *o)
 static void fire_sub(seq_t *s, int t, const seq_sink_t *o)
 {
     seq_trk_t *tr = &s->t[t];
-    const step_t *st = &tpat(s, t)->st[tr->pos];
+    const step_t *st = tr->wv_on ? &tr->wv_st : &tpat(s, t)->st[tr->pos];
     uint32_t carry = tr->sub_to_next < SEQ_DUE ? tr->sub_to_next : 0;
     tr->ratchet++;
     if (t < NTRK && tr->act[SC_MULTIPLY])

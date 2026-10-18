@@ -1792,7 +1792,7 @@ static void act_rotate(int d)
         }
     mark_dirty();
 }
-/* the pattern woven with the copied one (pattern_weave): bars or steps in turn, or one's rhythm with the
+/* the pattern woven with the copied one (pattern_woven): bars or steps in turn, or one's rhythm with the
  * other's notes; HOME + REC undoes it */
 static void act_weave(void)
 {
@@ -1800,7 +1800,10 @@ static void act_weave(void)
     static const char *const SAID[NWV] = {"bars in turn", "steps in turn", "copied notes", "copied rhythm"};
     int m = ui.pick_weave % NWV;
     undo_keep();
-    pattern_weave(&out, tpat(sel_trk()), &clip, m);
+    {
+        int k = sel_trk() == AUX_PUNCH ? WK_FX : is_drum(sel_trk()) ? WK_KIT : WK_MEL;
+        pattern_woven(&out, tpat(sel_trk()), k, &clip, k, m);
+    }
     *tpat(sel_trk()) = out;
     if (ui.bar * 16 >= out.len)
         ui.bar = 0;

@@ -157,6 +157,8 @@ typedef struct {                      /* one track's runtime (interrupt only) */
     uint32_t sub_to_next;             /* ratchets: samples to the next hit, Q8 (NEVER none) */
     uint32_t age;                     /* samples since the step fired, Q8 (live record quantise) */
     int32_t off_q8;                   /* the current step's timing offset (groove, nudge), Q8 */
+    step_t wv_st;                     /* the woven step playing (weave_step), while the track weaves */
+    uint8_t wv_on;                    /* 1: the step playing is wv_st (its ratchets repeat it) */
 } seq_trk_t;
 
 typedef struct {
@@ -251,6 +253,11 @@ typedef struct {
     volatile uint8_t rec_target;      /* the track the keys record into (the UI's) */
     uint32_t rec_written[NSEQT][2];   /* steps written since the playhead last passed them */
     uint32_t rec_age[8];
+    /* the weave (pattern.h weave_step): a track weaving plays its pattern crossed with wv_from's pattern wv_pat by
+     * wv_rule; it weaves while its bit is in wv_live (the WEAVE page's keys, held or latched) or wv_rec (the WEAVE
+     * track's steps playing). wv_from 0 = no weave set up, else the track + 1. Set by the UI, read here */
+    volatile uint8_t wv_from[NSEQT], wv_pat[NSEQT], wv_rule[NSEQT];
+    volatile uint16_t wv_live, wv_rec;
 } seq_t;
 
 void seq_init(seq_t *s, patterns_t *P, uint8_t (*par)[NTP_ALL]);
