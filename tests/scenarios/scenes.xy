@@ -34,6 +34,23 @@ shot scene_cue.png
 wait 2500
 expect scene 1
 tap PLAY
+# holding a scene's key asks CLEAR SCENE?; another scene's key, or that key again, is no
+key w1 down
+wait 1100
+expect ask 1
+tapkey w0
+key w1 up
+wait 40
+expect ask 0
+expect scene 2
+key w1 down
+wait 1100
+expect ask 1
+key w1 up
+tapkey w1
+wait 40
+expect ask 0
+expect scene 2
 turn SELECT 1
 expect page Song
 tapkey w0

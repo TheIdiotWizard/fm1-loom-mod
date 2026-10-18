@@ -20,7 +20,7 @@
  *                                upload would leave it (empty at boot)
  *   upload FILE                  an upload's SysEx frames (tools/loom_samples.py syx), each through samples.c as from
  *                                USB; a frame not answered, or answered with an error, fails the run
- *   expect WHAT VALUE            besides fm1-base's: playing, scene, voices, guard, cores, dirty, mem (the last save's
+ *   expect WHAT VALUE            besides fm1-base's: playing, scene, voices, guard, cores, dirty, ask, mem (the last save's
  *                                share of a project slot, %), model_avg /
  *                                model_peak (the last meter's, %), tempo, trk, user / userbytes / rateN (the user bank's
  *                                samples, its data's bytes, user N's rate), punch_drum / punch_mel (the masks in effect,
@@ -170,6 +170,8 @@ int app_expect(const char *what, int *got)
         *got = engine_core2_state();
     else if (!strcmp(what, "dirty"))
         *got = ui_dirty();
+    else if (!strcmp(what, "ask"))
+        *got = ui_asking();
     else if (!strcmp(what, "mem"))                  /* the last save's share of a project slot, % */
         *got = project_mem_pct();
     else if (!strcmp(what, "tempo"))

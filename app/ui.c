@@ -79,6 +79,7 @@ static void mark_dirty(void)
     ui.act_t = plat_ms();
 }
 int ui_dirty(void) { return ui.dirty; }
+int ui_asking(void) { return ui.ask; }
 
 static uint8_t accel_off;
 #ifdef PLAT_HOST
@@ -925,13 +926,18 @@ static void keyboard_down(int k)
             step_rec_key(note);
     }
 }
+static void ask_end(int yes);
+static void act_clear_scene(void);
 static void key_down(int k)
 {
     int trk = sel_trk(), w = ordinal(WHITE_K, 16, k), b = ordinal(BLACK_K, 11, k), p = ui.page;
     ui.kmode[k] = KM_NONE;
     ui.key_t[k] = plat_ms();
-    if (ui.ask)
+    if (ui.ask) {
+        if (ui.ask_yes == act_clear_scene && w >= 0)   /* CLEAR SCENE?: a scene's key (that one again too) is no */
+            ask_end(0);
         return;
+    }
     if (ui.btn >> B_SAVE & 1u) {
         ui.kmode[k] = KM_SAVE;
         ui.knote[k] = (uint8_t)(w < 0 ? 255 : w);
@@ -1156,7 +1162,6 @@ static void key_up(int k)
 /* --------------------------------------------------------- buttons --- */
 static void list_open(void);
 static void list_sel(void);
-static void ask_end(int yes);
 static int save_project(int slot);
 static void save_user_preset(int slot);
 static void page_button(int b)
@@ -1255,7 +1260,6 @@ static void button_up(int b)
 }
 #define CARD_MS 900u
 #define KEY_LONG_MS 900u
-static void act_clear_scene(void);
 static void holds(void)
 {
     uint32_t now = plat_ms();
