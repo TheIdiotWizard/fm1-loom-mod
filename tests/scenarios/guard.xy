@@ -1,0 +1,102 @@
+# the overload guard's first step, brocade's saws (engine.c thin_load), on synthetic loads ("load N": every block
+# costs N % as the guard sees it): a block's spike does not thin; a sustained average over 76 %, or four blocks in
+# a row over 86 %, does, a pair of saws at a time; they come back a pair each half second once the average is
+# under 68 %; with no brocade voice sounding nothing thins and Status shows no saws
+wait 300
+load 40
+preset 3 gold_thread brocade
+knob 3 vmode poly
+play 3 G3 on
+play 3 B3 on
+play 3 D4 on
+play 3 F4 on
+wait 500
+expect voices 4
+expect saws 9
+# brocade and a kit as the FM-1 runs them: 64 % with a block of 82-91 % now and then (note-ons, hits)
+load 64
+wait 500
+load 91
+wait 6
+load 64
+wait 100
+load 90
+wait 12
+load 64
+wait 100
+load 82
+wait 6
+load 64
+wait 50
+load 91
+wait 6
+load 64
+wait 1000
+expect saws 9
+expect guard 16
+# a sustained overload: 82 % on average thins to three saws before the voice guard (85 %) drops voices
+load 82
+wait 400
+expect saws 3
+expect guard 16
+# recovery: under 68 % for half a second a pair at a time
+load 64
+wait 300
+expect saws 3
+wait 400
+expect saws 5
+wait 500
+expect saws 7
+wait 500
+expect saws 9
+# in between (70 %, after a thinning): the saws stay
+load 82
+wait 400
+expect saws 3
+load 72
+wait 1500
+expect saws 3
+load 60
+wait 2500
+expect saws 9
+# a load rising too fast for the average: four blocks in a row over 86 % thin a pair (the average still under 76)
+load 89
+wait 30
+expect saws 7
+load 60
+wait 2000
+expect saws 9
+# Status says the saws while they are thinned
+load 82
+wait 400
+tap GLO
+turn SELECT 5
+wait 100
+listen
+where
+said saws 3
+# no brocade sounding: the cap lifts, nothing on Status
+play 3 G3 off
+play 3 B3 off
+play 3 D4 off
+play 3 F4 off
+wait 4000
+expect voices 0
+expect saws 9
+where
+unsaid saws
+# kit and weft at a sustained 82 %: no brocade, nothing thins
+preset 3 none weft
+knob 3 vmode poly
+play 3 G3 on
+play 3 B3 on
+play 3 D4 on
+wait 1000
+expect saws 9
+where
+unsaid saws
+play 3 G3 off
+play 3 B3 off
+play 3 D4 off
+load 0
+wait 500

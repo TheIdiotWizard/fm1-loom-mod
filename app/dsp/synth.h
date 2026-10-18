@@ -215,6 +215,7 @@ void synth_limit(synth_t *s, int max_voices);                  /* the overload g
  * the pool (five at seven or eight saws, four at nine: synth.c br_cap). The guard's first step: its saws at most (1..9;
  * the outer ones fade out over 12 ms each, the rest made up to the same power) */
 void synth_saws(synth_t *s, int max_saws);
+int synth_brocade_voices(const synth_t *s);                    /* brocade's voices sounding (the guard thins only them) */
 /* what voice vi costs to render, in rough units for the cores' split (engine.c split_at): 0 silent, 4 an
  * ordinary voice, brocade (7 + its saws sounding) / 2: 8 at nine saws; the Braids engines by their model (braids.h:
  * 2 .. 5, cane's bell the most) */

@@ -651,6 +651,16 @@ void fx_process(fxslot_t *f, const float *in, float *out_l, float *out_r, uint32
     }
 }
 
+int fx_awake(const fxslot_t *f)
+{
+    switch (f->type) {
+    case FXT_DELAY: return f->dquiet < FX_DLY_LEN;
+    case FXT_REVERB: return f->mode == RV_PLATE ? f->rquiet < FX_RV_LEN : f->spu.clear > 0 || f->spu.quiet < FX_RV_LEN * 2;
+    case FXT_CHORUS: case FXT_LOFI: case FXT_PHASER: return 1;
+    default: return 0;
+    }
+}
+
 /* ================================================================ master === */
 /* the master's knob names, short enough for the knob strip: percussion, melodic, compressor
  * and master level are perc, mel, comp, level */

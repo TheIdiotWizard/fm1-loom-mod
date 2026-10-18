@@ -5,6 +5,7 @@
  * shows them; "expect step" reports the playhead 0-based (eng_step).
  *   param T P V                  parameter P (synth.h TP_*) of track T set to V, as a knob would
  *   load N                       every block costs N % (the overload guard's input); -1 = measured
+ *   meter MS                     run MS ms; print the modelled load's mean and peak (the model: load_model below)
  *   steps T PAT                  print track T's pattern PAT: each step's notes, component, condition
  *   step T PAT S NOTE VEL        write one note on step S (NOTE 0 clears the step)
  *   chord T PAT S LEN N1 N2 [N3 [N4]]  notes together on step S, LEN quarter steps long
@@ -16,11 +17,14 @@
  *   samples FILE                 the user sample bank from FILE (an image from tools/loom_samples.py build), as an
  *                                upload would leave it (empty at boot)
  *   expect WHAT VALUE            besides fm1-base's: playing, scene, voices, guard, cores, dirty, mem (the last save's
- *                                share of a project slot, %), tempo, trk, punch_drum / punch_mel (the masks in effect,
+ *                                share of a project slot, %), saws (the guard's cap on brocade's saws), model_avg /
+ *                                model_peak (the last meter's, %), tempo, trk, punch_drum / punch_mel (the masks in effect,
  *                                PX_* bits), parT.P; and with more words: step T VALUE, page NAME, comp T S VALUE (prints
  *                                both components; checks the first), note T PAT S VALUE
  * LOOM_THEME=N: the screenshots in theme N (ui.c). The layout audit (gfx_loom.c): its findings fail the run. */
 #include <time.h>
+
+static float meter_avg, meter_peak, host_load;      /* the last "meter", the model's load now (below) */
 
 /* ---- LOOM-8's platform extras (app.h), simulated */
 static uint32_t cpu_peak;
@@ -140,6 +144,12 @@ int app_expect(const char *what, int *got)
         *got = eng_voices;
     else if (!strcmp(what, "guard"))
         *got = eng_voices_max;
+    else if (!strcmp(what, "saws"))                 /* the guard's cap on brocade's saws (9: none) */
+        *got = eng_saws_max;
+    else if (!strcmp(what, "model_avg"))            /* the last "meter": the model's mean and peak load, % */
+        *got = (int)(meter_avg + 0.5f);
+    else if (!strcmp(what, "model_peak"))
+        *got = (int)(meter_peak + 0.5f);
     else if (!strcmp(what, "cores"))
         *got = engine_core2_state();
     else if (!strcmp(what, "dirty"))
@@ -374,46 +384,91 @@ static step_t *step_or_die(tpat_t *tp, const char *s)
     return &tp->st[k];
 }
 
-/* the peaks, every simulated millisecond: the voices, and the load the FM-1's Status page would show by a model
- * of its measurements (the user's: idle ~13 %, a synth voice ~3.5 %, a kit playing ~+27 % over idle, the master
- * tape ~+12 %). A voice counts by its cost (synth_voice_cost, 4 an ordinary one: brocade's by its saws, up to
- * twice, cane's bell 5). The second core renders voices [0, k) (engine.c split_at), the first the rest, the
- * kits, the FX, the tape and the mix, then waits for the second: the load is the longer of the two */
+/* the peaks, every simulated millisecond: the voices, and the load the FM-1's Status page would show, by a model
+ * fitted to its measurements (tools/measure_load.sh, two cores; tests/scenarios/loadmodel.xy checks the fit). A
+ * block is a serial part on the first core (the sequencer, the mix, the master: idle 12.5 %; the master tape, on
+ * when a knob is: 9.5 % at colour alone, up to 3.5 more by drive, wobble and noise; the FX tracks, once either is
+ * awake: 15 %, as a send hears anything or a line still rings, fx_awake) and a parallel part: the second core renders
+ * voices [0, k) (engine.c split_at), the first the rest and the drum tracks, and waits for the second. The parallel
+ * part costs by split_at's units (synth_voice_cost: an ordinary voice 4 = 6.5 % of a core, brocade by its saws up
+ * to 8, cane's bell 5; a drum voice 2, a drum track sounding 1). A drum hit costs 7 % more on the first core for the
+ * block it starts in (its sound's setup, before the render: the kit's peaks, ~+20 % for a kick, snare and hat
+ * together, whatever else plays). With one core both halves are on the first. */
 static uint32_t st_ms, st_syn, st_drum, st_guard0, st_hi_ms;
 static float st_load, st_load_sum;
-#define LOAD_IDLE 13.0f
-#define LOAD_VOICE 3.5f
-#define LOAD_KIT 27.0f
-#define LOAD_TAPE 12.0f
+#define LOAD_IDLE 12.5f
+#define LOAD_UNIT (6.5f / 4.0f)                            /* a cost unit, % of a core: an ordinary voice is 4 */
+#define LOAD_FX 15.0f
+#define LOAD_TAPE 9.5f
+#define LOAD_TAPE_MORE 3.5f
+#define LOAD_DRUM_VOICE 2
+#define LOAD_DRUM_TRACK 1
+#define LOAD_HIT 4.75f
+#define LOAD_HIT_MS 6                                      /* a block, 5.8 ms */
 static float load_model(int *nsyn, int *ndrum)
 {
-    int k = (int)split_at(), v0 = 0, v1 = 0, n = 0, t, kits = 0;
-    float c0, c1;
+    static uint32_t hits0;
+    static float hit_pct;
+    static int hit_ms;
+    int k = (int)split_at(), v0 = 0, v1 = 0, n = 0, t;
+    float serial = LOAD_IDLE, c0, c1;
+    const uint8_t *ms = proj.master;
     *ndrum = 0;
     for (int i = 0; i < NVOICE; i++)
         if (synth_sounding(SY, i, i + 1)) {
             *(i < k ? &v1 : &v0) += synth_voice_cost(SY, i);
             n++;
         }
-    for (t = 0; t < NTRK; t++)
-        if (eng_drum[t] && dl_slot[t] != 0xFFu && drumline_sounding(DL(t))) {
-            kits++;
-            *ndrum += drumline_voices(DL(t));
+    for (t = 0; t < NTRK; t++) {
+        int nv = eng_drum[t] && dl_slot[t] != 0xFFu ? drumline_voices(DL(t)) : 0;
+        if (nv) {
+            v0 += LOAD_DRUM_TRACK + LOAD_DRUM_VOICE * nv;
+            *ndrum += nv;
         }
+    }
+    if (host_drum_hits != hits0) {                  /* hits since the last millisecond: in this block's cost */
+        hit_pct = (hit_ms > 0 ? hit_pct : 0.0f) + LOAD_HIT * (float)(host_drum_hits - hits0);
+        hit_ms = LOAD_HIT_MS;
+        hits0 = host_drum_hits;
+    }
+    if (hit_ms > 0) {
+        serial += hit_pct;
+        hit_ms--;
+    }
     *nsyn = n;
-    c0 = LOAD_IDLE + LOAD_VOICE * 0.25f * (float)v0 + LOAD_KIT * (float)kits;
-    if (proj.master[MS_TP_DRIVE] || proj.master[MS_TP_COLOR] || proj.master[MS_TP_WOBBLE] || proj.master[MS_TP_NOISE])
-        c0 += LOAD_TAPE;
-    c1 = LOAD_VOICE * 0.25f * (float)v1 + 2.0f;            /* (its own buffers, zeroed and summed) */
-    return c0 > c1 ? c0 : c1;
+    if (ms[MS_TP_DRIVE] || ms[MS_TP_COLOR] || ms[MS_TP_WOBBLE] || ms[MS_TP_NOISE]) {
+        float more = (float)(ms[MS_TP_DRIVE] + ms[MS_TP_WOBBLE] + ms[MS_TP_NOISE]) * (1.0f / 192.0f);
+        serial += LOAD_TAPE + LOAD_TAPE_MORE * (more > 1.0f ? 1.0f : more);
+    }
+    if (fx_awake(FXS(0)) || fx_awake(FXS(1)))
+        serial += LOAD_FX;
+    c0 = LOAD_UNIT * (float)v0;
+    c1 = LOAD_UNIT * (float)v1;
+    return serial + (engine_core2_state() == 1 ? (c0 > c1 ? c0 : c1) : c0 + c1);
+}
+/* the model's load over MS milliseconds of the device, its mean and peak (the "meter" command; expect model_avg,
+ * model_peak) */
+static void meter_run(uint32_t ms)
+{
+    double sum = 0.0;
+    meter_peak = 0.0f;
+    for (uint32_t i = 0; i < ms; i++) {
+        float l;
+        run_ms(1);
+        l = host_load;
+        sum += l;
+        if (l > meter_peak)
+            meter_peak = l;
+    }
+    meter_avg = ms ? (float)(sum / ms) : 0.0f;
+    printf("meter: %u ms, model load mean %.1f %%, peak %.1f %%, voices %d\n", ms, meter_avg, meter_peak, eng_voices);
 }
 void app_host_ms(void)
 {
     int ns, nd;
-    float l;
+    float l = host_load = load_model(&ns, &nd);      /* (every millisecond: the model keeps its hits' time) */
     if (!seq.playing)
         return;
-    l = load_model(&ns, &nd);
     st_ms++;
     st_load_sum += l;
     if (l > st_load)
@@ -704,7 +759,9 @@ int app_host_cmd(const char *cmd, const char *a, const char *b, const char *c, c
         }
         printf("samples: %s, %d B, %d user samples\n", a, (int)nb, smp_user_scan());
         run_ms(1);
-    } else if (!strcmp(cmd, "load"))
+    } else if (!strcmp(cmd, "meter"))               /* meter MS: the model's load over MS ms */
+        meter_run((uint32_t)atoi(a));
+    else if (!strcmp(cmd, "load"))
         load_force = atoi(a);
     else if (!strcmp(cmd, "steps"))
         steps_print(atoi(a), atoi(b));
