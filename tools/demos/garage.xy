@@ -1,7 +1,7 @@
 # LOOM-8 demo: UK garage (2-step), 132 BPM swung, C minor. (tools/demos/render.sh renders it; its bank is
 # build/demos/garage.bin: a sung bar made by tools/demos/make_banks.py and the sesame break, private.)
 #   T1 kit: the 2-step (the kick on 1 and the "and" of 3, clap and snare on 2 and 4, shuffled hats and shaker)
-#   T2 organ "pedal bass" as the M1's organ bass: a quick decay, glides by the portamento trick
+#   T2 weft "denim bass": the bouncing bass, glides by the portamento trick
 #   T3 organ "reed combo": the stabs     T4 slice: the sung bar in 16, re-cut and pitch-locked (the chops)
 #   T5 slice: the sesame break, high-passed, as a top loop   T6 voile "voile choir": the pad, sung
 #   T7 voile "doo wop": a vocal answer at the end of each bar in the hooks and the breakdown
@@ -14,7 +14,7 @@ bpm 132
 groove swing
 
 # ---- the sounds (UK garage: crisp and skippy. The kit short and bright, shuffled hats and shaker up front, a
-# percussive organ bass after the M1's (sine organ, a fast decay), the organ stabs short, the voice chopped and
+# bouncing weft bass, the organ stabs short, the voice chopped and
 # pitched up through a moving filter and a dotted echo; a medium room; the master clean, no tape)
 # T1 the kit: a short punchy kick, a snare pitched up and cut short, a tight clap, hats between closed and open
 knob 1 d1.k1 86
@@ -45,19 +45,11 @@ knob 1 res 46
 knob 1 fenv 24
 knob 1 level 84
 knob 1 send2 12
-# T2 organ "pedal bass" as the M1's organ bass: the transistor stop, a quick decay to a low sustain, glides
-preset 2 pedal_bass organ
+# T2 weft "denim bass": the bouncing bass, glides by the portamento trick (as the earlier mix had it: the user's pick)
+preset 2 denim_bass weft
 knob 2 brain no
 knob 2 porta 30
-knob 2 d 70
-knob 2 s 56
-knob 2 r 30
-knob 2 cut 78
-knob 2 ctype drive
-knob 2 camt 64
-knob 2 ctone 90
-knob 2 cmix 127
-knob 2 level 120
+knob 2 level 105
 # T3 organ "reed combo": the stabs, short
 preset 3 reed_combo organ
 knob 3 brain no
@@ -118,9 +110,9 @@ knob 12 e3 72
 # the master: no tape, a little air, the compressor light
 mst blend 127
 mst hi 74
-mst lo 70
+mst lo 64
 mst comp 56
-mst level 112
+mst level 106
 
 # ---- T1 the kit: kick 1, snare 2, hat 3, open 4, clap 5, conga 8, shaker 9, fm 11
 pat 1 1 16 1 50 50
