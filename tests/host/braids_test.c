@@ -90,7 +90,7 @@ static void reset(int eng, int model, int e2, int e3, int e4)
         par[t][TP_LTYPE] = LT_OFF;
         par[t][TP_CTYPE] = CT_OFF;
         par[t][TP_VOLUME] = 127;
-        par[t][TP_LEVEL] = 127;
+        par[t][TP_LEVEL] = 108;          /* unity: tp_level_gain(108) x 100/127 = 0.99 */
         par[t][TP_PAN] = 64;
     }
     synth_init(S, par);

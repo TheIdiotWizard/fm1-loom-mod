@@ -40,18 +40,18 @@ knob 1 ftype dynamic
 knob 1 cut 8
 knob 1 res 66
 knob 1 fenv 24
-knob 1 level 90
+knob 1 level 93
 knob 1 send2 10
 # T2 stack "ply bass": round, a little brighter than its preset, mono in the middle
 preset 2 ply_bass stack
 knob 2 brain no
 knob 2 cut 76
-knob 2 level 110
+knob 2 level 103
 # T3 tines "felt piano": the chords, opened up
 preset 3 felt_piano tines
 knob 3 brain no
 knob 3 cut 104
-knob 3 level 64
+knob 3 level 86
 knob 3 send1 10
 knob 3 send2 24
 # T4 the hook in 16 slices: up front, into a short plate
@@ -66,7 +66,7 @@ knob 4 camt 76
 knob 4 ctone 100
 knob 4 cmix 127
 knob 4 brain no
-knob 4 level 106
+knob 4 level 102
 knob 4 send1 20
 knob 4 send2 26
 # T5 the "oh" (user 2, its root C5) as a vocal-chop lead: short, pitched, a little drive for presence
@@ -85,7 +85,7 @@ knob 5 camt 34
 knob 5 ctone 120
 knob 5 cmix 127
 knob 5 brain no
-knob 5 level 124
+knob 5 level 107
 knob 5 send1 30
 knob 5 send2 24
 # T6 wavetable "lace keys" through the arp: the plucks
@@ -98,7 +98,7 @@ knob 6 p3 2
 knob 6 p4 1
 knob 6 ap4 narrow
 knob 6 cut 110
-knob 6 level 64
+knob 6 level 86
 knob 6 send1 34
 knob 6 send2 16
 # T7 brocade "damask": the chorus's supersaw bed, opened up, pumped
@@ -110,12 +110,12 @@ knob 7 brain no
 knob 7 ltype pump
 knob 7 lspeed track_1
 knob 7 lamt 80
-knob 7 level 60
+knob 7 level 84
 knob 7 send2 30
 # T8 voile "doo wop": the drop's riff with the chop lead
 preset 8 doo_wop voile
 knob 8 brain no
-knob 8 level 47
+knob 8 level 78
 knob 8 send1 30
 knob 8 send2 26
 # FX I a quarter-note echo, bright, few repeats; FX II a short bright plate

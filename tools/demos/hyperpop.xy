@@ -50,7 +50,7 @@ knob 1 ftype dynamic
 knob 1 cut 10
 knob 1 res 80
 knob 1 fenv 76
-knob 1 level 92
+knob 1 level 95
 knob 1 send2 8
 # T2 the 808 (user 2, its root C2): mono, gliding, driven bright enough to read on a small speaker
 knob 2 engine sample
@@ -69,7 +69,7 @@ knob 2 camt 96
 knob 2 ctone 116
 knob 2 cmix 127
 knob 2 brain no
-knob 2 level 90
+knob 2 level 97
 # T3 brocade "sequin": seven saws spread wide, played high, through its own drive, pumped by the kick
 preset 3 sequin brocade
 knob 3 e2 70
@@ -82,7 +82,7 @@ knob 3 ltype pump
 knob 3 lspeed track_1
 knob 3 lamt 100
 knob 3 brain no
-knob 3 level 56
+knob 3 level 82
 knob 3 send1 20
 knob 3 send2 22
 # T4 the voice in 16 slices, mono: bitcrushed (bits more than rate: bright grit), into the delay
@@ -97,7 +97,7 @@ knob 4 camt 46
 knob 4 ctone 96
 knob 4 cmix 80
 knob 4 brain no
-knob 4 level 86
+knob 4 level 95
 knob 4 send1 34
 knob 4 send2 22
 # T5 gingham "picnic", the circuit-bent toy, through the arp
@@ -110,12 +110,12 @@ knob 5 p3 2
 knob 5 p4 1
 knob 5 ap1 short
 knob 5 ap4 wide
-knob 5 level 92
+knob 5 level 97
 knob 5 send1 40
 # T6 orbit "chime": sparkles
 preset 6 chime orbit
 knob 6 brain no
-knob 6 level 60
+knob 6 level 84
 knob 6 send1 50
 knob 6 send2 40
 # T7 voile "sheer lead": the sung topline, bright
@@ -124,7 +124,7 @@ knob 7 brain no
 knob 7 e2 95
 knob 7 e3 115
 knob 7 cut 120
-knob 7 level 70
+knob 7 level 89
 knob 7 send1 36
 knob 7 send2 26
 # FX I a bright eighth-note ping-pong; FX II a small bright plate (short, open on top)

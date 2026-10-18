@@ -1944,7 +1944,7 @@ void synth_prepare(synth_t *s, uint32_t n)
         }
         pk = tpk[i];                             /* the meter: the loudest voice of the track (gathered above) */
         {
-            uint32_t q = (uint32_t)(fm_minf(pk, 1.0f) * 32767.0f), old = synth_peak[i];
+            uint32_t q = (uint32_t)(fm_minf(pk, 2.0f) * 16383.5f), old = synth_peak[i];
             old = old - (old >> 4);              /* the fall: about 1/16 a block */
             synth_peak[i] = (uint16_t)(q > old ? q : old);
         }
@@ -2239,7 +2239,7 @@ static void voice_chunk(synth_t *s, voice_t *v)
 #endif
     /* gains */
     vol = pf(s, trk, TP_VOLUME, dest, off) * (1.0f / 127.0f);
-    lev = (float)P(s, trk, TP_LEVEL) * (1.0f / 127.0f);
+    lev = tp_level_gain(P(s, trk, TP_LEVEL)) * (100.0f / 127.0f);
     vg = (0.25f + 0.75f * v->vel * v->vel) * vol * vol * lev * lg * (1.0f - 0.6f * res);
     pan = fm_clampf((pf(s, trk, TP_PAN, dest, off) - 64.0f + (float)t->perf.pan) * (1.0f / 64.0f), -1.0f, 1.0f);
     if (pan != v->pan_in || v->fresh) {          /* the pan's cos / sin: only when it moved */
@@ -2689,7 +2689,7 @@ static const tp_info_t FIXED[NTP_SOUND + 13] = {
     {"pattern", 0, 5, 0, PK_NAMES, ARPPAT_N},           {"range", 1, 4, 1, PK_NUM, 0},
     {"hold", 0, 1, 0, PK_SWITCH, 0},                    {"length", 0, 2, 1, PK_NAMES, ARPLEN_N},
     {"style", 0, 5, 0, PK_NAMES, ARPSTY_N},             {"glide", 0, 2, 0, PK_NAMES, ARPGLD_N},
-    {"stereo", 0, 2, 0, PK_NAMES, ARPSTE_N},            {"level", 0, 127, 100, PK_PCT, 0},
+    {"stereo", 0, 2, 0, PK_NAMES, ARPSTE_N},            {"level", 0, 127, 100, PK_FADER, 0},
     {"pan", 0, 127, 64, PK_BIP, 0},                     {"follow", 0, 2, 1, PK_NAMES, BRAIN_N},
     {"channel", 0, 16, 0, PK_NUM, 0}};
 /* a drumline key's values (synth.h DP_*); its model's knobs take their names and defaults from drumline.c
@@ -2992,6 +2992,26 @@ static void tp_text_i(const tp_info_t *i, int p, int v, int engine, char *num, c
         if (d > 0)
             *num++ = '+';
         put_i(num, d);
+        put_s(unit, "dB");
+        break;
+    }
+    case PK_FADER: {                             /* tp_level_gain in dB: 60 log10(v / 100), tenths below 10 */
+        int d;
+        if (v <= 0) {
+            put_s(num, "off");
+            break;
+        }
+        d = (int)(fm_log2f((float)v * 0.01f) * 180.617997f + (v >= 100 ? 0.5f : -0.5f));   /* tenths */
+        if (d > 0)
+            *num++ = '+';
+        else if (d < 0)
+            *num++ = '-';
+        d = d < 0 ? -d : d;
+        num = put_i(num, d >= 100 ? (d + 5) / 10 : d / 10);
+        if (d < 100 && d % 10) {
+            *num++ = '.';
+            put_i(num, d % 10);
+        }
         put_s(unit, "dB");
         break;
     }

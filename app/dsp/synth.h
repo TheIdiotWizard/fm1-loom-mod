@@ -135,7 +135,8 @@ enum { PK_NUM, PK_PCT, PK_BIP, PK_NAMES, PK_SEMI, PK_SWITCH, PK_MS, PK_HZ_SYNC, 
        PK_BIPST,                                   /* semitones about 64: "+3 st" */
        PK_DMS,                                     /* a drum key's time: 0 = 0 ms, else as PK_MS */
        PK_DECAY,                                   /* the same, 127 = "off" */
-       PK_LAGMS };                                 /* 0..127 = 0..60 ms */
+       PK_LAGMS,                                   /* 0..127 = 0..60 ms */
+       PK_FADER };                                 /* a track's level: dB by tp_level_gain, 0 = "off" */
 typedef struct {
     const char *name;                 /* short, as on the knob row (<= 8 chars) */
     uint8_t lo, hi, def;
@@ -154,6 +155,14 @@ void sound_default(uint8_t *par, int engine);       /* par[NTP] for a fresh trac
  * quantised; ring: two cycles of a sine (u 0..1) ring-modulated (its peak at 1); tilt: the response in dB / 6 from 50 Hz
  * (u = 0) to 20 kHz (u = 1). The mix is in it. */
 float char_picture(const uint8_t *par, float u);
+/* a track's level (TP_LEVEL) as a gain: a fader's law, cubic (60 dB over 0..100: half way -18 dB), 100 = 0 dB,
+ * 127 = +6.2 dB, 0 = off. The drums and the FX returns take it as is; the synth's voices with 100/127 under it
+ * (their headroom: synth.c) */
+static inline float tp_level_gain(int v)
+{
+    float x = (float)v * 0.01f;
+    return x * x * x;
+}
 static inline int tp_bend_semi(int v) { return v >= 8 ? 12 : v; }   /* TP_BEND as semitones */
 
 /* factory presets: the sound part of par[], and its role (what it is for: the PRESETS message says it, "PAD 3/16",
@@ -223,7 +232,7 @@ int synth_brocade_voices(const synth_t *s);                    /* brocade's voic
  * ordinary voice (weft, stack and organ 5), brocade 4 + its saws; the Braids engines by their model (braids.h:
  * 3 .. 8, cane's bell the most) */
 int synth_voice_cost(const synth_t *s, int vi);
-extern volatile uint16_t synth_peak[NTRK];                     /* per track meters, Q15, decaying (UI) */
+extern volatile uint16_t synth_peak[NTRK];                     /* per track meters, Q14, decaying (UI) */
 /* the profiler (samples.c SB_PROF, tools/perf_read.py): the time each voice took, by its engine, in synth_clock's
  * units (engine.c sets it: plat_cycles; none, no timing), running totals (wrapping) for each half of the pool: [0] the
  * first core's voices, [1] the second core's; [.][NENGINE] every voice's control-rate work (voice_chunk) */

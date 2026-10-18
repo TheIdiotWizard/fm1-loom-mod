@@ -327,16 +327,21 @@ static glide_t trk_glide[NTRK][GL_N];             /* the drum tracks' level and 
 static glide_t ret_glide[2][2];                   /* the FX returns */
 
 static float trk_peak[NALLTRK];
-__attribute__((noinline)) static void meter(int p, const float *x, uint32_t n)
+/* a meter after its fader (as the synth's): the louder side's peak times its gain */
+__attribute__((noinline)) static void meter(int p, const float *l, const float *r, float gl, float gr, uint32_t n)
 {
     uint32_t i;
-    float pk = trk_peak[p];
+    float pl = 0.0f, pr = 0.0f;
     for (i = 0; i < n; i++) {
-        float a = fm_fabsf(x[i]);
-        if (a > pk)
-            pk = a;
+        float a = fm_fabsf(l[i]), b = fm_fabsf(r[i]);
+        if (a > pl)
+            pl = a;
+        if (b > pr)
+            pr = b;
     }
-    trk_peak[p] = pk;
+    pl = fm_maxf(pl * gl, pr * gr);
+    if (pl > trk_peak[p])
+        trk_peak[p] = pl;
 }
 
 /* ------------------------------------------------------------- params --- */
@@ -889,7 +894,7 @@ static void render_sub(uint32_t n, uint32_t at)
             zerof(ts1, n);
             zerof(ts2, n);
             drumline_render(DL(t), tl, tr, ts1, ts2, n);
-            g = perf_mute[t] || !HOST_ON(t) ? 0.0f : (float)epar[t][TP_LEVEL] * (float)epar[t][TP_LEVEL] * (1.0f / 10000.0f);
+            g = perf_mute[t] || !HOST_ON(t) ? 0.0f : tp_level_gain(epar[t][TP_LEVEL]);
             pan_gains(epar[t][TP_PAN] + perf_pan[t], &gl, &gr);
             glide_set(&trk_glide[t][GL_L], g * gl);
             glide_set(&trk_glide[t][GL_R], g * gr);
@@ -898,7 +903,7 @@ static void render_sub(uint32_t n, uint32_t at)
             add_glide(perc_r, tr, &trk_glide[t][GL_R], n);
             add_glide(s1, ts1, &trk_glide[t][GL_SEND], n);
             add_glide(s2, ts2, &trk_glide[t][GL_SEND], n);
-            meter(t, tl, n);
+            meter(t, tl, tr, g * gl, g * gr, n);
             eng_prof_drum[t] += plat_cycles() - pt1;
         }
         metro_tick(n);
@@ -918,7 +923,7 @@ static void render_sub(uint32_t n, uint32_t at)
     add_in(s2, c2_s2, n);
     for (t = 0; t < NTRK; t++)                            /* the synth's meters, into the common ones */
         if (!eng_drum[t]) {
-            float v = (float)synth_peak[t] * (1.0f / 32767.0f);
+            float v = (float)synth_peak[t] * (1.0f / 16383.5f);
             if (v > trk_peak[t])
                 trk_peak[t] = v;
         }
@@ -926,7 +931,7 @@ static void render_sub(uint32_t n, uint32_t at)
     {
         for (k = 0; k < 2; k++) {                         /* (timed apart: FX I, FX II) */
             PROF_T(pf);                         /* FX I, then FX II (which hears FX I's return) */
-            float g = HOST_ON(8 + k) ? (float)epar[AUX_FX1 + k][TP_LEVEL] * (float)epar[AUX_FX1 + k][TP_LEVEL] * (1.0f / 10000.0f) : 0.0f;
+            float g = HOST_ON(8 + k) ? tp_level_gain(epar[AUX_FX1 + k][TP_LEVEL]) : 0.0f;
             float *rl = tl, *rr = tr;
             if (fx_lag_on[k]) {                           /* run a block behind (fx_job): its return for this stretch */
                 rl = fx_ret[k][0] + at;
@@ -940,7 +945,7 @@ static void render_sub(uint32_t n, uint32_t at)
             glide_set(&ret_glide[k][1], g);
             add_glide(mel_l, rl, &ret_glide[k][0], n);
             add_glide(mel_r, rr, &ret_glide[k][1], n);
-            meter(AUX_FX1 + k, rl, n);
+            meter(AUX_FX1 + k, rl, rr, g, g, n);
             if (k == 0 && epar[AUX_FX1][TP_SEND2]) {      /* FX I into FX II: the FX I track's second send */
                 float s = (float)epar[AUX_FX1][TP_SEND2] * (1.0f / 127.0f) * 0.5f;
                 uint32_t i;
@@ -1013,8 +1018,8 @@ void engine_render(int32_t *out_lr, uint32_t n, uint32_t gain_q12)
         if (i & 1u)
             eng_scope[eng_scope_w++ & (SCOPE_N - 1u)] = (int16_t)((mix_l[i] + mix_r[i]) * 16383.5f);
     }
-    for (p = 0; p < NALLTRK; p++) {                      /* meters: peak hold, the UI lets them fall */
-        uint32_t q = (uint32_t)(fm_minf(trk_peak[p], 1.0f) * 32767.0f);
+    for (p = 0; p < NALLTRK; p++) {                      /* meters: the loudest since the UI took them (Q14, to 2) */
+        uint32_t q = (uint32_t)(fm_minf(trk_peak[p], 2.0f) * 16383.5f);
         if (q > eng_peak[p])
             eng_peak[p] = (uint16_t)q;
         trk_peak[p] = 0.0f;
