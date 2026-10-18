@@ -669,7 +669,8 @@ Turn **ALGORITHM** past T8. Each aux track has its own page under **EDIT** and i
   so a step is a beat, or 16 for a bar. Page 2 is the routing: black keys 1 to 8 toggle a track. Its
   **SEL** list sets how each track follows, diatonic or transpose only. Drum tracks never follow.
 - **THROW** (the throws): the keys fire the throws on the drum tracks (lower octave) and the melodic tracks
-  (upper octave). The last one you played is the one a step writes. **KNOB 1** is latch: a key then
+  (upper octave). Slice tracks count as drums: their fills play the pattern's own slices (the one on the
+  downbeat as the kick, the backbeat's as the snare, an off-beat's as the hat), and octave takes them up. The last one you played is the one a step writes. **KNOB 1** is latch: a key then
   toggles its effect.
 
 | Key of the octave | Effect |

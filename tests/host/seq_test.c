@@ -1413,6 +1413,82 @@ static void t_fills(void)
     printf("ok %s\n", cur);
 }
 
+/* a slice track is percussive for the throws: the drums' octave of keys, the drum fills on its own slices (the
+ * downbeat's for the kick, the backbeat's for the snare, an off-beat's for the hat), its notes kept under the
+ * octave throw (the engine raises its pitch); a sample track stays melodic */
+static void t_slice_throws(void)
+{
+    int i, k = 0, sn = 0, h = 0;
+    cur = "slice-throws";
+    reset();
+    par[0][TP_ENGINE] = EG_SLICE;
+    par[1][TP_ENGINE] = EG_SAMPLE;
+    for (i = 0; i < 8; i++)
+        note(0, 2 * i, 60 + i, 100);  /* a break's eight slices in eighths */
+    note(1, 0, 60, 100);
+    CHECK(punch_group_of(&S, 0) == 0 && punch_group_of(&S, 1) == 1);
+    seq_punch_key(&S, PX_OCTAVE, 1, -1);
+    seq_punch_key(&S, PX_MEL + PX_OCTAVE, 1, -1);
+    start();
+    run(10);
+    CHECK(on_n(0)->a == 60 && nth(E_ON, 1, 0)->a == 48);   /* the slice's note stays, the sample's goes down */
+    CHECK(seq_punch_mask(&S, 0) == (1u << PX_OCTAVE) && seq_punch_mask(&S, 1) == (1u << PX_OCTAVE));
+    seq_punch_key(&S, PX_OCTAVE, 0, -1);
+    run(10);
+    CHECK(seq_punch_mask(&S, 0) == 0);
+    seq_punch_key(&S, PX_MEL + PX_OCTAVE, 0, -1);
+    stop();
+    /* build: the snare's slice (the backbeat's, 62) in eighths, then sixteenths */
+    seq_punch_key(&S, PX_BUILD, 1, -1);
+    nev = 0;
+    start();
+    run(16 * L16);
+    CHECK(count(E_ON, 0) == 12 && count(E_ON, 1) == 1);
+    for (i = 0; i < 12; i++)
+        CHECK(on_n(i)->a == 62);
+    CHECK(near(off_of(on_n(0))->t - on_n(0)->t, L16 / 2, 1));
+    seq_punch_key(&S, PX_BUILD, 0, -1);
+    /* floor: the kick's slice (60) on the beats, the hat's (61) on the other sixteenths */
+    seq_punch_key(&S, PX_FLOOR, 1, -1);
+    nev = 0;
+    run(16 * L16);
+    for (i = 0; i < count(E_ON, 0); i++) {
+        k += on_n(i)->a == 60;
+        h += on_n(i)->a == 61;
+        sn += on_n(i)->a == 62;
+    }
+    CHECK(k == 4 && h == 12 && sn == 0 && count(E_ON, 0) == 16);
+    seq_punch_key(&S, PX_FLOOR, 0, -1);
+    /* jumble: the three slices */
+    seq_punch_key(&S, PX_JUMBLE, 1, -1);
+    nev = 0;
+    run(32 * L16);
+    CHECK(count(E_ON, 0) > 12 && count(E_ON, 0) < 32);
+    for (i = 0; i < count(E_ON, 0); i++)
+        CHECK(on_n(i)->a >= 60 && on_n(i)->a <= 62);
+    seq_punch_key(&S, PX_JUMBLE, 0, -1);
+    /* the melodic group's build leaves it alone; a live throw aimed at it (an upper key from its page) is its own */
+    seq_punch_key(&S, PX_MEL + PX_BUILD, 1, -1);
+    nev = 0;
+    run(16 * L16);
+    CHECK(count(E_ON, 0) == 8 && on_n(1)->a == 61);
+    seq_punch_key(&S, PX_MEL + PX_BUILD, 0, -1);
+    seq_punch_key(&S, PX_MEL + PX_BUILD, 1, 0);
+    nev = 0;
+    run(16 * L16);
+    CHECK(count(E_ON, 0) == 12 && on_n(0)->a == 62);
+    seq_punch_key(&S, PX_MEL + PX_BUILD, 0, 0);
+    /* an empty slice pattern's fills are silent */
+    stop();
+    reset();
+    par[0][TP_ENGINE] = EG_SLICE;
+    seq_punch_key(&S, PX_FLOOR, 1, -1);
+    start();
+    run(16 * L16);
+    CHECK(count(E_ON, 0) == 0);
+    printf("ok %s\n", cur);
+}
+
 /* drum offs: the gated and loop play modes end with the step's length, the key's release, or stop */
 static void t_drum_off(void)
 {
@@ -1900,6 +1976,7 @@ int main(void)
     t_loops();
     t_echo();
     t_fills();
+    t_slice_throws();
     t_pitch_short_long();
     t_drum_off();
     t_punch_seq();
