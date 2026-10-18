@@ -287,6 +287,16 @@ static int expect_more(const char *what, const char *a, const char *b, const cha
             host_fails++;
         } else
             printf("  ok note %s %s %s == %d\n", t, pt, st, got);
+    } else if (!strcmp(what, "weave")) {           /* expect weave PAT S MASK LEN: the WEAVE track's step */
+        char pt[16] = {0}, st[16] = {0}, m[16] = {0}, l[16] = {0};
+        const wv_step_t *w;
+        sscanf(plat_host_line, "%*s %*s %15s %15s %15s %15s", pt, st, m, l);
+        w = &pats.weave[(atoi(pt) - 1) & (NPATT - 1)].st[(atoi(st) - 1) & (NSTEP - 1)];
+        if (wv_mask(w) != (uint32_t)strtol(m, 0, 0) || w->len != atoi(l)) {
+            printf("FAIL expect weave %s %s == %s %s, got 0x%03x %d\n", pt, st, m, l, (unsigned)wv_mask(w), w->len);
+            host_fails++;
+        } else
+            printf("  ok weave %s %s == %s %s\n", pt, st, m, l);
     } else if (!strncmp(what, "par", 3) && !strchr(what, '.')) {
         printf("FAIL unknown expect %s\n", what);
         host_fails++;
@@ -965,6 +975,13 @@ int app_host_cmd(const char *cmd, const char *a, const char *b, const char *c, c
         load_force = atoi(a);
     else if (!strcmp(cmd, "steps"))
         steps_print(atoi(a), atoi(b));
+    else if (!strcmp(cmd, "weavesteps")) {          /* weavesteps PAT: the WEAVE track's pattern: each step's tracks, length */
+        const wvpat_t *wp = &pats.weave[(atoi(a) - 1) & (NPATT - 1)];
+        printf("  weave pattern %d: %d sixteenths\n", atoi(a), wp->len);
+        for (int s2 = 0; s2 < NSTEP; s2++)
+            if (wv_mask(&wp->st[s2]))
+                printf("    %2d: tracks 0x%03x len %d\n", s2 + 1, (unsigned)wv_mask(&wp->st[s2]), wp->st[s2].len);
+    }
     else if (!strcmp(cmd, "step")) {                /* step T PAT S NOTE [VEL] */
         char e[16] = {0};
         tpat_t *tp = pat_of(atoi(a), atoi(b));

@@ -1,0 +1,44 @@
+# the WEAVE track: T2 set up to weave with T1 (ARP's Weave); on WEAVE, REC held and T2's key held while it plays
+# writes a weave onto WEAVE's step 5 (8 sixteenths); its Steps: a step held, black key 5 adds T5, white key 12 its end
+wait 300
+hits 1 1 1 x...x...x...x...
+notes 2 1 1 1 100 C4
+notes 2 1 3 1 100 E4
+notes 2 1 5 1 100 G4
+notes 2 1 7 1 100 B4
+turn ALGO 1
+tap ARP
+turn SELECT 2
+tapkey b0
+turn K3 2
+turn ALGO 9
+expect trk 13
+tap EDIT
+wait 50
+shot wvt_page.png
+tap PLAY
+wait 300
+press REC
+wait 50
+key w1 down
+wait 1000
+shot wvt_weaving.png
+key w1 up
+wait 200
+release REC
+wait 300
+tap PLAY
+weavesteps 1
+expect weave 1 5 0x002 8
+tap SEQ
+wait 100
+shot wvt_steps.png
+key w8 down
+wait 30
+tapkey b4
+tapkey w11
+key w8 up
+wait 50
+weavesteps 1
+expect weave 1 9 0x010 4
+shot wvt_steps2.png

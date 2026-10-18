@@ -11,7 +11,7 @@
 /* The code keeps its first names; the screen and the manual say: AUX_BRAIN the conductor (COND), AUX_PUNCH the
  * throws (THROW), components (SC_*) tricks, the drumline engine the kit, the maestro player strum. */
 #define NTRK 8                        /* instrument tracks 1-8 */
-enum { AUX_BRAIN = NTRK, AUX_PUNCH, AUX_FX1, AUX_FX2, NALLTRK };
+enum { AUX_BRAIN = NTRK, AUX_PUNCH, AUX_FX1, AUX_FX2, AUX_WEAVE, NALLTRK };   /* (WEAVE: its own steps, wvpat_t) */
 #define NSEQT (AUX_PUNCH + 1)         /* sequenced tracks: 1-8, brain, punch */
 #define NPATT 8                       /* patterns per track */
 #define NSTEP 64                      /* 4 bars of 16 */
@@ -112,8 +112,18 @@ typedef struct {
     uint8_t used;                     /* 1 = the scene exists */
     uint16_t mute;                    /* bit t = track t muted (NSEQT bits) */
     uint8_t brain_key, brain_scale, brain_deg;   /* the brain's state in this scene */
-    uint8_t rsv;
-} scene_t;                            /* 18 bytes */
+    uint8_t weave;                    /* the WEAVE track's pattern */
+} scene_t;
+/* the WEAVE track's step: the tracks it weaves (a bit each: T1-T8, COND, THROW) and for how long, in sixteenths
+ * (0 = one); its pattern: steps on the sequencer's sixteenths, len of them (16, 32, 48 or 64) */
+typedef struct {
+    uint8_t m0, m1, len;
+} wv_step_t;
+static inline uint32_t wv_mask(const wv_step_t *w) { return (uint32_t)w->m0 | (uint32_t)w->m1 << 8; }
+typedef struct {
+    uint8_t len, rsv[3];
+    wv_step_t st[NSTEP];
+} wvpat_t;                            /* 18 bytes */
 
 typedef struct {
     uint8_t scene;                    /* 0..15 */
@@ -131,6 +141,7 @@ typedef struct {
 /* the whole pattern store: the project's (in the pool) */
 typedef struct {
     tpat_t pat[NSEQT][NPATT];
+    wvpat_t weave[NPATT];             /* the WEAVE track's patterns */
     lane_t lane[NLANE];
     scene_t scene[NSCENE];
     song_t song;

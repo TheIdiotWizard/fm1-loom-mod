@@ -258,6 +258,9 @@ typedef struct {
      * track's steps playing). wv_from 0 = no weave set up, else the track + 1. Set by the UI, read here */
     volatile uint8_t wv_from[NSEQT], wv_pat[NSEQT], wv_rule[NSEQT];
     volatile uint16_t wv_live, wv_rec;
+    uint8_t wv_ppat;                  /* the WEAVE track's pattern playing (the scene's) */
+    uint8_t wv_left[NSEQT];           /* sixteenths each track's recorded weave still lasts */
+    uint8_t wv_rec_at[NSEQT];         /* recording: the step a held weave started on (0xFF none) */
 } seq_t;
 
 void seq_init(seq_t *s, patterns_t *P, uint8_t (*par)[NTP_ALL]);

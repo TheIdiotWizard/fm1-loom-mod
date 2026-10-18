@@ -3,9 +3,9 @@
 wait 300
 expect trk 1
 turn ALGO -1
-expect trk 10
+expect trk 13
 turn ALGO -1
-expect trk 9
+expect trk 10
 turn ALGO 2
 expect trk 1
 tap GLO

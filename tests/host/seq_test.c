@@ -1960,7 +1960,7 @@ static void t_aux_tracks(void)
     CHECK(count(E_ON, 0) == 1);       /* step 2 muted by the sequenced FX */
     CHECK(nth(E_PUNCH, -1, 0) && nth(E_PUNCH, -1, 0)->b == 1);
     /* ten sequenced tracks (1-8, the conductor, the throws), then the two FX tracks: no tape */
-    CHECK(NSEQT == 10 && AUX_PUNCH == NSEQT - 1 && AUX_FX1 == NSEQT && AUX_FX2 == NSEQT + 1 && NALLTRK == 12);
+    CHECK(NSEQT == 10 && AUX_PUNCH == NSEQT - 1 && AUX_FX1 == NSEQT && AUX_FX2 == NSEQT + 1 && AUX_WEAVE == NSEQT + 2 && NALLTRK == 13);
     printf("ok %s\n", cur);
 }
 

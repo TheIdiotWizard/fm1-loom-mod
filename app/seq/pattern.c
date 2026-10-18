@@ -1,6 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* LOOM-8 pattern store: the plain-data helpers of pattern.h (main loop side; the sequencer only reads). */
-#include <string.h>
 #include "pattern.h"
 
 /* the value a component starts with (the notebook p. 139, 0-based): pulse 4, hold 4, multiply 2, velocity 64,
@@ -38,6 +37,8 @@ void patterns_init(patterns_t *P)
             if (t == AUX_BRAIN)       /* a brain step is a beat: a chord progression at four to the bar */
                 P->pat[t][k].scale = TS_4;
         }
+    for (k = 0; k < NPATT; k++)
+        P->weave[k].len = 16;
     for (k = 0; k < NLANE; k++)
         P->lane[k].used = 0;
     P->scene[0].used = 1;             /* scene 1: pattern 1 on every track (pat[] is already 0) */
@@ -309,6 +310,6 @@ void pattern_woven(tpat_t *out, const tpat_t *a, int ak, const tpat_t *b, int bk
         if (i < len)
             weave_step(a, ak, b, bk, rule, (uint32_t)i, &out->st[i]);
         else
-            memset(&out->st[i], 0, sizeof out->st[i]);
+            zero(&out->st[i], sizeof out->st[i]);
     }
 }

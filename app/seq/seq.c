@@ -979,6 +979,7 @@ static void scene_read(seq_t *s, int k, uint8_t *next)
     s->brain_key = (uint8_t)(sc->brain_key % 12);
     s->brain_scale = sc->brain_scale < NBS ? sc->brain_scale : BS_MAJOR;
     s->brain_deg = sc->brain_deg;
+    s->wv_ppat = (uint8_t)(sc->weave % NPATT);
     s->scene = (uint8_t)k;
 }
 
@@ -2194,6 +2195,44 @@ static void do_stop(seq_t *s, const seq_sink_t *o)
 }
 
 /* the sixteenth: the metronome, the count-in, the bar, the fills */
+/* the WEAVE track, a sixteenth: its step's tracks weave for the step's length (wv_rec); recording, what is held or
+ * latched (wv_live) is written: a weave starting marks this step, one going on lengthens the step it started on */
+static void weave_tick(seq_t *s)
+{
+    wvpat_t *wp = &s->P->weave[s->wv_ppat % NPATT];
+    int len = wp->len < 1 ? 16 : wp->len > NSTEP ? NSTEP : wp->len, pos = (int)(s->step_tick % (uint32_t)len), t;
+    wv_step_t *st = &wp->st[pos];
+    uint32_t m = wv_mask(st), rec = 0;
+    int writing = s->rec && s->playing && !s->count_in && !s->rec_wait;
+    for (t = 0; t < NSEQT; t++) {
+        if (s->wv_left[t])
+            s->wv_left[t]--;
+        if (m >> t & 1u) {
+            int l = st->len ? st->len : 1;
+            if (l > s->wv_left[t])
+                s->wv_left[t] = (uint8_t)l;
+        }
+        if (s->wv_left[t])
+            rec |= 1u << t;
+        if (writing && (s->wv_live >> t & 1u)) {
+            if (s->wv_rec_at[t] >= NSTEP) {
+                s->wv_rec_at[t] = (uint8_t)pos;
+                m |= 1u << t;
+                st->m1 = (uint8_t)(m >> 8);
+                st->m0 = (uint8_t)m;
+                if (!st->len)
+                    st->len = 1;
+            } else {
+                wv_step_t *s0 = &wp->st[s->wv_rec_at[t]];
+                if (s0->len < len)
+                    s0->len++;
+            }
+        } else
+            s->wv_rec_at[t] = 0xFF;
+    }
+    s->wv_rec = (uint16_t)rec;
+}
+
 static void six_tick(seq_t *s, const seq_sink_t *o)
 {
     int click = s->metronome == 2 || (s->metronome == 1 && (s->rec || s->count_in));
@@ -2250,6 +2289,7 @@ static void six_tick(seq_t *s, const seq_sink_t *o)
     if (click && (s->bar16 & 3) == 0 && o->metro)
         o->metro(o->ctx, s->bar16 == 0);
     fire_fills(s, o);
+    weave_tick(s);
     s->bar_six++;
     s->step_tick++;
     s->six_to_next = s->ext ? NEVER : carry + six_q8(s);
@@ -2315,6 +2355,7 @@ void seq_init(seq_t *s, patterns_t *P, uint8_t (*par)[NTP_ALL])
         tr->jump_to = 0xFF;
         s->ppat[t] = P->scene[0].pat[t] < NPATT ? P->scene[0].pat[t] : 0;
         s->pcue[t] = 0xFF;
+        s->wv_rec_at[t] = 0xFF;
     }
     for (t = 0; t < NTRK; t++) {
         s->player[t].arp_to_next = NEVER;
@@ -2329,6 +2370,7 @@ void seq_init(seq_t *s, patterns_t *P, uint8_t (*par)[NTP_ALL])
         s->lrt[i].applied = LOCK_NONE;
     s->mute = P->scene[0].mute;
     s->brain_scale = BS_MAJOR;
+    s->wv_ppat = (uint8_t)(P->scene[0].weave % NPATT);
     s->six_to_next = NEVER;
     s->clk_to_next = 0;
     bar_len_update(s);
@@ -2400,6 +2442,9 @@ void seq_advance(seq_t *s, uint32_t k, const seq_sink_t *o)
     if (s->req_stop) {
         s->req_stop = 0;
         s->req_start = s->req_cont = 0;
+        s->wv_rec = 0;                /* (the recorded weaves end with the transport) */
+        for (t = 0; t < NSEQT; t++)
+            s->wv_left[t] = 0, s->wv_rec_at[t] = 0xFF;
         if (s->playing)
             do_stop(s, o);
         else                          /* stopped already: the players let go (hold, latched arps) */
