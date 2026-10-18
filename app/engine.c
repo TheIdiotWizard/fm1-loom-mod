@@ -22,6 +22,7 @@ static inline void *dsp_far(void *p) { void *volatile q = p; return q; }
 /* time per stage of the render, in plat_cycles() units: running totals (wrapping; the Status page
  * takes differences) and the frames rendered */
 volatile uint32_t eng_prof[ENG_PROF_N], eng_prof_frames, eng_prof_worst[ENG_PROF_N];
+volatile uint32_t eng_vworst[NVOICE + 1];          /* (engine.h) */
 volatile uint8_t eng_prof_reset;
 volatile uint32_t eng_prof_drum[NTRK];
 static uint32_t prof_block0[ENG_PROF_N];
@@ -371,11 +372,18 @@ static int is_filter_param(int param)
     return param == TP_FTYPE || param == TP_CUT || param == TP_RES || param == TP_FENV || param == TP_KTRK;
 }
 /* a lock or a knob reaching a unit that reads epar (the drumline reads it live; the FX are told) */
+static uint8_t fx_c2;                                      /* the effects' job runs on the second core (from the
+                                                            * block's start): their knobs wait for it (fx_dirty) */
+static uint8_t fx_dirty;
 static void aux_changed(int trk, int param)
 {
     const uint8_t *p = epar[trk];
-    if ((trk == AUX_FX1 || trk == AUX_FX2) && param >= TP_E1 && param <= TP_E4)
-        fx_set(FXS(trk - AUX_FX1), fx_type[trk - AUX_FX1], p + TP_E1);
+    if ((trk == AUX_FX1 || trk == AUX_FX2) && param >= TP_E1 && param <= TP_E4) {
+        if (fx_c2)
+            fx_dirty |= (uint8_t)(1u << (trk - AUX_FX1));
+        else
+            fx_set(FXS(trk - AUX_FX1), fx_type[trk - AUX_FX1], p + TP_E1);
+    }
 }
 static void apply_param(int trk, int param, int val)       /* ISR: C_PARAM */
 {
@@ -750,20 +758,37 @@ static void fx_job(void)
                 DSP_FAR(fx_process_lag)(FXS(k), snd_acc[k], fx_ret[k][0], fx_ret[k][1], snd_n, (int)snd_n);
         }
 }
+static void fx_job_timed(uint32_t arg)                     /* the effects' job (on either core) */
+{
+    uint32_t pt = plat_cycles();
+    (void)arg;
+    fx_job();
+    PROF_ADD(PR_FXJ, pt);
+}
+/* the effects' job, when it runs on the second core, from the block's start: beside the first core's sequencer.
+ * fx_done waits for it (or runs it here, if the second core failed) and sets the knobs locked meanwhile */
+static void fx_done(void)
+{
+    int k;
+    if (!fx_c2)
+        return;
+    if (c2_wait())
+        fx_job_timed(0);
+    fx_c2 = 0;
+    for (k = 0; k < 2; k++)
+        if (fx_dirty >> k & 1u)
+            fx_set(FXS(k), fx_type[k], epar[AUX_FX1 + k] + TP_E1);
+    fx_dirty = 0;
+}
 static volatile uint32_t c2_took;                          /* the last job's time (plat_cycles) */
 static void core2_job(uint32_t arg)
 {
     uint32_t n = arg & 0xFFu ? arg & 0xFFu : 256u, pt = plat_cycles(), p0 = pt;   /* (the clock: a timer both cores read) */
-    if (arg & 0x200u) {                                    /* the block's first stretch: the effects first */
-        fx_job();
-        PROF_ADD(PR_FXJ, pt);
-        pt = plat_cycles();
-    }
     zerof(c2_l, n);
     zerof(c2_r, n);
     zerof(c2_s1, n);
     zerof(c2_s2, n);
-    synth_render(SY, 0, (int)(arg >> 16 & 31u), c2_l, c2_r, c2_s1, c2_s2, n);
+    synth_render_on(SY, 1, 0, (int)(arg >> 16 & 31u), c2_l, c2_r, c2_s1, c2_s2, n);
     PROF_ADD(PR_SYNTH1, pt);
     c2_took = plat_cycles() - p0;
 }
@@ -776,9 +801,10 @@ static void core2_job(uint32_t arg)
  * instructions a sample). Of the k that
  * do best, the one nearest the middle (the old fixed split). The same k with one core or two: the
  * samples stay the same either way (only the order of the halves' sum depends on k). */
-static uint32_t split_at(int extra2)
+static uint8_t split_units[2], split_blk[4];                 /* (the block's first stretch: k, the units, stretches) */
+static uint32_t split_at(int extra2, int top)          /* voices [0, top) shared out: the second core's [0, k) */
 {
-    int pre[NVOICE + 1], i, k, t, drum = 0, best = NVOICE / 2, cost = 1 << 30;
+    int pre[NVOICE + 1], i, k, t, drum = 0, best = top / 2, cost = 1 << 30;
     for (t = 0; t < NTRK; t++)
         if (eng_drum[t]) {
             int nv = drumline_voices(DL(t));
@@ -786,14 +812,16 @@ static uint32_t split_at(int extra2)
                 drum += 1 + 2 * nv;
         }
     pre[0] = 0;
-    for (i = 0; i < NVOICE; i++)
+    for (i = 0; i < top; i++)
         pre[i + 1] = pre[i] + synth_voice_cost(SY, i);
-    for (k = 0; k <= NVOICE; k++) {
-        int a = pre[k] + extra2, b = pre[NVOICE] - pre[k] + drum, c = a > b ? a : b;
-        int dk = k > NVOICE / 2 ? k - NVOICE / 2 : NVOICE / 2 - k, db = best > NVOICE / 2 ? best - NVOICE / 2 : NVOICE / 2 - best;
+    for (k = 0; k <= top; k++) {
+        int a = pre[k] + extra2, b = pre[top] - pre[k] + drum, c = a > b ? a : b;
+        int dk = k > top / 2 ? k - top / 2 : top / 2 - k, db = best > top / 2 ? best - top / 2 : top / 2 - best;
         if (c < cost || (c == cost && dk < db)) {
             cost = c;
             best = k;
+            split_units[0] = (uint8_t)(b > 255 ? 255 : b);   /* (the profiler: the first core's, the second's) */
+            split_units[1] = (uint8_t)(a > 255 ? 255 : a < 0 ? 0 : a);
         }
     }
     return (uint32_t)best;
@@ -828,42 +856,30 @@ static void metro_tick(uint32_t n)
 #endif
 /* one stretch: the upper half of the voices and the drumlines here while the second core renders the
  * lower half; then the halves are summed in the order one core always used, the FX tracks, the master */
-/* the effects' cost on the second core in split_at's units (a unit ~1.1 % of a block on the FM-1), for a whole block
- * (the FX job's) over a stretch of n frames: the delay 3.9 %, the plate 10.4, an SPU mode 7.5, the chorus ~3 */
-static int fx_job_units(uint32_t n)
-{
-    int u = 0, k;
-    for (k = 0; k < 2; k++)
-        if (fx_lag_on[k])
-            u += fx_type[k] > FXT_REVERB ? 7 : fx_type[k] == FXT_REVERB ? 9 : fx_type[k] == FXT_DELAY ? 4 : 3;
-    return n ? (int)((uint32_t)u * 256u / n) : u;
-}
 /* the split's correction, learnt on the FM-1 from the two cores' times (split_at's units on the second core's side:
- * a stretch whose second core took longer than the first core's part moves a unit to the first, and back; one for
- * the stretches with the effects' job, one for the rest), held within three voices' worth either way: the model stays
- * in charge (a split by each voice's measured time misjudged the blocks where notes start, the ones that matter).
- * The simulator's split stays the model's alone (its samples the same every run; the split only changes the order
- * of the halves' sum) */
-static int split_bias[2];
+ * a stretch whose second core took longer than the first core's part moves a unit to the first, and back), held
+ * within three voices' worth either way: the model stays in charge (a split by each voice's measured time misjudged
+ * the blocks where notes start, the ones that matter). The simulator's split stays the model's alone (its samples
+ * the same every run; the split only changes the order of the halves' sum) */
+static int split_bias;
 #define SPLIT_BIAS_MAX 12
-static void split_learn(int fxj, uint32_t t0, uint32_t t1)
+static void split_learn(uint32_t t0, uint32_t t1)
 {
 #ifndef PLAT_HOST
     uint32_t dz = (t0 + t1) >> 4;                          /* (a dead band: 6 % of the two) */
-    if (t1 > t0 + dz && split_bias[fxj] < SPLIT_BIAS_MAX)
-        split_bias[fxj]++;
-    else if (t0 > t1 + dz && split_bias[fxj] > -SPLIT_BIAS_MAX)
-        split_bias[fxj]--;
+    if (t1 > t0 + dz && split_bias < SPLIT_BIAS_MAX)
+        split_bias++;
+    else if (t0 > t1 + dz && split_bias > -SPLIT_BIAS_MAX)
+        split_bias--;
 #else
-    (void)fxj;
     (void)t0;
     (void)t1;
 #endif
 }
 static void render_sub(uint32_t n, uint32_t at)
 {
-    uint32_t arg = n & 0xFFu, pt, split;
-    int on2, t, k, fxj = at == 0 && (fx_lag_on[0] || fx_lag_on[1]);
+    uint32_t arg = n & 0xFFu, pt, split, ps;
+    int on2 = 0, t, k, learn = 1;
     PROF_T(pp);
     eng_prof[PR_SUBS]++;
     zerof(perc_l, n);
@@ -874,13 +890,43 @@ static void render_sub(uint32_t n, uint32_t at)
     zerof(s2, n);
     perf_tick(n);
     synth_prepare(SY, n);                                 /* the shared per-chunk values, before either core renders */
-    split = split_at((fxj ? fx_job_units(n) : 0) + split_bias[fxj]);
-    arg |= split << 16 | (fxj ? 0x200u : 0u);
-    on2 = c2_run ? c2_run(core2_job, arg | 0x100u) : 0;
-    PROF_ADD(PR_PREP, pp);
-    PROF_T(ps);
-    synth_render(SY, (int)split, NVOICE, mel_l, mel_r, s1, s2, n);
-    PROF_ADD(PR_SYNTH0, ps);
+    if (fx_c2 && plat_cpu2_busy()) {
+        /* the second core still at the effects' job (begun with the block): the voices from the top here, one at a
+         * time, until it is free; then it takes the lower part of what is left (the model's split of it) */
+        int j = NVOICE;
+        PROF_ADD(PR_PREP, pp);
+        ps = plat_cycles();
+        learn = 0;
+        split = 0;
+        while (j > 0) {
+            if (!plat_cpu2_busy()) {
+                fx_done();
+                split = split_at(split_bias, j);
+                arg = (n & 0xFFu) | split << 16;
+                on2 = c2_run ? c2_run(core2_job, arg | 0x100u) : 0;
+                synth_render_on(SY, 0, (int)split, j, mel_l, mel_r, s1, s2, n);
+                break;
+            }
+            synth_render_on(SY, 0, j - 1, j, mel_l, mel_r, s1, s2, n);
+            j--;
+        }
+        arg = (n & 0xFFu) | split << 16;
+        PROF_ADD(PR_SYNTH0, ps);
+    } else {
+        fx_done();                                        /* (done already, or one core) */
+        split = split_at(split_bias, NVOICE);
+        arg |= split << 16;
+        on2 = c2_run ? c2_run(core2_job, arg | 0x100u) : 0;
+        PROF_ADD(PR_PREP, pp);
+        ps = plat_cycles();
+        synth_render_on(SY, 0, (int)split, NVOICE, mel_l, mel_r, s1, s2, n);
+        PROF_ADD(PR_SYNTH0, ps);
+    }
+    if (at == 0) {
+        split_blk[0] = (uint8_t)split;
+        split_blk[1] = split_units[0];
+        split_blk[2] = (uint8_t)(split_units[1] | (learn ? 0u : 128u));   /* (128: handed over late) */
+    }
     {
         PROF_T(pd);
         for (t = 0; t < NTRK; t++) {
@@ -910,11 +956,13 @@ static void render_sub(uint32_t n, uint32_t at)
         PROF_ADD(PR_DRUM, pd);
     }
     pt = plat_cycles();
+    fx_done();                                            /* (the voices all done here first: the effects' job) */
     if (!on2 || c2_wait()) {
         core2_job(arg);                                   /* one core (or the second failed): here */
     } else {
         PROF_ADD(PR_WAIT, pt);                            /* what the first core waited for the second */
-        split_learn(fxj, pt - ps, c2_took);
+        if (learn)
+            split_learn(pt - ps, c2_took);
     }
     pt = plat_cycles();
     add_in(mel_l, c2_l, n);
@@ -971,6 +1019,10 @@ void engine_render(int32_t *out_lr, uint32_t n, uint32_t gain_q12)
         n = 256u;
     eng_prof_frames += n;
     guard_frames += n;
+    for (i = 0; i < NVOICE; i++) {                       /* (the profiler: each voice's time this block) */
+        synth_vblk[i] = 0;
+        synth_vinfo[i] = 0;
+    }
     guard_apply();
     {
         PROF_T(pt);
@@ -981,11 +1033,18 @@ void engine_render(int32_t *out_lr, uint32_t n, uint32_t gain_q12)
         synth_tempo(SY, bpm);
         fx_tempo(FXS(0), bpm);
         fx_tempo(FXS(1), bpm);
+        fx_lag_on[0] = (uint8_t)fx_lags(FXS(0));         /* (the type as set: fx_process takes it at its next call) */
+        fx_lag_on[1] = (uint8_t)fx_lags(FXS(1));
+        if (fx_lag_on[0] || fx_lag_on[1]) {               /* the effects' job (the last block's sends) now, on the
+                                                           * second core beside the sequencer; else here */
+            if (c2_run && c2_run(fx_job_timed, 0x100u))
+                fx_c2 = 1;
+            else
+                fx_job_timed(0);
+        }
         seq_advance(&seq, 0, &SINK);
         PROF_ADD(PR_SEQ, pt);
     }
-    fx_lag_on[0] = (uint8_t)fx_lags(FXS(0));             /* (the type as set: fx_process takes it at its next call) */
-    fx_lag_on[1] = (uint8_t)fx_lags(FXS(1));
     while (done < n) {
         uint32_t k = seq_until_event(&seq, n - done);
         if (k > n - done)
@@ -1048,9 +1107,15 @@ void engine_render(int32_t *out_lr, uint32_t n, uint32_t gain_q12)
                     for (p = 0; p < TRACE_K; p++)
                         trace_worst[j][p] = trace[(trace_w + j) % TRACE_N][p];
         }
-        if (d > eng_prof_worst[PR_ALL])
+        if (d > eng_prof_worst[PR_ALL]) {
+            uint32_t bud = n * 544u;
             for (p = 0; p < ENG_PROF_N; p++)
                 eng_prof_worst[p] = eng_prof[p] - prof_block0[p];
+            for (i = 0; i < NVOICE; i++)                 /* its voices: time (permille), engine and flags */
+                eng_vworst[i] = (synth_vblk[i] * 1000u / bud) | (uint32_t)synth_vinfo[i] << 16;
+            eng_vworst[NVOICE] = (uint32_t)split_blk[0] | (uint32_t)split_blk[1] << 8 | (uint32_t)split_blk[2] << 16 |
+                                 (eng_prof[PR_SUBS] - prof_block0[PR_SUBS]) << 24;
+        }
         for (p = 0; p < ENG_PROF_N; p++)
             prof_block0[p] = eng_prof[p];
     }

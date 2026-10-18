@@ -24,6 +24,9 @@ enum { PR_SEQ, PR_SYNTH0, PR_SYNTH1, PR_DRUM, PR_FX, PR_MST, PR_WAIT, PR_FX2, PR
        PR_NOTE, PR_SIX, PR_STEP, PR_SUB, PR_COMP, PR_LOCKS, PR_NOTES, PR_FIRE, PR_DRAIN, PR_FXJ, ENG_PROF_N };
 extern volatile uint32_t eng_prof[ENG_PROF_N], eng_prof_frames, eng_prof_worst[ENG_PROF_N];
 extern volatile uint8_t eng_prof_reset;
+/* the slowest block's voices: [i] its time in permille of the block | (engine | 32 started | 64 core 1 | 128 sounded) << 16;
+ * [NVOICE] the first stretch's split k | the first core's units << 8 | the second's << 16 | stretches << 24 */
+extern volatile uint32_t eng_vworst[NVOICE + 1];
 /* the blocks around the slowest one since eng_prof_reset (the oldest first; it is the 8th, 4 follow): each its whole render, the synth on each
  * core, the sequencer, the drums, the notes (permille of the block's budget), its stretches, its voices */
 #define TRACE_N 12

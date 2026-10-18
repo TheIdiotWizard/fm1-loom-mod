@@ -29,6 +29,11 @@ int plat_cpu2_set(int on)
 int plat_cpu2_on(void) { return fm1_c1_on; }
 int plat_cpu2_run(void (*fn)(uint32_t), uint32_t arg) { return fm1_cpu1_run(fn, arg); }
 int plat_cpu2_wait(void) { return fm1_cpu1_wait(); }
+int plat_cpu2_busy(void)                           /* (core 0 reads core 1's word: core 0's reads are sound) */
+{
+    FM1_C1_SYNC();
+    return fm1_c1_mb.done != fm1_c1_mb.job && !fm1_c1_mb.bad;
+}
 int plat_cpu2_gave_up(void) { return fm1_c1_gave_up; }
 uint32_t plat_cpu2_bad(void) { return fm1_c1_mb.bad; }
 int plat_cpu2_barred(void) { return fm1_c1_bar.magic == FM1_C1_BAR_MAGIC && fm1_c1_bar.barred == 1u; }

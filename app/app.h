@@ -100,6 +100,7 @@ int plat_cpu2_set(int on);              /* main loop: 0 = done; -1 = it did not 
 int plat_cpu2_on(void);
 int plat_cpu2_run(void (*fn)(uint32_t), uint32_t arg);   /* ISR: 1 = the second core has it */
 int plat_cpu2_wait(void);               /* ISR: 0 = done; -1 = it failed (and is off): do the job here */
+int plat_cpu2_busy(void);               /* ISR: 1 = the job handed over is not done yet (no waiting) */
 int plat_cpu2_gave_up(void);            /* why it is off: 0 no, 1 it read a wrong job, 2 one did not finish, 3 barred */
 uint32_t plat_cpu2_bad(void);
 int plat_cpu2_barred(void);             /* 1: it was given up, or core 0 crashed beside it (until power-off or a new build) */

@@ -323,7 +323,7 @@ def play_song(row, every, overhead_note, record=False, quiet=False):
     limit = (pm.get("seconds") or 90) * 1.6 + 20
     reads, stopped_n, g0, x0 = [], 0, None, None
     p_first = p_prev = prof_snap()
-    p_last, worst, worst_trace, worst_t = p_first, None, None, None
+    p_last, worst, worst_trace, worst_t, dd_worst_vblk = p_first, None, None, None, None
     while time.time() - t0 < limit:
         time.sleep(max(0.0, every - 0.3))
         s = where()
@@ -343,6 +343,7 @@ def play_song(row, every, overhead_note, record=False, quiet=False):
                 if r["playing"] and (worst is None or dd["worst"]["all"] > worst["all"]):
                     worst = dict(dd["worst"])
                     worst_trace = dd.get("trace")
+                    dd_worst_vblk = dd.get("vblk")
                     worst_t = r["t"]
             if r["playing"]:
                 p_last = pn
@@ -389,6 +390,9 @@ def play_song(row, every, overhead_note, record=False, quiet=False):
         print("  stages: " + pr.line(whole))
         if worst:
             print("  slowest block: " + " ".join(f"{k} {v:.0f}" for k, v in worst.items() if v >= 1 or k == "subs"))
+        if dd_worst_vblk:
+            res["vblk"] = dd_worst_vblk
+            print("  its voices: " + pr.vblk_text(dd_worst_vblk))
         if worst_trace:
             res["trace"] = {"t": worst_t, "blocks": worst_trace}
             print(f"  the blocks up to it (read at {worst_t} s; all/synth0/synth1/seq/drum/note %, stretches, voices): "

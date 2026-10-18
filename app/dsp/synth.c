@@ -143,6 +143,7 @@ typedef struct {
     uint8_t fresh;                    /* configured mid-block: refresh the coefficients before the next sample;
                                        * bit 1: started since the last render, its first configuration due there */
     uint8_t vi;                       /* the voice's index (its sample cache, smp_vc) */
+    float cost_m;                     /* its render's measured time, clock ticks a frame (a running mean; 0 none yet) */
     uint8_t tws, tws_pend;            /* cane: the line slot it plays from, and its pending note's (CN_NONE) */
     float amp_cur, amp_step;          /* the amp level, ramped inside the sub-block */
     float steal_gain, sg_step;
@@ -178,6 +179,7 @@ typedef struct {
     uint32_t mono_tag[8];
     int8_t mono_voice;
     float last_pitch;                 /* the previous note: poly glide starts here */
+    float cost_m;                     /* its voices' measured time (voice_t cost_m): a new note's first guess */
     float lfo_ph, lfo_sh, lfo_sm;     /* the LFO's phase, the drift's target and its slewed value */
     float duck, duck_hold;            /* the pump's level 0..1 and the hold time left, seconds */
     float lf_in, lf_out;              /* the fade envelope: seconds to fade in (or out), 0 = none */
@@ -205,6 +207,8 @@ int synth_sizeof(void) { return (int)sizeof(struct synth); }
 volatile uint16_t synth_peak[NTRK];
 uint32_t (*synth_clock)(void);
 volatile uint32_t synth_prof[2][NENGINE + 1];
+volatile uint32_t synth_vblk[NVOICE];                 /* each voice's time this block (the profiler; engine.c clears it) */
+volatile uint8_t synth_vinfo[NVOICE];                 /* and what it was: engine | 32 started this block | 64 core 1 | 128 sounded */
 volatile uint32_t synth_vworst[3];                   /* the slowest voice render since the reader cleared it: its time, its
                                                       * engine, its frames */
 
@@ -1333,6 +1337,7 @@ static void voice_start(synth_t *s, voice_t *v, int note, int vel, int glide_ms,
     if (!eg_synth(eng))
         eng = EG_WEFT;
     v->tws = v->tws_pend;                        /* cane: the slot voice_take kept for this note */
+    v->cost_m = t->cost_m;                       /* (the split's guess: what the track's voices take) */
     if (eng != v->engine || !v_sounding(v)) {
         v->engine = (uint8_t)eng;
         eng_init(v);
@@ -1767,11 +1772,20 @@ void synth_limit(synth_t *s, int max_voices)
 {
     s->max_voices = (uint8_t)(max_voices < 1 ? 1 : max_voices > NVOICE ? NVOICE : max_voices);
 }
+/* a voice's cost in units of ~1.1 % of a block: on the FM-1 its measured time (or, a note just started, its track's
+ * voices' and a unit for its set-up); else, and in the simulator (its samples the same every run), the model below */
+#define COST_TICKS_UNIT 5.98f                    /* 1.1 % of 544 clock ticks, a frame's time */
 int synth_voice_cost(const synth_t *s, int vi)
 {
     const voice_t *v = &s->v[vi];
     if (!v_sounding(v))
         return 0;
+#ifndef PLAT_HOST
+    if (v->cost_m > 0.0f) {
+        int u = (int)(v->cost_m * (1.0f / COST_TICKS_UNIT) + 0.5f) + (v->fresh & 2 ? 1 : 0);
+        return u < 1 ? 1 : u > 40 ? 40 : u;
+    }
+#endif
     if (v->engine == EG_CANE || v->engine == EG_VOILE || v->engine == EG_GINGHAM) {   /* by the model (braids.h) */
         int md = v->c.ex[19] > 0.0f ? (int)v->c.ex[19] : 0;
         return v->engine == EG_CANE ? CN_COST[md < NCANE ? md : 0] : v->engine == EG_VOILE ? VO_COST[md < NVOILE ? md : 0]
@@ -2571,19 +2585,27 @@ static void voice_samples(synth_t *s, voice_t *v, float *l, float *r, float *s1,
 
 void synth_render(synth_t *s, int v0, int v1, float *l, float *r, float *s1, float *s2, uint32_t n)
 {
+    synth_render_on(s, v0 == 0 && v1 < NVOICE, v0, v1, l, r, s1, s2, n);   /* (the second core's: [0, k), k < 16) */
+}
+
+void synth_render_on(synth_t *s, int core, int v0, int v1, float *l, float *r, float *s1, float *s2, uint32_t n)
+{
     int vi;
     if (v0 < 0)
         v0 = 0;
     if (v1 > NVOICE)
         v1 = NVOICE;
     uint32_t (*clk)(void) = synth_clock;
-    volatile uint32_t *prof = synth_prof[v0 == 0 && v1 < NVOICE];   /* (the second core's half: [0, k), k < 16) */
+    volatile uint32_t *prof = synth_prof[core != 0];
     for (vi = v0; vi < v1; vi++) {
         voice_t *v = &s->v[vi];
         uint32_t i = 0, t0 = 0, tc = 0, tk = 0;
         const int timed = clk && (v_sounding(v) || v->pos == 0);
-        if (timed)
+        if (timed) {
             t0 = clk();
+            synth_vinfo[vi] = (uint8_t)((synth_vinfo[vi] & 32u) | (v->engine & 31u) | (v->fresh & 2 ? 32u : 0u) |
+                                        (prof == synth_prof[1] ? 64u : 0u) | 128u);
+        }
         if (v->fresh & 2) {                      /* a note started since the last render: its parameters now, from
                                                   * this stretch's first slot (at a chunk's start the chunk's own
                                                   * configuration below is the first) */
@@ -2620,6 +2642,14 @@ void synth_render(synth_t *s, int v0, int v1, float *l, float *r, float *s1, flo
         }
         if (timed) {
             tk = clk() - t0;
+            synth_vblk[vi] += tk;
+            if (n >= 32u && !(synth_vinfo[vi] & 32u) && v_sounding(v)) {   /* the split's costs: a running mean of
+                                                                          * the voice's time a frame, not its first
+                                                                          * render's (its set-up) */
+                float x = (float)tk / (float)n;
+                v->cost_m = v->cost_m > 0.0f ? v->cost_m + (x - v->cost_m) * 0.25f : x;
+                s->t[v->trk < NTRK ? v->trk : 0].cost_m = v->cost_m;
+            }
             prof[NENGINE] += tc;
             prof[v->engine < NENGINE ? v->engine : 0] += tk - tc;
             if (tk > synth_vworst[0]) {

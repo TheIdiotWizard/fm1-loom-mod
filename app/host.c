@@ -102,6 +102,7 @@ int plat_cpu2_run(void (*fn)(uint32_t), uint32_t arg)
     return 1;
 }
 int plat_cpu2_wait(void) { return 0; }
+int plat_cpu2_busy(void) { return 0; }   /* (a job ran at once) */
 int plat_cpu2_gave_up(void) { return 0; }
 uint32_t plat_cpu2_bad(void) { return 0; }
 int plat_cpu2_barred(void) { return 0; }
@@ -456,15 +457,11 @@ static float load_model(int *nsyn, int *ndrum)
     static uint32_t hits0, notes0;
     static float hit_pct;
     static int hit_ms;
-    int lag = fx_lags(FXS(0)) || fx_lags(FXS(1));
-    int k = (int)split_at(lag ? fx_job_units(256) : 0), v0 = 0, v1 = 0, n = 0, t;
-    float serial = LOAD_IDLE + (seq.playing ? LOAD_PLAY : 0.0f), c0, c1;
+    int k, v0 = 0, v1 = 0, n = 0, t;
+    float serial = LOAD_IDLE + (seq.playing ? LOAD_PLAY : 0.0f), c0, c1, fx_left;
     *ndrum = 0;
     for (int i = 0; i < NVOICE; i++)
-        if (synth_sounding(SY, i, i + 1)) {
-            *(i < k ? &v1 : &v0) += synth_voice_cost(SY, i);
-            n++;
-        }
+        n += synth_sounding(SY, i, i + 1);
     for (t = 0; t < NTRK; t++) {
         int nv = eng_drum[t] && dl_slot[t] != 0xFFu ? drumline_voices(DL(t)) : 0;
         if (nv) {
@@ -479,6 +476,17 @@ static float load_model(int *nsyn, int *ndrum)
         hits0 = host_drum_hits;
         notes0 = host_note_ons;
     }
+    {   /* the effects' job runs on the second core from the block's start, beside the sequencer: what is left of it
+         * when the voices start shares the second core with them (engine.c render_sub) */
+        float seq_part = (seq.playing ? LOAD_PLAY : 0.0f) + (hit_ms > 0 ? hit_pct : 0.0f);
+        fx_left = fx_cost(0) + fx_cost(1) - seq_part;
+        if (fx_left < 0.0f)
+            fx_left = 0.0f;
+    }
+    k = (int)split_at((int)(fx_left / LOAD_UNIT + 0.5f), NVOICE);
+    for (int i = 0; i < NVOICE; i++)
+        if (synth_sounding(SY, i, i + 1))
+            *(i < k ? &v1 : &v0) += synth_voice_cost(SY, i);
     if (hit_ms > 0) {
         serial += hit_pct;
         hit_ms--;
@@ -488,7 +496,7 @@ static float load_model(int *nsyn, int *ndrum)
         if (!fx_lags(FXS(t)) && fx_awake(FXS(t)))
             serial += LOAD_SYNCFX;
     c0 = LOAD_UNIT * (float)v0;
-    c1 = LOAD_UNIT * (float)v1 + fx_cost(0) + fx_cost(1);
+    c1 = LOAD_UNIT * (float)v1 + fx_left;
     return serial + (engine_core2_state() == 1 ? (c0 > c1 ? c0 : c1) : c0 + c1);
 }
 /* the model's load over MS milliseconds of the device, its mean and peak (the "meter" command; expect model_avg,

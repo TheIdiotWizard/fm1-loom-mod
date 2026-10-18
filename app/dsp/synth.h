@@ -219,6 +219,8 @@ void synth_prepare(synth_t *s, uint32_t n);
 /* render n frames (any n; chunks inside): dry L/R and the two sends (mono), added into the buffers.
  * v0..v1 is the range of voices to render (the two cores split the pool) */
 void synth_render(synth_t *s, int v0, int v1, float *l, float *r, float *s1, float *s2, uint32_t n);
+/* the same, saying which core renders (0 the first, 1 the second: the profiler's halves) */
+void synth_render_on(synth_t *s, int core, int v0, int v1, float *l, float *r, float *s1, float *s2, uint32_t n);
 int synth_sounding(const synth_t *s, int v0, int v1);          /* a voice in the range is sounding */
 int synth_voices_used(const synth_t *s);
 /* the slice engine's newest playing voice on a track (the picture): its slice (0-based) and the position in
@@ -239,6 +241,8 @@ extern volatile uint16_t synth_peak[NTRK];                     /* per track mete
 extern uint32_t (*synth_clock)(void);
 extern volatile uint32_t synth_prof[2][NENGINE + 1];
 extern volatile uint32_t synth_vworst[3];
+extern volatile uint32_t synth_vblk[NVOICE];
+extern volatile uint8_t synth_vinfo[NVOICE];
 #ifdef PLAT_HOST
 extern uint16_t synth_host_solo;              /* the host's stems (host.c LOOM_SOLO): bits 0-7 tracks, 8 / 9 FX I / II */
 #endif

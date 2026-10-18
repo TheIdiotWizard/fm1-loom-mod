@@ -58,6 +58,10 @@ def ask(port, part, timeout=1.0):
 def snap(port, reset_worst=True):
     """the running totals: {'t', 'frames', 'stage': {..}, 'worst': {..}, 'load'.., 'eng': [2][16], 'drum': [8]}"""
     tr = ask(port, 3)                        # (first: the reset below lets the next block overwrite it)
+    try:
+        vb = ask(port, 4)                    # the slowest block's voices (a firmware without it: none)
+    except TimeoutError:
+        vb = None
     flat = [x for w in tr for x in (w & 0xFFFF, w >> 16)]
     a = ask(port, 0 | (64 if reset_worst else 0))
     n = len(STAGES)
@@ -69,6 +73,7 @@ def snap(port, reset_worst=True):
     s["vworst"] = e[2 * k:2 * k + 3]
     s["drum"] = ask(port, 2)
     s["trace"] = [flat[i:i + 8] for i in range(0, len(flat), 8)]
+    s["vblk"] = vb
     s["wall"] = time.time()
     return s
 
@@ -97,9 +102,30 @@ def diff(a, b):
     for k in TRAIL:
         out[k] = b[k]
     out["trace"] = b.get("trace")
+    out["vblk"] = b.get("vblk")
     vw = b.get("vworst") or [0, 0, 0]
     out["vworst"] = (100.0 * vw[0] / wb, ENGINES[vw[1]] if vw[1] < len(ENGINES) else "?", vw[2])
     return out
+
+
+def vblk_text(vb):
+    """the slowest block's voices: each sounding one's time (% of the block), engine, * started there, the core
+    (0 / 1); the first stretch's split: k, the model's units for core 0 / core 1, and the block's stretches"""
+    if not vb or len(vb) < 17:
+        return ""
+    parts, sums = [], [0.0, 0.0]
+    for i, w in enumerate(vb[:16]):
+        info = w >> 16 & 0xFF
+        if not info & 128:
+            continue
+        t = (w & 0xFFFF) / 10.0
+        core = 1 if info & 64 else 0
+        sums[core] += t
+        eng = ENGINES[info & 31] if (info & 31) < len(ENGINES) else "?"
+        parts.append(f"v{i} {eng}{'*' if info & 32 else ''} c{core} {t:.1f}")
+    x = vb[16]
+    return (f"split k {x & 255} model units c0 {x >> 8 & 255} c1 {x >> 16 & 255}, {x >> 24} stretches; voices c0 "
+            f"{sums[0]:.1f} % c1 {sums[1]:.1f} %: " + ", ".join(parts))
 
 
 def trace_text(tr):
