@@ -11,7 +11,9 @@
  *   scene N                      switch to scene N now
  *   punch KEY on|off             a punch-in key (0..26 = F3..G5, or w0../b0..) held or released, on the group
  *   brainkey N on|off            a key on the BRAIN track (MIDI note N)
- *   bpm N                        the tempo (a decimal allowed: 0.1 BPM steps)
+ *   bpm N                        the project's tempo (a decimal allowed: 0.1 BPM steps)
+ *   projnew                      a new project (Setup's NEW PROJECT)
+ *   projsave SLOT [NAME]         the project saved into slot SLOT (1..3), named NAME ('_' for a space) if given
  *   cores N                      the second core on (1) or off (0): its job then runs in place
  *   samples FILE                 the user sample bank from FILE (an image from tools/loom_samples.py build), as an
  *                                upload would leave it (empty at boot)
@@ -919,7 +921,26 @@ int app_host_cmd(const char *cmd, const char *a, const char *b, const char *c, c
         engine_brain_key(atoi(a), !strcmp(b, "on"));
         run_ms(1);
     } else if (!strcmp(cmd, "bpm"))
-        engine_tempo((int)(atof(a) * 10.0 + 0.5));
+        set_tempo_x10((int)(atof(a) * 10.0 + 0.5));     /* the project's tempo (saved with it), as SELECT turns it */
+    else if (!strcmp(cmd, "projnew"))              /* as Setup's NEW PROJECT */
+        do_new_proj();
+    else if (!strcmp(cmd, "projsave")) {           /* projsave SLOT [NAME]: saved into slot 1..3 (as SAVE there) */
+        int slot = atoi(a) - 1;
+        if (slot < 0 || slot >= NPROJ) {
+            printf("projsave: no slot %s\n", a);
+            exit(2);
+        }
+        if (*b) {
+            memset(proj.name, 0, sizeof proj.name);
+            for (int i = 0; b[i] && i < NAME_LEN; i++)
+                proj.name[i] = b[i] == '_' ? ' ' : b[i];
+        }
+        if (save_project(slot) != 0) {
+            printf("projsave: slot %s not saved\n", a);
+            exit(2);
+        }
+        printf("projsave: slot %d \"%.*s\", %d %% of the slot\n", slot + 1, NAME_LEN, proj.name, project_mem_pct());
+    }
     else if (!strcmp(cmd, "cores"))
         plat_cpu2_set(atoi(a));
     else
