@@ -854,7 +854,7 @@ static void bench(void)
 }
 
 /* ---- the character stage ---- */
-static const char *const CT_N[NCT] = {"off", "drive", "fold", "crush", "ring", "tilt", "rectify"};
+static const char *const CT_N[NCT] = {"off", "drive", "fold", "crush", "ring", "tilt"};
 /* a held note's RMS (left, blocks 30..90) on track 0 as par[0] stands; its samples into buf when given */
 static float held_rms(int note, float *buf, int *finite)
 {
@@ -964,8 +964,8 @@ static void char_tests(void)
     check("character: every type stays finite, bounded, and dies", ok);
 
     /* drive and fold keep the level (+-3 dB) at mid amount; and they change the sound */
-    for (ty = CT_DRIVE; ty <= CT_RECTIFY; ty++) {
-        int tone = ty == CT_DRIVE || ty == CT_RECTIFY ? 127 : 64;
+    for (ty = CT_DRIVE; ty <= CT_TILT; ty++) {
+        int tone = ty == CT_DRIVE ? 127 : 64;
         char_sound(EG_STACK, CT_OFF, 64, tone, 127);
         par[0][TP_E1] = 0;                       /* a saw */
         r0 = held_rms(57, ref, &finite);

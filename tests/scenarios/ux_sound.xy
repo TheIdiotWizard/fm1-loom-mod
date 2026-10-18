@@ -58,13 +58,9 @@ turn PRESET 1
 expect par2.30 5
 wait 60
 shot d10h_tilt.png
-turn PRESET 1
-expect par2.30 6
-wait 60
-shot d10i_rectify.png
 spin K4 -40
 wait 60
-shot d10j_rectify_half_mix.png
+shot d10j_tilt_half_mix.png
 turn PRESET 1
 expect par2.30 0
 turn SELECT 1

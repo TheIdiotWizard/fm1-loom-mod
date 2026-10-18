@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* LOOM-8 voices: sixteen voices playing fourteen engines (synth.h), each with two ADSRs, a filter (six
- * types), a character stage (six types: drive, fold, crush, ring, tilt, rectify), a steal fade and sends; per track an LFO, a mono stack, parameter locks and
+ * types), a character stage (five types: drive, fold, crush, ring, tilt), a steal fade and sends; per track an LFO, a mono stack, parameter locks and
  * performance offsets.
  *
  * Time runs in SY_CHUNK (64-sample) chunks: at a chunk boundary a voice reads its track's parameters
@@ -84,7 +84,7 @@ static const float SYNC_BEATS[LS_SYNC_N] = {8.0f, 4.0f, 2.0f, 1.0f, 0.5f, 0.25f,
 static const char *const ENVP_N[4] = {"attack", "decay", "sustain", "release"};
 static const char *const FLTP_N[4] = {"cutoff", "reso", "env", "keytrack"};
 static const char *const AMPP_N[4] = {"volume", "pitch", "pan", "character"};
-static const char *const CTYPE_N[NCT] = {"off", "drive", "fold", "crush", "ring", "tilt", "rectify"};
+static const char *const CTYPE_N[NCT] = {"off", "drive", "fold", "crush", "ring", "tilt"};
 static const char *const SMODE_N[NSM] = {"one-shot", "loop", "reverse", "ping-pong"};
 static const char *const SLICES_N[SL_NCOUNT] = {"4", "8", "16", "32"};
 static const char *const DFTYPE_N[NDF] = {"off", "lp", "hp", "bp"};
@@ -1977,13 +1977,8 @@ static void char_coefs(int type, float a, float t, float freq, float *x)
         x[2] = fm_exp2f(tl);
         break;
     }
-    default: {                                   /* rectify: x .. max(x, 0) .. |x|, its DC off, made up */
-        x[0] = a;
-        x[1] = 1.0f + 1.6f * a - 0.3f * a * a;
-        x[2] = ch_alpha(ch_lp_hz(t));
-        x[5] = CH_DC;
+    default:
         break;
-    }
     }
 }
 static void char_prep(synth_t *s, voice_t *v, int dest, float off)
@@ -2019,7 +2014,6 @@ float char_picture(const uint8_t *par, float u)
     switch (type) {
     case CT_DRIVE: y = sat_c(u * x[0]) * x[1]; break;
     case CT_FOLD: y = (sin_q(u * x[0] + x[3]) - x[4]) * x[1]; break;
-    case CT_RECTIFY: y = u + x[0] * (fm_fabsf(u) - u); break;
     case CT_CRUSH: {                             /* a cycle of 200 samples, held and quantised */
         float hold = 1.0f / x[2], n = fm_floorf(u * 200.0f / hold) * hold;
         d = 0.9f * fm_sin_turns(u);
@@ -2074,12 +2068,8 @@ SY_INLINE float char_one(float d, const int type, float c0, float c1, float c2, 
         *lp += c0 * (d - *lp);
         y = *lp * c1 + (d - *lp) * c2;
         break;
-    default:                                     /* rectify */
-        y = d + c0 * (fm_fabsf(d) - d);
-        *dc += c5 * (y - *dc);
-        y = (y - *dc) * c1;
-        *lp += c2 * (y - *lp);
-        y = *lp;
+    default:
+        y = d;
         break;
     }
     (void)c4;
@@ -2130,8 +2120,6 @@ static void char_run(voice_t *v, float *xl, float *xr, int k)
     case CT_RING * 2 + 1: char_loop(v, xl, xr, k, CT_RING, 1); break;
     case CT_TILT * 2: char_loop(v, xl, xr, k, CT_TILT, 0); break;
     case CT_TILT * 2 + 1: char_loop(v, xl, xr, k, CT_TILT, 1); break;
-    case CT_RECTIFY * 2: char_loop(v, xl, xr, k, CT_RECTIFY, 0); break;
-    case CT_RECTIFY * 2 + 1: char_loop(v, xl, xr, k, CT_RECTIFY, 1); break;
     default: break;
     }
 }
@@ -2929,7 +2917,7 @@ void tp_text(int p, int v, int engine, char *num, char *unit) { tp_text_i(tp_inf
 void tp_text_par(int p, int v, const uint8_t *par, char *num, char *unit)
 {
     int ct = par[TP_CTYPE];
-    if ((p == TP_CTONE && (ct == CT_DRIVE || ct == CT_RECTIFY)) || (p == TP_CAMT && ct == CT_TILT)) {
+    if ((p == TP_CTONE && ct == CT_DRIVE) || (p == TP_CAMT && ct == CT_TILT)) {
         float t = (float)(v > 127 ? 127 : v) * (1.0f / 127.0f);   /* a low-pass, the tilt's pivot: Hz */
         hz_text(p == TP_CTONE ? ch_lp_hz(t) : ch_pivot_hz(t), num, unit);
         return;
@@ -3034,7 +3022,7 @@ const preset_t PRESETS[] = {
     PR("sunday", EG_ORGAN, 4, 6, 7, 8, VM_POLY, 0, 81, 0, 60, 100, 30, 0, 60, 0, 40, 110, 0, 64, 64, FT_LP12, 0, 35, NOLFO, (CT_DRIVE, 100, 105, 127)),
     PR("cathedral", EG_ORGAN, 8, 7, 1, 1, VM_POLY, 0, 84, 40, 60, 100, 76, 0, 60, 0, 40, 100, 0, 64, 64, FT_LP12, 0, 100, NOLFO, (CT_TILT, 45, 110, 127)),
     PR("pedal bass", EG_ORGAN, 1, 8, 1, 1, VM_MONO, 0, 117, 0, 60, 100, 26, 0, 60, 0, 40, 70, 0, 64, 40, FT_LP12, 0, 5, NOLFO, NOCH),
-    PR("harmonium", EG_ORGAN, 1, 2, 2, 4, VM_POLY, 0, 89, 50, 60, 100, 56, 0, 60, 0, 40, 95, 0, 64, 64, FT_LP12, 0, 40, NOLFO, (CT_RECTIFY, 80, 100, 127)),
+    PR("harmonium", EG_ORGAN, 1, 2, 2, 4, VM_POLY, 0, 89, 50, 60, 100, 56, 0, 60, 0, 40, 95, 0, 64, 64, FT_LP12, 0, 40, NOLFO, (CT_FOLD, 30, 64, 127)),
     PR("carousel", EG_ORGAN, 6, 3, 8, 8, VM_POLY, 0, 85, 0, 60, 100, 30, 0, 60, 0, 40, 105, 0, 64, 64, FT_LP12, 10, 30, NOLFO, (CT_FOLD, 100, 80, 127)),
     PR("chapel", EG_ORGAN, 7, 5, 2, 3, VM_POLY, 0, 92, 45, 60, 100, 66, 0, 60, 0, 40, 80, 0, 64, 64, FT_LP12, 0, 70, NOLFO, NOCH),
     /* sync: wire, drawn hard and bright. reach, sub, hiss, thin */

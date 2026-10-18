@@ -3161,8 +3161,7 @@ static void draw_filter(void)
 static void draw_character(void)
 {
     static const char *const ABOUT[NCT] = {"the voice as it is", "a soft saturation", "a sine wavefolder",
-                                           "fewer bits, a lower rate", "a ring modulator", "a tilt EQ",
-                                           "an octave up"};
+                                           "fewer bits, a lower rate", "a ring modulator", "a tilt EQ"};
     int trk = inst_trk(), drum = is_drum(trk);
     const uint8_t *p = proj.trk[trk].par;
     int ct = p[TP_CTYPE] % NCT;

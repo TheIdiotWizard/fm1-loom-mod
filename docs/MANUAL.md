@@ -130,7 +130,7 @@ press…" means keep **HOME** down while you press the next thing.
 | load my own samples | Connect the FM-1 by USB and run `tools/loom_samples.py load kick.wav snare.wav` on the computer. They come after the factory samples, as user 1, user 2 ... |
 | chop a break | On a synth track, **SEL** and ENGINE: slice. Each key plays a slice of the break, F3 the first; write them on the steps in any order. Load your own with `tools/loom_samples.py load "amen.wav@2"` (a loop of 2 bars). |
 | change the filter | Press **ENV** and turn **SELECT** to Filter. **PRESETS** turns the filter type. |
-| give a sound some character | Press **FX**: the Character page. **PRESETS** turns the type (drive, fold, crush, ring, tilt, rectify); the knobs are its amount, tone and mix. |
+| give a sound some character | Press **FX**: the Character page. **PRESETS** turns the type (drive, fold, crush, ring, tilt); the knobs are its amount, tone and mix. |
 | use the effects | Press **FX** and turn **SELECT** to Sends: the track's sends. Turn on for FX I and FX II; **PRESETS** picks the effect. |
 | play | Press **PLAY**: every track starts from step 1. |
 | record live | Hold **REC** and press **PLAY**: it records from step 1 at once (after the count-in, if set). |
@@ -619,7 +619,6 @@ to wet); at mix 0 it is off. The factory presets each have their own, so a prese
 | crush | how far it falls | which falls: left the sample rate, right the bits, the middle both |
 | ring | how deep the ring modulation | the ratio of the ring's sine to the note, 0.25:1 to 7:1 |
 | tilt | the pivot, 150 Hz to 6 kHz | the tilt: left darker, right brighter, 6 dB each side at the ends |
-| rectify | towards half-wave, then full-wave: an octave up | a low-pass after it |
 
 Lock the amount, tone or mix on a step like any knob (hold the step, press **FX**). The LFO reaches the amount:
 the amp module's fourth knob, "character". A drum track's voices have no character: on a kit the page says
