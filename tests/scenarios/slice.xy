@@ -14,7 +14,7 @@ tap SEL
 expect par3.0 10
 expect par3.1 7
 expect par3.2 1
-expect par3.45 0
+expect par3.brain 0
 wait 60
 shot slice_engine.png
 # the break straight: slice k on step 2k - 1

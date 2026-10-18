@@ -12,7 +12,7 @@ shot kit_key_env.png
 spin K3 -40
 spin K2 20
 spin K1 15
-expect par1.76 87
+expect par1.d2.decay 87
 wait 40
 shot kit_key_env_shaped.png
 turn SELECT 1
@@ -20,7 +20,7 @@ expect page Filter
 wait 40
 shot kit_key_filter_off.png
 turn PRESET 1
-expect par1.82 1
+expect par1.d2.ftype 1
 spin K1 -60
 spin K2 90
 spin K3 40
@@ -28,16 +28,16 @@ spin K4 30
 wait 40
 shot kit_key_filter.png
 turn PRESET 1
-expect par1.82 2
+expect par1.d2.ftype 2
 wait 40
 shot kit_key_filter_hp.png
 turn PRESET 1
-expect par1.82 3
+expect par1.d2.ftype 3
 wait 40
 shot kit_key_filter_bp.png
 turn PRESET 1
 turn PRESET 1
-expect par1.82 1
+expect par1.d2.ftype 1
 tap SEL
 wait 40
 shot kit_key_filter_list.png
@@ -89,12 +89,12 @@ tap EDIT
 tapkey b10
 turn SELECT 1
 spin K1 10
-expect par1.227 10
+expect par1.d11.model 10
 turn SELECT -1
 spin K1 5
-expect par1.228 5
+expect par1.d11.k1 5
 spin K4 1
-expect par1.231 1
+expect par1.d11.k4 1
 wait 40
 shot kit_sample_key.png
 tap SEL
