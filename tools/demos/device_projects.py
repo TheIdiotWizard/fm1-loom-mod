@@ -11,8 +11,10 @@ For each group: one user sample bank with the three songs' samples (OUT_DIR/bank
 then the host simulator runs each song's setup (tools/demos/<song>.xy up to "tap HOME", where its performance
 starts), saves it into slot 1..3 (named after the song), starts a new project for the next, and writes the backup
 (OUT_DIR/group_A.loom8, base/tools/fm1_backup.py's file). OUT_DIR/manifest.json lists, per song: its slot, the
-host's model (render.sh's stats line, if build/demos/run_<song>/log.txt is there), and what the script does live
-while it plays (knob moves, throws, keys) that a project cannot hold: the FM-1 plays the project's song alone.
+host's model of the project as the FM-1 will play it (the backup restored in the simulator, the slot loaded from
+Status's list, its song from the Song page until it stops: project_model), render.sh's model with the performance
+(model, if build/demos/run_<song>/log.txt is there), and what the script does live while it plays (knob moves,
+throws, keys) that a project cannot hold: the FM-1 plays the project's song alone.
 
 The banks hold classic breaks (make_banks.py): private, never committed or published (OUT_DIR is under build/).
 Needs the host simulator built (./build.sh --host) and numpy + scipy (make_banks.py).
@@ -65,18 +67,70 @@ def live_actions(live):
 
 
 def model(song):
+    """render.sh's stats line for the song (its performance included), if it was rendered"""
     log = ROOT / "build" / "demos" / f"run_{song}" / "log.txt"
     if not log.exists():
         return None
-    for ln in log.read_text().splitlines():
+    return next((parse_stats(ln) for ln in log.read_text().splitlines() if ln.startswith("stats:")), None)
+
+
+PLAY_SONG = """master 4096
+samples {bank}
+restore {backup}
+expect restore_rc 0
+wait 300
+listen
+tap GLO
+wait 300
+turn SELECT 5
+wait 300
+tap SEL
+wait 300
+turn ALGO {turns}
+wait 200
+tap SEL
+wait 500
+said LOADED slot {slot}
+tap HOME
+wait 300
+tap HOME
+wait 300
+turn SELECT 1
+wait 300
+stats reset
+tap PLAY
+wait 1000
+said Play
+wait {ms}
+expect playing 0
+stats
+"""
+
+
+def project_model(host, out, g, slot, bank, backup):
+    """the host's model of what the FM-1 plays: the backup restored, the slot loaded from Status's list (as
+    device_load.py does it), its song from the Song page until it stops; no live gestures"""
+    sp = out / f"play_{g}{slot}.xy"
+    sp.write_text(PLAY_SONG.format(bank=bank, backup=backup, turns=slot - 1, slot=slot, ms=150000))
+    r = subprocess.run([str(host), str(sp), str(out / "play")], capture_output=True, text=True,
+                       env={**__import__("os").environ, "LOOM_LOAD": "0"})
+    log = r.stdout + r.stderr
+    (out / f"play_{g}{slot}.log").write_text(log)
+    if r.returncode:
+        sys.exit(f"group {g} slot {slot}: the song did not play and stop in the host (see {out / f'play_{g}{slot}.log'})")
+    for ln in log.splitlines():
         if ln.startswith("stats:"):
-            m = re.search(r"([\d.]+) s playing, peak synth voices (\d+) \(of (\d+)\), peak drum voices (\d+), guard trips "
-                          r"(\d+); model load peak (\d+) %, mean (\d+) %", ln)
-            if m:
-                return {"line": ln, "seconds": float(m.group(1)), "synth_voices": int(m.group(2)),
-                        "drum_voices": int(m.group(4)), "guard": int(m.group(5)), "peak": int(m.group(6)),
-                        "mean": int(m.group(7))}
+            return parse_stats(ln)
     return None
+
+
+def parse_stats(ln):
+    m = re.search(r"([\d.]+) s playing, peak synth voices (\d+) \(of (\d+)\), peak drum voices (\d+), guard trips "
+                  r"(\d+); model load peak (\d+) %, mean (\d+) %", ln)
+    if not m:
+        return None
+    return {"line": ln, "seconds": float(m.group(1)), "synth_voices": int(m.group(2)), "drum_voices": int(m.group(4)),
+            "guard": int(m.group(5)), "peak": int(m.group(6)), "mean": int(m.group(7))}
 
 
 def main():
@@ -126,6 +180,10 @@ def main():
         if r.returncode or not (out / f"group_{g}.loom8").exists():
             sys.exit(f"group {g}: the host run failed (rc {r.returncode}); see {out / f'group_{g}.log'}")
         print(f"  backup {out / f'group_{g}.loom8'}, bank {bank}")
+        for row in rows:
+            row["project_model"] = project_model(host, out, g, row["slot"], bank, out / f"group_{g}.loom8")
+            pm = row["project_model"]
+            print(f"  slot {row['slot']} {row['song']}: as a project, " + (pm["line"][7:] if pm else "no stats"))
         manifest["groups"][g] = {"bank": str(bank), "backup": str(out / f"group_{g}.loom8"), "songs": rows}
     (out / "manifest.json").write_text(json.dumps(manifest, indent=1) + "\n")
     print(f"manifest {out / 'manifest.json'}")
