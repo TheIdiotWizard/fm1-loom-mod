@@ -478,15 +478,6 @@ static void step_say(int s, int on)
         sp_said = 1;
     }
 }
-/* a drum step holds SN sounds: one more is refused, aloud (taking one off is always fine) */
-static int step_full(const step_t *st, int sound)
-{
-    for (int i = 0; i < SN; i++)
-        if (!st->note[i] || st->note[i] == sound)
-            return 0;
-    say_no("STEP FULL", "4 sounds a step");
-    return 1;
-}
 static void step_toggle(int i)
 {
     int trk = sel_trk(), s = step_shown(i);
@@ -495,15 +486,8 @@ static void step_toggle(int i)
         return;
     undo_keep();
     if (is_drum(trk)) {
-        int on = 0;
-        if (step_full(st, ui.dsound + 1))
-            return;
-        step_toggle_note(st, ui.dsound + 1);
-        for (int k = 0; k < SN; k++)
-            on |= st->note[k] == ui.dsound + 1;
-        if (!st->vel)
-            st->vel = 100;
-        step_say(s, on);
+        kit_toggle(st, ui.dsound + 1);
+        step_say(s, kit_has(st, ui.dsound + 1));
     } else if (step_empty(st)) {
         uint8_t one = 0;
         if (trk == AUX_PUNCH) {
@@ -718,7 +702,11 @@ static void step_rec_key(int v)
         memset(st, 0, sizeof *st);                    /* (the step's components and locks go with it: a new note) */
         st->vel = 100;
     }
-    {
+    if (is_drum(trk)) {
+        kit_add(st, v);
+        if (!st->vel)
+            st->vel = 100;
+    } else {
         int has = 0, k;
         for (k = 0; k < SN; k++)
             has |= st->note[k] == v;
@@ -1002,16 +990,9 @@ static void key_down(int k)
         if (b >= 0 && ui.held && is_drum(trk)) {
             int s = step_shown(ui.held_first), on = 0;
             step_t *st = &tpat(trk)->st[s];
-            ui.kmode[k] = KM_STEPSOUND;
-            ui.held_used = 1;
-            if (step_full(st, b + 1))
-                return;
             undo_keep();
-            step_toggle_note(st, b + 1);
-            for (int i = 0; i < SN; i++)
-                on |= st->note[i] == b + 1;
-            if (!st->vel)
-                st->vel = 100;
+            kit_toggle(st, b + 1);
+            on = kit_has(st, b + 1);
             ui.kmode[k] = KM_STEPSOUND;
             ui.held_used = 1;
             say(DL_SOUND_NAME[b], on ? "on the step" : "off the step");
@@ -1939,6 +1920,20 @@ static void act_remove_note(int row)             /* a step held: the row's note 
 {
     int trk = sel_trk();
     step_t *st = &tpat(trk)->st[step_shown(ui.held_first)];
+    if (is_drum(trk)) {                          /* the row-th sound on the step */
+        int snd = 0;
+        for (int i = 1, r = 0; i <= NDRUM && !snd; i++)
+            if (kit_has(st, i) && r++ == row)
+                snd = i;
+        if (!snd)
+            return;
+        undo_keep();
+        kit_toggle(st, snd);
+        ui.held_used = 1;
+        mark_dirty();
+        say("REMOVED", DL_SOUND_NAME[snd - 1]);
+        return;
+    }
     if (row < 0 || row >= SN || !st->note[row])
         return;
     undo_keep();
@@ -2118,15 +2113,8 @@ static void input(void)
                 if (is_drum(sel_trk())) {           /* a kit's locks reach the key the step plays: the one shown
                                                      * if the step has it, else the step's first */
                     const step_t *st = &tpat(sel_trk())->st[step_shown(ui.held_first)];
-                    int has = 0, first = -1;
-                    for (int k = 0; k < SN; k++)
-                        if (st->note[k] >= 1 && st->note[k] <= DL_NSOUND) {
-                            has |= st->note[k] == ui.dsound + 1;
-                            if (first < 0)
-                                first = st->note[k] - 1;
-                        }
-                    if (!has && first >= 0)
-                        ui.dsound = (uint8_t)first;
+                    if (!kit_has(st, ui.dsound + 1) && kit_first(st))
+                        ui.dsound = (uint8_t)(kit_first(st) - 1);
                 }
                 ui.held_used = 1;
                 ui.touched = -1;
@@ -2726,7 +2714,7 @@ static void speak_dump(void)
     static const char *const MSG[][2] = {
         {"SAVED", 0}, {"NOT SAVED", "flash error"}, {"UNDO", "T1 P1"}, {"REDO", "T1 P1"}, {"NOTHING TO UNDO", 0},
         {"NOTHING TO REDO", 0}, {"COUNT-IN", "then recording"}, {"RECORDING", "latched"}, {"RECORDING", "play to start"},
-        {"RECORD OFF", 0}, {"STEP RECORD", "keys write steps"}, {"STEP FULL", "4 sounds a step"},
+        {"RECORD OFF", 0}, {"STEP RECORD", "keys write steps"},
         {"LENGTH", "to step 4"}, {"NUDGE", "+2"},
         {"NO LANE LEFT", "clear locks first"}, {"LOCKS CLEARED", 0}, {"NEW", "S3"}, {"MUTED", "T1"}, {"UNMUTED", "T1"},
         {"INSERTED", "S2"}, {"T3", 0}, {"SOUND", "snare"}, {"KEY", "snare"}, {"SCALE", "1/2"}, {"BAR", "2"}, {"CURSOR", "5"},

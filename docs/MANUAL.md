@@ -84,7 +84,8 @@ knob on it; press **ARP** on T2 and turn **KNOB 1** to arp; press **GLO**, turn 
 - **Track** (T1 to T8): one sound and its patterns. After T8 come the aux tracks: COND (the conductor), THROW (the throws), FX I
   and FX II.
 - **Pattern** (P1 to P8): a track's steps, up to 64 of them in four bars. Each track has eight.
-- **Step**: one cell of a pattern. It holds up to four notes, two tricks, a chance and parameter locks.
+- **Step**: one cell of a pattern. It holds up to four notes (on a drum track, any of the eleven sounds), two tricks, a
+  chance and parameter locks.
 - **Trick**: something a step does as it plays, such as pulse, hold, multiply or jump. There are fourteen; hold
   a step and press ARP to give it two.
 - **Lock**: a knob value a step sets as it plays.

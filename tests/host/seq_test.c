@@ -113,9 +113,12 @@ static void stop(void)
 #define L16 5512u                     /* a sixteenth at 120 BPM: 5512.5 samples */
 static int near(uint32_t t, uint32_t want, uint32_t tol) { return t + tol >= want && t <= want + tol; }
 static step_t *st(int trk, int step) { return &P.pat[trk][0].st[step]; }
-static void note(int trk, int step, int n, int vel)
+static void note(int trk, int step, int n, int vel)   /* (a kit track's: sound n added to the step's) */
 {
-    st(trk, step)->note[0] = (uint8_t)n;
+    if (trk < NTRK && par[trk][TP_ENGINE] == EG_DRUMLINE)
+        kit_add(st(trk, step), n);
+    else
+        st(trk, step)->note[0] = (uint8_t)n;
     st(trk, step)->vel = (uint8_t)vel;
 }
 static int count(int kind, int trk)
@@ -1647,6 +1650,23 @@ static void t_pitch_short_long(void)
 /* sequenced punch-ins, and recording held punch keys into the PUNCH track */
 /* a muted track's steps: nothing plays, each would-be hit goes to the sink's ghost (the master's pump) at the
  * step's velocity; a playing track sends none */
+static void t_kit11(void)            /* a kit step holds all eleven sounds, and plays them in key order */
+{
+    cur = "kit11";
+    reset();
+    par[0][TP_ENGINE] = EG_DRUMLINE;
+    for (int k = 1; k <= NDRUM; k++)
+        note(0, 0, k, 100);
+    CHECK(kit_mask(st(0, 0)) == KIT_ALL && !step_empty(st(0, 0)) && kit_first(st(0, 0)) == 1);
+    start();
+    run(10);
+    CHECK(count(E_DRUM, 0) == NDRUM && nth(E_DRUM, 0, 0)->a == 0 && nth(E_DRUM, 0, NDRUM - 1)->a == NDRUM - 1);
+    stop();
+    kit_toggle(st(0, 0), 11);
+    CHECK(!kit_has(st(0, 0), 11) && kit_has(st(0, 0), 10) && st(0, 0)->note[2] == 0 && st(0, 0)->note[3] == 0);
+    printf("ok %s\n", cur);
+}
+
 static void t_ghost(void)
 {
     cur = "ghost";
@@ -1654,7 +1674,7 @@ static void t_ghost(void)
     par[0][TP_ENGINE] = EG_DRUMLINE;
     note(0, 0, 1, 120);                           /* the kick (sound 0) */
     note(0, 4, 2, 90);                            /* snare and kick */
-    st(0, 4)->note[1] = 1;
+    note(0, 4, 1, 90);
     note(1, 0, 60, 70);                           /* a melodic chord on track 2 */
     st(1, 0)->note[1] = 64;
     S.mute = 3;
@@ -1662,7 +1682,7 @@ static void t_ghost(void)
     run(6 * L16);
     CHECK(count(E_DRUM, 0) == 0 && count(E_ON, 1) == 0);
     CHECK(count(E_GHOST, 0) == 3 && nth(E_GHOST, 0, 0)->a == 0 && nth(E_GHOST, 0, 0)->b == 120);
-    CHECK(nth(E_GHOST, 0, 1)->a == 1 && nth(E_GHOST, 0, 2)->a == 0 && nth(E_GHOST, 0, 2)->b == 90);
+    CHECK(nth(E_GHOST, 0, 1)->a == 0 && nth(E_GHOST, 0, 2)->a == 1 && nth(E_GHOST, 0, 2)->b == 90);   /* by key */
     CHECK(near(nth(E_GHOST, 0, 1)->t, 4 * L16 + 2, 3));
     CHECK(count(E_GHOST, 1) == 1 && nth(E_GHOST, 1, 0)->a == -1 && nth(E_GHOST, 1, 0)->b == 70);
     stop();
@@ -1820,7 +1840,7 @@ static void t_rec_wait(void)
     CHECK(count(E_METRO, -1) == 0);
     seq_key(&S, 0, 3, 1, 100);
     run(10);
-    CHECK(count(E_DRUM, 0) == 1 && count(E_METRO, -1) == 1 && st(0, 0)->note[0] == 3);
+    CHECK(count(E_DRUM, 0) == 1 && count(E_METRO, -1) == 1 && kit_mask(st(0, 0)) == 1u << 2);   /* the hat (sound 3) */
     /* seq_rec(2) while playing is a plain rec */
     stop();
     seq_rec(&S, 0);
@@ -2121,6 +2141,7 @@ int main(void)
     t_components();
     t_cond();
     t_locks();
+    t_kit11();
     t_scene();
     t_ghost();
     t_song();

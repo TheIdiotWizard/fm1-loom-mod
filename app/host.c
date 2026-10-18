@@ -117,6 +117,7 @@ static void run_ms(uint32_t ms);                        /* (plat_host.c's, after
 static int host_fails;
 static int key_of(const char *s);
 
+static int host_kit(int t) { return t >= 0 && t < NTRK && proj.trk[t].par[TP_ENGINE] == EG_DRUMLINE; }   /* 0-based */
 static tpat_t *pat_of(int t, int p)             /* track T, pattern P (1-based; P 0 = the one playing) */
 {
     if (t < 1 || t > NSEQT)
@@ -142,9 +143,12 @@ static void steps_print(int t, int p)
         if (step_empty(st) && !st->comp && !st->comp2 && !st->cond)
             continue;
         printf("    %2d:", s + 1);
-        for (k = 0; k < SN; k++)
+        for (k = 0; k < SN && !host_kit(t - 1); k++)
             if (st->note[k])
                 printf(" %d", st->note[k]);
+        for (k = 1; k <= NDRUM && host_kit(t - 1); k++)   /* a kit's step: its sounds */
+            if (kit_has(st, k))
+                printf(" %d", k);
         printf("  vel %d len %d nudge %d comp %d/%d comp2 %d/%d cond %d\n", st->vel, st->len, st->nudge, st->comp,
                st->cval, st->comp2, st->cval2, st->cond);
     }
@@ -277,7 +281,7 @@ static int expect_more(const char *what, const char *a, const char *b, const cha
         }
         tp = pat_of(atoi(t), atoi(pt));
         s = atoi(st) - 1;
-        got = tp && s >= 0 && s < NSTEP ? tp->st[s].note[0] : -1;
+        got = !tp || s < 0 || s >= NSTEP ? -1 : host_kit(atoi(t) - 1) ? kit_first(&tp->st[s]) : tp->st[s].note[0];
         if (got != atoi(v)) {
             printf("FAIL expect note %s %s %s == %s, got %d\n", t, pt, st, v, got);
             host_fails++;
@@ -694,11 +698,7 @@ static int song_cmd(const char *cmd)
                 st = &tp->st[s++];
                 if (!vel)
                     continue;
-                for (k = 0; k < SN && st->note[k] && st->note[k] != snd; k++)
-                    ;
-                if (k == SN)
-                    host_die("a fifth sound on a step", w[i]);
-                st->note[k] = (uint8_t)snd;
+                kit_add(st, snd);
                 if (vel > st->vel)
                     st->vel = (uint8_t)vel;
             }
@@ -962,7 +962,12 @@ int app_host_cmd(const char *cmd, const char *a, const char *b, const char *c, c
             memset(&tp->st[s], 0, sizeof tp->st[s]);
         } else {
             uint8_t n1 = (uint8_t)note;
-            step_set_notes(&tp->st[s], &n1, 1, vel);
+            if (host_kit(atoi(a) - 1)) {             /* a kit track: the sound note on the step, alone */
+                kit_set(&tp->st[s], 0);
+                kit_add(&tp->st[s], note);
+                tp->st[s].vel = (uint8_t)vel;
+            } else
+                step_set_notes(&tp->st[s], &n1, 1, vel);
         }
     } else if (!strcmp(cmd, "chord")) {             /* chord T PAT S LEN N1 N2 [N3 [N4]]: notes on one step */
         char w[4][16] = {{0}};

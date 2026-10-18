@@ -244,6 +244,8 @@ static void patterns_clamp(void)
                 tp->quant = 100;
             for (k = 0; k < NSTEP; k++) {
                 step_t *s = &tp->st[k];
+                if (t < NTRK && proj.trk[t].par[TP_ENGINE] == EG_DRUMLINE)
+                    kit_set(s, kit_mask(s));              /* a kit step: its sounds' bits only */
                 if (s->comp >= NSC)
                     s->comp = SC_NONE;
                 if (s->comp2 >= NSC)

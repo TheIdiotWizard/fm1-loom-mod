@@ -55,7 +55,7 @@ extern const uint8_t SC_DEFAULT[NSC];      /* pulse 3 (= 4), hold 3, multiply 1,
 #define COND_NAB 35
 
 typedef struct {
-    uint8_t note[SN];                 /* MIDI notes, 0 = none (a drum track: the sound 1..11 in note[0]) */
+    uint8_t note[SN];                 /* MIDI notes, 0 = none (a kit track: its sounds as bits, seq.h kit_*) */
     uint8_t vel;                      /* 1..127 */
     uint8_t len;                      /* quarter steps, 0 = the pattern's note length */
     int8_t nudge;                     /* ticks, -12..12 */
@@ -64,6 +64,15 @@ typedef struct {
     uint8_t cond;                     /* see COND_* */
     uint8_t comp2, cval2;             /* a second component on the same step (SC_NONE = none) */
 } step_t;                             /* 12 bytes */
+/* a kit track's step: any of its NDRUM sounds (1..11), a bit each (bit k: sound k + 1) in note[0] (sounds 1-8) and
+ * note[1] (9-11); note[2] and note[3] stay 0, so step_empty holds */
+#define KIT_ALL ((1u << NDRUM) - 1u)
+static inline uint32_t kit_mask(const step_t *st) { return ((uint32_t)st->note[0] | (uint32_t)st->note[1] << 8) & KIT_ALL; }
+static inline int kit_has(const step_t *st, int sound) { return sound >= 1 && sound <= NDRUM && (kit_mask(st) >> (sound - 1) & 1u); }
+void kit_set(step_t *st, uint32_t mask);
+void kit_toggle(step_t *st, int sound);           /* on or off; a fresh step's velocity 100 */
+int kit_add(step_t *st, int sound);               /* 1: added (0: there already, or not a sound) */
+int kit_first(const step_t *st);                  /* the lowest sound on the step, 0 none */
 
 enum { TS_HALF, TS_1, TS_2, TS_3, TS_4, TS_5, TS_6, TS_8, TS_16, NTS };   /* track scale: sixteenths a step */
 /* groove types (the project's): swing, lilt, weave, stretch, drunk, jitter, accent, lazy, push pull, sway, swell

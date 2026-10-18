@@ -1653,10 +1653,18 @@ static void list_build(void)
 {
     int keep = ui.page, g = page_group(keep), f = PAGE_BTN[g].first, n = group_n(g), trk = sel_trk();
     knob_t k[4];
-    static char slot_t[24], fol_t[24], nm[NTRK][16], rm[SN][12];
+    static char slot_t[24], fol_t[24], nm[NTRK][16], rm[NDRUM][16];
     lst.n = 0;
     if (keep == P_STEPS && ui.held && is_seqt(trk)) {   /* a step held + SEL: its notes, to remove */
         const step_t *st = &tpat(trk)->st[step_shown(ui.held_first)];
+        if (is_drum(trk)) {                           /* each sound on the step, by key */
+            for (int i = 1, r = 0; i <= NDRUM; i++)
+                if (kit_has(st, i)) {
+                    s_cat(s_cat(rm[r], "REMOVE "), DL_SOUND_NAME[i - 1]);
+                    list_add(rm[r++], 0, LK_ACTION, A_REMOVE_NOTE);
+                }
+            return;
+        }
         for (int i = 0; i < SN && st->note[i]; i++) {
             char *e = s_cat(rm[i], "REMOVE ");
             if (is_drum(trk))
@@ -1986,12 +1994,8 @@ static void draw_song(void)
 /* a cell's text: its notes or chord, the shown drum sound, a throw track's effect (draw_steps) */
 static int step_on(const step_t *st, int trk)       /* the cell is "on" for the sound shown (drums) or any note */
 {
-    if (is_drum(trk)) {
-        for (int k = 0; k < SN; k++)
-            if (st->note[k] == ui.dsound + 1)
-                return 1;
-        return 0;
-    }
+    if (is_drum(trk))
+        return kit_has(st, ui.dsound + 1);
     return !step_empty(st);
 }
 /* a chord from its notes (3 or 4): its shape (CHORD_SHAPE's, +1; 0 = none) and its root's pitch class. The root is a
@@ -2132,18 +2136,20 @@ static void draw_steps(void)
          * dot (3-11), line 1 (13-21), line 2 (23-31) or a kit's ticks (26-29), the marks (33-41: the chance's sign
          * at the left, the tricks' letters at the right), the length's bar (42-43). A line is at most ST_TW wide. */
         if (drum && !step_empty(st)) {               /* every sound on the step: a tick each, by key, the shown one bright */
-            uint16_t have = 0;
-            int nt = 0;
-            for (int k = 0; k < SN; k++)
-                if (st->note[k] >= 1 && st->note[k] <= DL_NSOUND)
-                    have |= (uint16_t)(1u << (st->note[k] - 1));
-            for (int b = 0; b < DL_NSOUND; b++)
-                nt += have >> b & 1u;
+            uint32_t have = kit_mask(st);
+            int nt = __builtin_popcount(have), row1 = nt > 5 ? (nt + 1) / 2 : nt;
             for (int b = 0, j = 0; b < DL_NSOUND; b++)
-                if (have >> b & 1u) {
-                    int32_t tx = x + (ST_CW - 2) / 2 - (nt * 5 - 1) / 2 + j++ * 5;
+                if (have >> b & 1u) {                /* up to five a row of 4 px ticks; more: two rows of 3 px */
                     uint16_t tc = b == ui.dsound ? (bg == K_NOW ? K_BG : K_TEXT) : (bg == K_NOW ? K_PANEL2 : K_NOW_M);
-                    cv_round(tx, y + 26, 4, 4, 1, tc);   /* their own row, between the name and the marks */
+                    if (nt <= 5) {
+                        int32_t tx = x + (ST_CW - 2) / 2 - (nt * 5 - 1) / 2 + j * 5;
+                        cv_round(tx, y + 26, 4, 4, 1, tc);   /* their own row, between the name and the marks */
+                    } else {
+                        int r = j >= row1, n = r ? nt - row1 : row1, c = r ? j - row1 : j;
+                        int32_t tx = x + (ST_CW - 2) / 2 - (n * 4 - 1) / 2 + c * 4;
+                        cv_rect(tx, y + 25 + r * 4, 3, 3, tc);
+                    }
+                    j++;
                 }
             if (on) {
                 s_cat(t, DL_SOUND_NAME[ui.dsound % DL_NSOUND]);

@@ -185,6 +185,36 @@ int step_empty(const step_t *st)
     return 1;
 }
 
+/* the kit's steps (seq.h): the interrupt reads note[0] and note[1] apart, so a change between them plays at
+ * most one step half old */
+void kit_set(step_t *st, uint32_t mask)
+{
+    mask &= KIT_ALL;
+    st->note[2] = st->note[3] = 0;
+    st->note[1] = (uint8_t)(mask >> 8);
+    st->note[0] = (uint8_t)(mask & 255u);
+}
+void kit_toggle(step_t *st, int sound)
+{
+    if (sound < 1 || sound > NDRUM)
+        return;
+    kit_set(st, kit_mask(st) ^ 1u << (sound - 1));
+    if (!st->vel)
+        st->vel = 100;
+}
+int kit_add(step_t *st, int sound)
+{
+    if (sound < 1 || sound > NDRUM || kit_has(st, sound))
+        return 0;
+    kit_set(st, kit_mask(st) | 1u << (sound - 1));
+    return 1;
+}
+int kit_first(const step_t *st)
+{
+    uint32_t m = kit_mask(st);
+    return m ? __builtin_ctz(m) + 1 : 0;
+}
+
 /* ----------------------------------------------------------------- weave --- */
 static const step_t *wrap_step(const tpat_t *p, int i) { return &p->st[p->len ? i % p->len : 0]; }
 

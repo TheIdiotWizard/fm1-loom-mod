@@ -612,9 +612,9 @@ static void fire_notes(seq_t *s, int t, const step_t *st, int p, uint32_t L, int
         int semi = step_tune(s->P->lane, t, s->ppat[t], p);
         if (act[SC_MULTIPLY] && tr->ratchets > 1 && len_q8 > L / tr->ratchets)
             len_q8 = L / tr->ratchets;
-        for (i = 0; i < SN; i++)
-            if (st->note[i] >= 1 && st->note[i] <= NDRUM && st->note[i] != tr->skip_note)
-                emit_drum(s, t, st->note[i] - 1, vel, semi, TAG_STEP | (uint32_t)(ratchet * 1024), len_q8, o);
+        for (i = 1; i <= NDRUM; i++)
+            if (kit_has(st, i) && i != tr->skip_note)
+                emit_drum(s, t, i - 1, vel, semi, TAG_STEP | (uint32_t)(ratchet * 1024), len_q8, o);
         return;
     }
     if (fx_on(s, t, PX_CHOP))
@@ -672,9 +672,9 @@ static void ghost_notes(seq_t *s, int t, const step_t *st, const seq_sink_t *o)
         o->ghost(o->ctx, t, -1, vel);
         return;
     }
-    for (i = 0; i < SN; i++)
-        if (st->note[i] >= 1 && st->note[i] <= NDRUM)
-            o->ghost(o->ctx, t, st->note[i] - 1, vel);
+    for (i = 1; i <= NDRUM; i++)
+        if (kit_has(st, i))
+            o->ghost(o->ctx, t, i - 1, vel);
 }
 
 /* the aux tracks' steps: brain chords, punch-in bits */
@@ -1769,7 +1769,14 @@ static void rec_key_on(seq_t *s, int t, int note, int vel)
             st->note[i] = 0;
     }
     s->rec_written[t][p >> 5] |= 1u << (p & 31);
-    if (step_empty(st)) {
+    if (is_drum(s, t)) {
+        if (step_empty(st)) {
+            st->vel = (uint8_t)vel;
+            st->len = 0;
+            st->nudge = (int8_t)ticks;
+        }
+        kit_add(st, note);
+    } else if (step_empty(st)) {
         st->note[0] = (uint8_t)note;
         st->vel = (uint8_t)vel;
         st->len = 0;
@@ -1807,9 +1814,13 @@ static void rec_key_off(seq_t *s, int t, int note)
             uint32_t L = s->t[t].step_q8 ? s->t[t].step_q8 : seq_step_q8(s, t);
             int len = (int)((s->rec_age[i] + L / 8u) / (L / 4u));   /* quarter steps, rounded */
             len = len < 1 ? 1 : len > 16 ? 16 : len;
-            for (j = 0; j < SN; j++)
-                if (st->note[j] == note)
+            if (is_drum(s, t)) {
+                if (kit_has(st, note))
                     st->len = (uint8_t)len;
+            } else
+                for (j = 0; j < SN; j++)
+                    if (st->note[j] == note)
+                        st->len = (uint8_t)len;
         }
         s->rec_note[i] = 0;
         return;
@@ -1840,7 +1851,14 @@ static void rec_go(seq_t *s, int t, int note, int vel, const seq_sink_t *o)
     s->bar_fresh = 1;
     s->step_tick = 0;
     origins_zero(s);
-    if (step_empty(st)) {
+    if (is_drum(s, t)) {
+        if (step_empty(st)) {
+            st->vel = (uint8_t)vel;
+            st->len = 0;
+            st->nudge = 0;
+        }
+        kit_add(st, note);
+    } else if (step_empty(st)) {
         st->note[0] = (uint8_t)note;
         st->vel = (uint8_t)vel;
         st->len = 0;
@@ -2616,6 +2634,13 @@ int seq_step_rec(seq_t *s, int trk, int step, int note, int vel)
     if (trk < 0 || trk >= NSEQT || step < 0 || step >= NSTEP || note < 1 || note > 127)
         return 0;
     st = &tpat(s, trk)->st[step];
+    if (is_drum(s, trk)) {
+        if (step_empty(st)) {
+            st->vel = (uint8_t)(vel < 1 ? 1 : vel > 127 ? 127 : vel);
+            st->len = 0;
+        }
+        return kit_add(st, note);
+    }
     if (step_empty(st)) {
         st->note[0] = (uint8_t)note;
         st->vel = (uint8_t)(vel < 1 ? 1 : vel > 127 ? 127 : vel);
@@ -2641,9 +2666,14 @@ int seq_step_add_notes(seq_t *s, int trk, int step, const uint8_t *notes, int n,
         return 0;
     st = &tpat(s, trk)->st[step];
     for (i = 0; i < n; i++)
-        step_toggle_note(st, notes[i]);
+        if (is_drum(s, trk))
+            kit_toggle(st, notes[i]);
+        else
+            step_toggle_note(st, notes[i]);
     if (vel > 0 && !step_empty(st))
         st->vel = (uint8_t)(vel > 127 ? 127 : vel);
+    if (is_drum(s, trk))
+        return __builtin_popcount(kit_mask(st));
     for (i = 0; i < SN; i++)
         k += st->note[i] != 0;
     return k;

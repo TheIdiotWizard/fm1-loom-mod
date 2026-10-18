@@ -111,7 +111,8 @@ int plat_last_crash(uint32_t v[5]);     /* 1: a crash since power-on (vec, pc, e
 void loom_lights(uint32_t buttons, uint32_t keys, int glow, uint32_t dim_keys, int red);
 
 #define PROJ_MAGIC 0x384D4F4Cu          /* "LOM8" (was "XXY1": XY-1's projects start fresh) */
-#define PROJ_FORMAT 6u                  /* (pre-release: an older project does not load, nothing is migrated)
+#define PROJ_FORMAT 7u                  /* (pre-release: an older project does not load, nothing is migrated)
+                                         * 7: a kit step's sounds as bits (pattern.h kit_*: any of the 11);
                                          * 6: the engine's second page (TP_X1..X4: brocade's sub) moved TP_PLAYER on
                                          * (and every index after it); 5: the master's pump (master[] 12 -> 16
                                          * bytes, out of rsv[]); 4: no tape (its track and send), the reverb's modes, the master's tape,
