@@ -1941,6 +1941,13 @@ static void draw_song(void)
     uint32_t h = hash_u(hash_u(2166136261u, 0x50u), (uint32_t)cur | (uint32_t)sg->len << 8 | (uint32_t)sg->loop << 16 |
                                           (uint32_t)(seq.song_on && playing() ? pp + 1 : 0) << 20);
     char t[16];
+    int32_t fill = 0;                                /* the playing slot's way through, 0..48 px: its bars and the bar's sixteenths */
+    if (seq.song_on && playing() && pp < sg->len) {
+        int reps = sg->slot[pp].rep ? sg->slot[pp].rep : 1, left = seq.song_rep ? seq.song_rep : 1;
+        int32_t six = (int32_t)(reps - (left > reps ? reps : left)) * 16 + (int32_t)(seq.bar16 & 15u);
+        fill = six * 48 / (reps * 16);
+    }
+    h = hash_u(h, (uint32_t)fill);
     for (int i = top; i < top + 16 && i < sg->len; i++)
         h = hash_u(h, sg->slot[i].scene | (uint32_t)sg->slot[i].rep << 8);
     if (!begin_main(h))
@@ -1959,15 +1966,18 @@ static void draw_song(void)
             text_c(x + 26, y + 3, &FONT_XS, sg->loop ? "loop" : "end", K_DIM);
             continue;
         }
-        cv_round(x, y, 52, 22, 5, on ? K_NOW : K_PANEL);
-        if (i == cur) {
-            cv_round(x, y, 52, 22, 5, K_SEL);
-            cv_round(x + 2, y + 2, 48, 18, 4, on ? K_NOW : K_PANEL);
+        cv_round(x, y, 52, 22, 5, on || i == cur ? (i == cur ? K_SEL : K_NOW) : K_PANEL);
+        if (on || i == cur)                          /* (the frame: the playing one's ink, the picked one's) */
+            cv_round(x + 2, y + 2, 48, 18, 4, K_PANEL);
+        if (on) {                                    /* playing: a bar along its foot fills as it plays, to the step */
+            cv_rect(x + 6, y + 17, 40, 3, K_PANEL2);
+            if (fill > 0)
+                cv_rect(x + 6, y + 17, fill * 40 / 48, 3, K_NOW);
         }
         num_s((uint32_t)sg->slot[i].scene + 1u, s_cat(t, "S"));
-        cv_text(x + 6, y + 3, &FONT_B, t, on ? K_BG : K_TEXT);
+        cv_text(x + 6, y + 3, &FONT_B, t, K_TEXT);
         num_s((uint32_t)sg->slot[i].rep, t);         /* its bars (the BARS knob names them) */
-        text_r(x + 47, y + 4, &FONT_XS, t, on ? K_BG : K_DIM);
+        text_r(x + 47, y + 4, &FONT_XS, t, on ? K_TEXT : K_DIM);
     }
     if (sg->len >= 16) {
         num_s((uint32_t)sg->len, s_cat(num_s((uint32_t)top + 1u, s_cat(t, "slots ")), " to "));

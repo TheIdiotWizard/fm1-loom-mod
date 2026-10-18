@@ -1,0 +1,28 @@
+# the Song page while a song plays: the playing slot's bar fills through its bars (S1 four bars, then S2 one)
+wait 300
+tapkey w0
+tap HOME
+tapkey w1
+tap HOME
+wait 100
+expect page Song
+tapkey w0
+tapkey w1
+turn K1 -2
+wait 50
+turn K3 3
+wait 50
+turn K1 2
+wait 100
+shot song_progress0.png
+tap PLAY
+wait 1000
+expect playing 1
+shot song_progress1.png
+wait 3000
+shot song_progress2.png
+wait 3900
+shot song_progress3.png
+wait 1500
+shot song_progress4.png
+tap PLAY
