@@ -1168,6 +1168,29 @@ static void t_maestro(void)
     cur = "maestro";
     reset();
     par[0][TP_PLAYER] = PL_STRUM;
+    seq_key(&S, 0, 62, 1, 90);            /* a fresh strum: a major triad from the key */
+    run(10);
+    CHECK(count(E_ON, 0) == 3 && on_n(1)->a == 66 && on_n(2)->a == 69);
+    seq_key(&S, 0, 62, 0, 0);
+    run(10);
+    nev = 0;
+    /* keys held together: the chord (as held: the first key's strum stops), then one key plays it from there */
+    seq_key(&S, 0, 57, 1, 90);
+    seq_key(&S, 0, 60, 1, 90);
+    seq_key(&S, 0, 64, 1, 90);
+    run(10);
+    CHECK(S.player[0].nchord == 3 && S.player[0].chord[0] == 57 && S.player[0].chord[2] == 64);
+    seq_key(&S, 0, 57, 0, 0);
+    seq_key(&S, 0, 60, 0, 0);
+    seq_key(&S, 0, 64, 0, 0);
+    run(10);
+    nev = 0;
+    seq_key(&S, 0, 62, 1, 90);            /* a minor triad from D */
+    run(10);
+    CHECK(count(E_ON, 0) == 3 && on_n(0)->a == 62 && on_n(1)->a == 65 && on_n(2)->a == 69);
+    seq_key(&S, 0, 62, 0, 0);
+    run(10);
+    nev = 0;
     seq_maestro_record(&S, 0, chord, 3);
     seq_key(&S, 0, 62, 1, 90);
     run(10);

@@ -151,7 +151,6 @@ static struct {
     uint8_t rem[SN], nrem;                           /* the remembered notes (the last keys held together) */
     uint8_t rem_fx;                                  /* PUNCH: the remembered effect + 1 */
     uint8_t chord[8], nchord;                        /* the keys held together now (notes) */
-    uint8_t chord_max[8], nchord_max;                /* the most held together since the last all-up (maestro) */
     uint16_t held;                                   /* Steps: the white keys down as steps (bit = cell) */
     uint8_t held_first;                              /* the first held step (the one edited) */
     uint8_t held_used;                               /* a held step was edited: its release toggles nothing */
@@ -161,7 +160,6 @@ static struct {
     uint8_t rec_armed;                               /* REC tapped while stopped: step record */
     uint8_t srec_down;                               /* step record: the keys of the chord being written still down */
     uint8_t rec_held, rec_latched;                   /* REC down while playing (momentary); REC + PLAY latched it */
-    uint8_t maestro_rec;                             /* REC on Players with maestro: the next chord is recorded */
     uint8_t kmode[NKEYS], knote[NKEYS];              /* each held key: KM_*, its note / scene / fx */
     uint32_t key_t[NKEYS];
     uint32_t play_t;
@@ -457,7 +455,7 @@ static int cur_scene(void) { return seq.scene < NSCENE ? seq.scene : 0; }
 static int cur_pat(int t) { return is_seqt(t) ? seq.ppat[t] % NPATT : 0; }
 static tpat_t *tpat(int t) { return &pats.pat[is_seqt(t) ? t : 0][cur_pat(t)]; }
 static int playing(void) { return seq.playing; }
-static int recording(void) { return seq.rec || seq.rec_wait || ui.rec_armed || ui.maestro_rec; }
+static int recording(void) { return seq.rec || seq.rec_wait || ui.rec_armed; }
 static int step_shown(int i) { return ui.bar * 16 + i; }
 static int home_held(void) { return ui.btn >> B_HOME & 1u; }
 static int pl_type(int t) { return is_aux(t) ? PL_OFF : proj.trk[t].par[TP_PLAYER] % NPL; }
@@ -1273,7 +1271,7 @@ static void page_footer(char *t)
         s_cat(t, "BLACK mute|hold: solo");
         break;
     case P_THROWS:
-        s_cat(t, "KEYS throw: low drums, high melodic|KNOB 1 latch");
+        s_cat(t, "KEYS throw: low drums, high melodic|REC held: record");
         break;
     case P_MASTER3:
         s_cat(t, "SEL pump by, level");
@@ -1298,10 +1296,8 @@ static void page_footer(char *t)
             s_cat(t, "KEYS fx|REC record");
         else if (is_aux(trk))
             s_cat(s_cat(t, "KEYS play "), TRACK_NAME[ui.last_inst % NTRK]);
-        else if (ui.maestro_rec)
-            s_cat(t, "KEYS the chord|REC cancel");
         else if (ui.page >= P_PLAYERS && ui.page <= P_PLAYERS3 && pl_type(trk) == PL_STRUM)
-            s_cat(t, "REC record the chord|KEYS play");
+            s_cat(t, "KEY strums the chord|KEYS together: a new chord");
         else if (ui.page >= P_PLAYERS && ui.page <= P_PLAYERS3 && pl_type(trk) == PL_ARP)
             s_cat(t, "KEYS hold notes: they arpeggiate");
         else if (is_drum(trk) && ui.page == P_FILTER)
@@ -1559,7 +1555,7 @@ static const struct { uint8_t btn; uint32_t pages; const char *title, *l1, *l2; 
      "PRESETS: the character's type; on FX I and FX II the effect, SEL its filter."},
     {B_LFO, PG_ANY, "LFO", "Type, then its first three knobs.", "Page 2 has the type's fourth and fifth."},
     {B_ARP, PG_ANY, "Players", "Arp, strum or hold on the track's keys.",
-     "With strum, REC records the chord you hold next. A key plays it."},
+     "Strum: a key strums the chord from that key; keys held together become the chord."},
     {B_ARP, PG(P_STEPS), "Tricks", "With a step held, ARP: KNOB 1 and 3 pick its two tricks,",
      "KNOB 2 and 4 their values. Let go of the step when done."},
     {B_GLO, PG_ANY, "Mix", "Sends, pan, level. Black keys: a tap mutes a track, held: solo.",
@@ -1573,8 +1569,6 @@ static const struct { uint8_t btn; uint32_t pages; const char *title, *l1, *l2; 
     {B_SAVE, PG_SOUND, "Save", "Tap to save the project.",
      "Hold SAVE and press a white key: the sound as that user preset."},
     {B_SAVE, PG_ANY, "Save", "Tap to save the project.", "Hold SAVE and press white key 1 to 4 to save to that slot."},
-    {B_REC, PG(P_PLAYERS) | PG(P_PLAYERS2) | PG(P_PLAYERS3), "Recording",
-     "With strum, the chord you hold next becomes its chord.", "Else: hold it and play; stopped, a tap arms step record."},
     {B_REC, PG_ANY, "Recording", "Stopped: a tap, then each key writes a step. + PLAY: live.",
      "Playing: hold it and play. Held, the knobs set click, count-in, mode."},
     {B_PLAY, PG(P_SONG), "Play", "Plays the song from slot 1. PLAY again stops.", "HOME + PLAY redoes."},
@@ -3439,7 +3433,7 @@ static void draw_players(void)
     int trk = sel_trk(), pl = pl_type(trk);
     const player_t *pr = &seq.player[trk < NTRK ? trk : 0];
     uint32_t h = hash_u(hash_u(2166136261u, 0x9Cu), (uint32_t)trk | (uint32_t)pl << 4 | (uint32_t)pr->nheld << 8 |
-                                          (uint32_t)pr->nchord << 12 | (uint32_t)pr->arp_note << 16 | (uint32_t)ui.maestro_rec << 24);
+                                          (uint32_t)pr->nchord << 12 | (uint32_t)pr->arp_note << 16 | (uint32_t)pr->chord[0] << 24);
     char t[48], *e;
     for (int i = 0; i < 16; i++)
         h = hash_u(h, pr->held[i]);
@@ -3453,7 +3447,7 @@ static void draw_players(void)
     else if (pl == PL_ARP)
         cv_text(12, 24, &FONT_XS, "held notes play one after another", K_DIM);
     else if (pl == PL_STRUM)
-        cv_text(12, 24, &FONT_XS, ui.maestro_rec ? "hold the chord to record (up to 8)" : "one key plays the chord, moved", K_DIM);
+        cv_text(12, 24, &FONT_XS, "a key strums the chord from it; keys together: a new one", K_DIM);
     else
         cv_text(12, 24, &FONT_XS, "notes stay until the next", K_DIM);
     e = s_cat(t, pl == PL_STRUM ? "chord: " : "held: ");
@@ -3463,8 +3457,6 @@ static void draw_players(void)
                 e = s_cat(e, " ");
             e = note_name(pr->chord[i], e);
         }
-        if (!pr->nchord)
-            e = s_cat(e, "none yet, REC records one");
     } else {
         for (int i = 0; i < pr->nheld && i < 8; i++) {
             if (i)

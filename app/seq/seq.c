@@ -1688,6 +1688,25 @@ static void maestro_play(seq_t *s, int t, int key, int vel, const seq_sink_t *o)
         pl->roll_to_next = 0;         /* the first note now, the rest spaced by the roll */
 }
 
+/* strum: keys held together become its chord (the lowest eight, from the bottom) and sound as held: the strum
+ * the first key started stops, the held keys play */
+static void strum_learn(seq_t *s, int t, int raw, int vel, const seq_sink_t *o)
+{
+    player_t *pl = &s->player[t];
+    int n = 0, note;
+    sounding_off(s, t, o);
+    for (note = 0; note < 128 && n < SN * 2; note++)
+        if (pl->phys[note >> 5] >> (note & 31) & 1u)
+            pl->chord[n++] = (uint8_t)note;
+    pl->nchord = (uint8_t)n;
+    for (int i = 0; i < n; i++) {
+        int sh = raw ? pl->chord[i] : clamp_note(brain_note(s, t, pl->chord[i]));
+        player_note_on(s, t, sh, vel, 0, TAG_PLAYER | (uint32_t)sh, o);
+        sounding_add(pl, sh);
+    }
+    pl->maestro_root = pl->chord[0];
+}
+
 static void roll_fire(seq_t *s, int t, const seq_sink_t *o)
 {
     player_t *pl = &s->player[t];
@@ -1906,9 +1925,11 @@ static void key_in(seq_t *s, int t, int note, int on, int vel, int raw, const se
         }
         break;
     case PL_STRUM:
-        if (on)
+        if (on && had_phys)           /* a second key held and more: the keys held are the chord, as they are */
+            strum_learn(s, t, raw, vel, o);
+        else if (on)
             maestro_play(s, t, shifted, vel, o);
-        else if (!s->par[t][TP_P4] && pl->maestro_root == shifted && !pl->nphys)
+        else if (!s->par[t][TP_P4] && !pl->nphys)
             sounding_off(s, t, o);
         break;
     case PL_HOLD:
@@ -2267,6 +2288,10 @@ void seq_init(seq_t *s, patterns_t *P, uint8_t (*par)[NTP_ALL])
         s->player[t].arp_to_next = NEVER;
         s->player[t].arp_to_off = NEVER;
         s->player[t].roll_to_next = NEVER;
+        s->player[t].chord[0] = 60;   /* strum's chord until keys held together set one: a major triad */
+        s->player[t].chord[1] = 64;
+        s->player[t].chord[2] = 67;
+        s->player[t].nchord = 3;
     }
     for (i = 0; i < NLANE; i++)
         s->lrt[i].applied = LOCK_NONE;

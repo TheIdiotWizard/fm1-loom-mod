@@ -115,7 +115,7 @@ press…" means keep **HOME** down while you press the next thing.
 | see a step | On Steps, hold its white key. The knobs show its velocity, length, chance and pitch. |
 | make a note longer | Hold its step and press a later white key. A bar under the cells shows how far a note reaches. |
 | nudge a step | Hold its step and press **OCT−** or **OCT+**. |
-| change a step's note | Hold its step and turn **KNOB 4** (a drum step too: its hits play higher or lower), or hold its step, hold **SEQ** and play the new note or chord. |
+| change a step's note | Hold its step and turn **KNOB 4** (a drum step too: its hits play higher or lower). |
 | put a second sound on a drum step | Hold the step and press the sound's black key. |
 | take one note off a step | Hold the step, press **SEL**, pick the note and press **SEL**. |
 | add a trick | Hold the step and press **ARP**. **KNOB 1** picks the first trick (pulse, hold, multiply, velocity, ramp up, ramp down, random, portamento, bend, tonality, jump, skip lock, skip trick, skip trigger) and **KNOB 2** its value; **KNOB 3** and **KNOB 4** the second. Turn a trick back to "-" to take it off. |
@@ -142,7 +142,7 @@ press…" means keep **HOME** down while you press the next thing.
 | record step by step | Stopped, on Steps, tap **REC**. The red cursor starts after the last note; each key (or chord) you play writes it and moves on. **OCT+** leaves a rest, **OCT−** goes back. **REC** again ends. |
 | undo | Hold **HOME** and press **REC**. Hold **HOME** and press **PLAY** to redo. |
 | set the tempo | Press **HOME** and turn **KNOB 1**. Hold **HOME** and turn it for tenths. On any page, hold **HOME** and turn **SELECT**. |
-| use a throw | Press **FX** and turn **SELECT** to Throws. Hold a key: the lower octave works on the drums, the upper octave on the melodic tracks. |
+| use a throw | Press **FX** and turn **SELECT** to Throws. Hold a key: the lower octave works on the drums, the upper octave on the melodic tracks. Hold **REC** while it plays to record them into the THROW track. |
 | make a new scene | Press **HOME** and press an empty white key. It becomes a copy of the scene playing. |
 | switch scenes while playing | On Arrange, press the scene's white key: it starts at the next bar. Press it again to switch at once. To wait for the end of T1's pattern instead, set **SEL**'s SCENES SWITCH to "pattern end". |
 | mute a track | On Arrange or Mix, press its black key. On Mix, hold it to solo the track while you hold. |
@@ -158,7 +158,7 @@ press…" means keep **HOME** down while you press the next thing.
 | Control | What it does |
 | --- | --- |
 | **PLAY** | Starts (every track from step 1) and stops. A track whose scale or length you change stays in phase with the rest. On the Song page, it plays the song. With **REC** held, it starts live recording. |
-| **REC** | Held while playing: records while held. Stopped: a tap arms step record. Held, the knobs are the record settings (click, count-in, quantise, mode). On Players with strum, it records the chord. |
+| **REC** | Held while playing: records while held. Stopped: a tap arms step record. Held, the knobs are the record settings (click, count-in, quantise, mode). |
 | **SEL** | Opens a list of this page's settings and actions. With a step held, its notes. When LOOM-8 asks a question, **SEL** means yes. |
 | **HOME** | Opens Arrange. On Arrange, it opens the Song page. Held, it is the shift key for buttons and knobs: undo and redo, the fine tempo, the scenes on **PRESETS**. When LOOM-8 asks a question, **HOME** means no. |
 | **SEQ** | Opens Steps. Its page 2 is Bar. Hold it on Steps and the keys play the track and set what a step writes. |
@@ -244,8 +244,6 @@ effect you played. The four squares at the right are the bars.
   of every B passes) and **KNOB 4** its pitch: on a synth track its notes move by semitones, a chord together;
   on a drum track the step's hits play up to 24 semitones from their key's pitch, the step's own note, apart
   from the key's pitch knob and its locks. **OCT−** and **OCT+** nudge it, earlier or later.
-- **Hold a step, then hold SEQ and play keys** to give it new notes: the keys you hold together become its
-  chord.
 - **Hold a step and press a later white key** to make its note reach that step.
 - **Hold a step and press a black key** on a drum track to put that sound on the step, or take it off.
 - **Hold a step and press SEL** for a list of its notes. Pick one and press **SEL** to take it off.
@@ -669,8 +667,9 @@ Press **ARP**. **KNOB 1** picks the player: off, arp, strum or hold.
 - **arp** plays the held notes one after another: speed (1/4 to 1/64, with triplets), pattern (up, down, up
   down 1, up down 2, as played, random) and range on page 1; page 2 has the note length, a style, glide and
   stereo; page 3 is hold.
-- **strum** plays a chord from one key. Press **REC**, then hold the chord, up to eight keys: it is
-  recorded. From then on any key plays it, moved to that key. Roll strums it, up to one note per step.
+- **strum** plays a chord from one key, moved so it starts on that key: a major triad at first. Hold keys
+  together, up to eight, and they become the chord (they sound as you hold them); from then on one key plays
+  that chord from there. Roll strums it, up to one note per step.
 - **hold** keeps the notes you play until the next.
 
 ## Arrange, scenes and the song
@@ -808,7 +807,7 @@ On a sound page, hold **SAVE** and press white key 1 to 16 to keep the track's s
 | HOME | Arrange | tempo | groove | amount | click | white: scenes, black: mutes; SEL: when scenes switch |
 | HOME, SELECT | Song | slot | scene | bars | at end | white: add a scene |
 | SEQ | Steps | pattern | length | scale | groove | white: steps, black: sound (drums); SEQ held: a keyboard |
-| SEQ, a step held | Steps | velocity | length | chance | pitch | white: length, black: sounds; SEQ held: its notes |
+| SEQ, a step held | Steps | velocity | length | chance | pitch | white: length, black: sounds |
 | SEQ, a step held + ARP | Steps | trick 1 | its value | trick 2 | its value | |
 | SEQ, SELECT | Bar | quant | note | groove | shape | black: scale |
 | EDIT | Engine | the engine's four | | | | play |

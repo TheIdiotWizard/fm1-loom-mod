@@ -37,7 +37,7 @@ static void say_as(const char *a, const char *b, uint32_t flags)
     ui.msg_no = 0;
     {
         static const char *const DONE[] = {"SAVED", "CLEARED", "COPIED", "PASTED", "ROTATED", "DUPLICATED", "RECORDED",
-                                           "CHORD RECORDED", "LOCKS CLEARED", "NEW PROJECT", "LOADED", "SCRAMBLED",
+                                           "LOCKS CLEARED", "NEW PROJECT", "LOADED", "SCRAMBLED",
                                            "RESET", "INSERTED", "DELETED", "PRESET SAVED", "ALL NOTES OFF", "REMOVED", "WOVEN"};
         const char *m = ui.msg[0];
         ui.msg_kind = AL_INFO;
@@ -415,19 +415,8 @@ static void play_press(void)
 #define REC_TAP_MS 400u                          /* REC held longer (to see its knobs): not a tap */
 static void rec_tap(void)                        /* REC released, unused, while stopped */
 {
-    int trk = sel_trk();
     if (plat_ms() - ui.btn_t[B_REC] >= REC_TAP_MS)
         return;
-    if (ui.maestro_rec) {
-        ui.maestro_rec = 0;
-        say("RECORD OFF", 0);
-        return;
-    }
-    if ((ui.page == P_PLAYERS || ui.page == P_PLAYERS2 || ui.page == P_PLAYERS3) && pl_type(trk) == PL_STRUM) {
-        ui.maestro_rec = 1;
-        say("HOLD A CHORD", "for strum");
-        return;
-    }
     if (playing())
         return;
     ui.rec_armed = (uint8_t)!ui.rec_armed;
@@ -439,7 +428,7 @@ static void rec_tap(void)                        /* REC released, unused, while 
 }
 static void rec_down(void)                       /* REC pressed while playing: momentary recording */
 {
-    if (ui.maestro_rec || !playing())
+    if (!playing())
         return;
     if (ui.rec_latched) {                        /* latched: a press turns it off */
         rec_off();
@@ -901,10 +890,6 @@ static void keyboard_down(int k)
         ui.knote[k] = (uint8_t)note;
         engine_key(trk, note, 1, 127);
         chord_add(note);
-        if (ui.nchord > ui.nchord_max || ui.nchord == 1) {
-            memcpy(ui.chord_max, ui.chord, 8);
-            ui.nchord_max = ui.nchord;
-        }
         if (is_drum(trk)) {                      /* a drum key: its sound is the one shown (Steps with SEQ held; a
                                                   * black key on the sound pages picks the key the knobs edit) */
             if ((ui.page == P_STEPS || b >= 0) && ui.dsound != note - 1) {
@@ -916,16 +901,6 @@ static void keyboard_down(int k)
             for (int i = 0; i < SN && i < ui.nchord; i++)
                 ui.rem[i] = ui.chord[i];
             ui.nrem = (uint8_t)(ui.nchord > SN ? SN : ui.nchord);
-            if (ui.held && ui.page == P_STEPS && (ui.btn >> B_SEQ & 1u) && !srec) {   /* steps held, SEQ held: the keys are their notes now */
-                undo_keep();
-                for (int i = 0; i < 16; i++)
-                    if (ui.held >> i & 1u) {
-                        step_t *st = &tpat(trk)->st[step_shown(i)];
-                        step_set_notes(st, ui.rem, ui.nrem, st->vel ? st->vel : 100);
-                    }
-                ui.held_used = 1;
-                mark_dirty();
-            }
         }
         if (srec && !is_aux(sel_trk()))
             step_rec_key(note);
@@ -1077,13 +1052,6 @@ static void key_up(int k)
         chord_del(ui.knote[k]);
         if (ui.rec_armed && !playing())
             step_rec_key_up();
-        if (!ui.nchord) {
-            if (ui.maestro_rec && !is_aux(trk)) {   /* the chord as it was at its largest (up to 8 keys) */
-                seq_maestro_record(&seq, trk, ui.chord_max, ui.nchord_max);
-                ui.maestro_rec = 0;
-                say("CHORD RECORDED", 0);
-            }
-        }
         break;
     case KM_STEP: {
         int w = ordinal(WHITE_K, 16, k);
@@ -2743,8 +2711,8 @@ static void speak_dump(void)
     static const char *const MSG[][2] = {
         {"SAVED", 0}, {"NOT SAVED", "flash error"}, {"UNDO", "T1 P1"}, {"REDO", "T1 P1"}, {"NOTHING TO UNDO", 0},
         {"NOTHING TO REDO", 0}, {"COUNT-IN", "then recording"}, {"RECORDING", "latched"}, {"RECORDING", "play to start"},
-        {"RECORD OFF", 0}, {"STEP RECORD", "keys write steps"}, {"HOLD A CHORD", "for strum"}, {"CHORD RECORDED", 0},
-        {"LENGTH", "to step 4"}, {"TRICK OFF", "pulse"}, {"NO TRICK", "white key first"}, {"NUDGE", "+2"},
+        {"RECORD OFF", 0}, {"STEP RECORD", "keys write steps"},
+        {"LENGTH", "to step 4"}, {"NUDGE", "+2"},
         {"NO LANE LEFT", "clear locks first"}, {"LOCKS CLEARED", 0}, {"NEW", "S3"}, {"MUTED", "T1"}, {"UNMUTED", "T1"},
         {"INSERTED", "S2"}, {"T3", 0}, {"SOUND", "snare"}, {"KEY", "snare"}, {"SCALE", "1/2"}, {"BAR", "2"}, {"CURSOR", "5"},
         {"OCTAVE", "+1"}, {"PRESET", "U3 stack"}, {"EFFECT", "delay"}, {"CLEARED", "notes"}, {"COPIED", "pattern"},
