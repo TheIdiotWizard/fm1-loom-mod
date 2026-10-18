@@ -132,6 +132,7 @@ typedef struct {                      /* one track's runtime (interrupt only) */
     uint8_t bend_shape, bend_on;
     uint32_t bend_t, bend_len;        /* samples into the bend, its length */
     seq_off_t off[SEQ_PENDING];
+    uint16_t off_mask;                /* bit i: off[i].used (the scans skip a track with none) */
     uint8_t last_note[SN];            /* the notes sounding (step mode: one step at a time) */
     uint8_t act[NSC];                 /* the step's components in force: act[SC_x] = value + 1, 0 = absent */
     uint8_t loop_on;                  /* a punch loop runs: steps loop_from .. loop_from + loop_span - 1 */

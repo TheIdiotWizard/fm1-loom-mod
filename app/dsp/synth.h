@@ -220,7 +220,17 @@ int synth_brocade_voices(const synth_t *s);                    /* brocade's voic
  * ordinary voice, brocade (7 + its saws sounding) / 2: 8 at nine saws; the Braids engines by their model (braids.h:
  * 2 .. 5, cane's bell the most) */
 int synth_voice_cost(const synth_t *s, int vi);
+/* what voice vi took to render lately, measured (synth_clock's units for 256 frames): 0 silent, -1 not measured yet
+ * (a voice just started; the engine's split then takes synth_voice_cost) */
+float synth_voice_time(const synth_t *s, int vi);
+int synth_voice_track(const synth_t *s, int vi);
 extern volatile uint16_t synth_peak[NTRK];                     /* per track meters, Q15, decaying (UI) */
+/* the profiler (samples.c SB_PROF, tools/perf_read.py): the time each voice took, by its engine, in synth_clock's
+ * units (engine.c sets it: plat_cycles; none, no timing), running totals (wrapping) for each half of the pool: [0] the
+ * first core's voices, [1] the second core's; [.][NENGINE] every voice's control-rate work (voice_chunk) */
+extern uint32_t (*synth_clock)(void);
+extern volatile uint32_t synth_prof[2][NENGINE + 1];
+extern volatile uint32_t synth_vworst[3];
 #ifdef PLAT_HOST
 extern uint16_t synth_host_solo;              /* the host's stems (host.c LOOM_SOLO): bits 0-7 tracks, 8 / 9 FX I / II */
 #endif

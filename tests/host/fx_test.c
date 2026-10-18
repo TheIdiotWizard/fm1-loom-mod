@@ -1020,6 +1020,42 @@ int main(void)
         di = instr_now() - i0;
         printf("  master pump %5.0f  (all, and the pump pumping)\n", (double)di / (20.0 * 256.0));
     }
+    {   /* the engine runs the chorus, the delay and the plate a block behind (fx_process_lag): their output must be
+         * where it was, but for the lines' rounding (a noise burst, then its tail; the send a block late) */
+        static float xa[SR * 3], ya_l[SR * 3], ya_r[SR * 3], yb_l[SR * 3], yb_r[SR * 3];
+        static const int picks[3] = {FXT_CHORUS, FXT_DELAY, FXT_REVERB};
+        static const uint8_t kn[3][4] = {{50, 86, 90, 127}, {40, 64, 110, 100}, {100, 40, 44, 72}};
+        const int L = 256, n = SR * 3;
+        printf("-- a block behind (fx_process_lag, 256 samples): the same output, but for the lines' rounding\n");
+        for (i = 0; i < n; i++)               /* (never silent: a sleeping line would skip a block in one run only) */
+            xa[i] = (i < SR / 3 ? 0.4f : 0.001f) * noise();
+        for (t = 0; t < 3; t++) {
+            float pk = 0.0f, err = 0.0f;
+            for (b = 0; b < 2; b++) {
+                float *yl = b ? yb_l : ya_l, *yr = b ? yb_r : ya_r;
+                fx_init(fx, dly_l, dly_r, rv);
+                fx_set(fx, picks[t], kn[t]);
+                fx_tempo(fx, 120.0f);
+                for (i = 0; i < n; i++)
+                    yl[i] = yr[i] = 0.0f;
+                for (i = 0; i + L <= n; i += L) {
+                    static float blk[256];
+                    int j;
+                    for (j = 0; j < L; j++)
+                        blk[j] = b ? (i + j >= L ? xa[i + j - L] : 1e-30f) : xa[i + j];   /* (not 0: awake) */
+                    fx_process_lag(fx, blk, yl + i, yr + i, (uint32_t)L, b ? L : 0);
+                }
+            }
+            for (i = 0; i < n; i++) {
+                pk = fm_maxf(pk, fm_maxf(fm_fabsf(ya_l[i]), fm_fabsf(ya_r[i])));
+                err = fm_maxf(err, fm_maxf(fm_fabsf(ya_l[i] - yb_l[i]), fm_fabsf(ya_r[i] - yb_r[i])));
+            }
+            snprintf(name, sizeof name, "  %-8s peak %6.1f dB, the largest difference %6.1f dB under it", FXT_NAME[picks[t]],
+                     (double)db(pk), (double)(db(pk) - db(err)));
+            check(name, pk > 0.01f && db(pk) - db(err) > (picks[t] == FXT_REVERB ? 45.0f : 60.0f));   /* (the plate's
+                                                   * 12-bit combs: its own rounding, recirculated, is of that size) */
+        }
+    }
     printf("%s\n", bad ? "FX TESTS FAILED" : "fx tests passed");
     return bad != 0;
 }

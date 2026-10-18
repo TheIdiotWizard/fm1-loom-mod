@@ -19,6 +19,12 @@
  *   SMP_HDR    16 slot part data     -> slot, part, rc    the header in parts of 320 bytes (packed), into RAM:
  *                                       parts 0..4 (the 1344 bytes used: 64 + 32 entries of 40)
  *   PING       25                    -> 0
+ *   PROF       26 part               -> part, count, then count 32-bit values (5 bytes each, 7 bits, low first): the
+ *                                       profiler's running totals (tools/perf_read.py takes differences). part 0:
+ *                                       the clock, the frames, engine.h's stages, the slowest block's stages, the
+ *                                       load, voices, their cap, saws, guard trips, dropouts; part 1: synth.h's
+ *                                       synth_prof (each engine's time, both halves); part 2: each drum track's time.
+ *                                       part | 64: the slowest block starts again after this reply
  * rc: 0 ok, 1 size / offset, 2 erase, 3 write, 4 not begun (the bank is live), 5 header, 6 CRC, 7 no samples,
  * 8 an update record's mark ("AT" at 0xF06 of a sector in PLAT_XDATA0 / 1: the loader would erase it).
  * Every frame is answered (the tool waits for each). The erases and writes run with the interrupts off a
@@ -28,7 +34,7 @@
 #define SB_HDR0 0x7D
 #define SB_HDR1 0x46
 #define SB_HDR2 0x4C
-enum { SB_INFO = 1, SB_BEGIN = 11, SB_WRITE, SB_END, SB_ERASE, SB_SINFO, SB_HDR, SB_PING = 25 };
+enum { SB_INFO = 1, SB_BEGIN = 11, SB_WRITE, SB_END, SB_ERASE, SB_SINFO, SB_HDR, SB_PING = 25, SB_PROF };
 #define SB_PART 320u                                 /* SMP_HDR: a header part, bytes */
 #define SB_NPART ((SMP_HDR_USED + SB_PART - 1u) / SB_PART)
 #define SB_INFO_K 12u                                /* SMP_INFO: samples a reply (12 x 18 bytes at most) */
@@ -150,6 +156,41 @@ static int smp_frame(const uint8_t *p, uint32_t n)
     case SB_PING:
         sb_b(0);
         break;
+    case SB_PROF: {
+        uint32_t part = na ? a[0] & 63u : 0u, v[2 + 2 * ENG_PROF_N + 6], nv = 0;
+        if (part == 0u) {
+            v[nv++] = plat_cycles();
+            v[nv++] = eng_prof_frames;
+            for (i = 0; i < ENG_PROF_N; i++)
+                v[nv++] = eng_prof[i];
+            for (i = 0; i < ENG_PROF_N; i++)
+                v[nv++] = eng_prof_worst[i];
+            v[nv++] = plat_cpu_pct();
+            v[nv++] = eng_voices;
+            v[nv++] = eng_voices_max;
+            v[nv++] = eng_saws_max;
+            v[nv++] = eng_guard_count;
+            v[nv++] = plat_xruns();
+        } else if (part == 1u) {
+            for (i = 0; i < 2u * (NENGINE + 1u); i++)
+                v[nv++] = synth_prof[i / (NENGINE + 1u)][i % (NENGINE + 1u)];
+            for (i = 0; i < 3u; i++)
+                v[nv++] = synth_vworst[i];
+            if (na && (a[0] & 64u))
+                synth_vworst[0] = 0;
+        } else if (part == 2u) {
+            for (i = 0; i < NTRK; i++)
+                v[nv++] = eng_prof_drum[i];
+        }
+        sb_b(part);
+        sb_b(nv);
+        for (i = 0; i < nv; i++)
+            for (uint32_t b = 0; b < 35u; b += 7u)
+                sb_b(v[i] >> b);
+        if (na && (a[0] & 64u))
+            eng_prof_reset = 1;
+        break;
+    }
     case SB_SINFO: {
         uint32_t from = na ? a[0] : 0u, used = (smp_user_bytes() + 1023u) / 1024u, cnt = (uint32_t)smp_user_count(), k;
         k = from < cnt ? cnt - from : 0u;

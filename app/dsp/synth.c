@@ -122,6 +122,8 @@ typedef struct {
     float ek[4];                      /* the same, raw (the discrete knobs: 1..8, a table index) */
     float ex[20];                     /* the engine's derived values (eng_prep) */
     float cx[8];                      /* the character stage's values for the chunk (char_prep) */
+    float cin[3];                     /* what cx[0..5] were made from (amount, tone, the ring's frequency) */
+    uint8_t cin_type;                 /* and the type (0xFF: none yet) */
     uint8_t ftype, stereo, mute, eng;
     uint8_t ctype;                    /* the character stage running (CT_OFF: skipped, also at mix 0) */
 } cfg_t;
@@ -145,6 +147,8 @@ typedef struct {
     float a1, a2, a3, b1, b2, b3;     /* the filter's coefficients (TPT SVF, lp24's second stage; the ladder's g and k) */
     float f[8];                       /* filter: ic1 ic2 jc1 jc2 of L, then R (the ladder: its four poles a side) */
     float peak;
+    float tcost;                      /* what it took to render, synth_clock's units for 256 frames (a running mean;
+                                       * 0: not measured yet) */
     float tsec;                       /* seconds since the note (the LFO's fade envelope counts on it) */
     uint32_t rng;
     cfg_t c;
@@ -193,6 +197,10 @@ int synth_sizeof(void) { return (int)sizeof(struct synth); }
 #endif
 
 volatile uint16_t synth_peak[NTRK];
+uint32_t (*synth_clock)(void);
+volatile uint32_t synth_prof[2][NENGINE + 1];
+volatile uint32_t synth_vworst[3];                   /* the slowest voice render since the reader cleared it: its time, its
+                                                      * engine, its frames */
 
 /* ------------------------------------------------------------ small maths --- */
 static inline uint32_t xs(uint32_t *r)
@@ -593,7 +601,7 @@ static void tines_chunk(voice_t *v)                 /* the brightness envelopes,
     v->o[14] *= 0.93f;                                 /* the punch burst: ~30 ms */
     v->o[13] = v->o[13] * 0.994f;                      /* the tine partial: ~0.25 s */
 }
-SY_INLINE void tines_loop(voice_t *v, float *xl, int m, const int has_tine)
+SY_INLINE void tines_loop(voice_t *v, float *xl, int m, const int has_tine, const int has_tex)
 {
     const cfg_t *c = &v->c;
     float cp = v->o[0], mp = v->o[1], tp = v->o[2];
@@ -604,7 +612,9 @@ SY_INLINE void tines_loop(voice_t *v, float *xl, int m, const int has_tine)
         float mo;
         mp = step1(mp, d);
         cp = step1(cp, d);
-        mo = fm_sin_turns(mp) * idx + fm_sin_turns(mp + mp) * tex;
+        mo = fm_sin_turns(mp) * idx;
+        if (has_tex)                             /* (texture 0, felt piano's and soft felt's: a sine less) */
+            mo += fm_sin_turns(mp + mp) * tex;
         xl[i] = fm_sin_turns(cp + mo * 0.25f) * 0.9f;
         if (has_tine) {
             tp = step1(tp, dt);
@@ -618,10 +628,17 @@ SY_INLINE void tines_loop(voice_t *v, float *xl, int m, const int has_tine)
 static void tines_run(voice_t *v, float *xl, float *xr, int m)
 {
     (void)xr;
-    if (v->c.ex[5] * v->o[13] > 0.0005f)        /* the tine partial dies in a quarter second */
-        tines_loop(v, xl, m, 1);
-    else
-        tines_loop(v, xl, m, 0);
+    const int tex = v->c.ex[3] * v->o[15] != 0.0f;
+    if (v->c.ex[5] * v->o[13] > 0.0005f) {      /* the tine partial dies in a quarter second */
+        if (tex)
+            tines_loop(v, xl, m, 1, 1);
+        else
+            tines_loop(v, xl, m, 1, 0);
+    } else if (tex) {
+        tines_loop(v, xl, m, 0, 1);
+    } else {
+        tines_loop(v, xl, m, 0, 0);
+    }
 }
 
 /* organ: six drawbars (16' 8' 4' 2 2/3' 2' 1 1/3') as rotating phasors (a complex multiply a sine:
@@ -1762,6 +1779,12 @@ int synth_voice_cost(const synth_t *s, int vi)
     /* tests/host/brocade_test's cost: 3 + half a unit a saw (stereo, lp24), so (7 + saws) / 2 */
     return (7 + (int)(v->o[9] < 0.0f ? v->c.ex[14] : v->o[9] + 0.99f)) / 2;
 }
+int synth_voice_track(const synth_t *s, int vi) { return s->v[vi].trk; }
+float synth_voice_time(const synth_t *s, int vi)
+{
+    const voice_t *v = &s->v[vi];
+    return !v_sounding(v) ? 0.0f : v->tcost > 0.0f ? v->tcost : -1.0f;
+}
 void synth_duck_trigger(synth_t *s, int src)
 {
     int i;
@@ -1834,11 +1857,22 @@ static inline float lfo_wave_trem(int shape, float ph)    /* sine, saw, exponent
  * voices read the slots in order as they cross the boundaries. Also the meters. */
 void synth_prepare(synth_t *s, uint32_t n)
 {
+    float tpk[NTRK];
     int i, k, nck = 0;
     uint32_t off = (SY_CHUNK - s->pos) % SY_CHUNK;
     for (; off < n && nck < NCK; off += SY_CHUNK)
         nck++;
     s->nck = (uint8_t)(nck ? nck : 1);
+    for (i = 0; i < NTRK; i++)
+        tpk[i] = 0.0f;
+    for (k = 0; k < NVOICE; k++) {               /* each track's loudest voice, the voices' peaks cleared: one pass */
+        voice_t *v = &s->v[k];
+        if (v->trk < NTRK) {
+            if (v->peak > tpk[v->trk])
+                tpk[v->trk] = v->peak;
+            v->peak = 0.0f;
+        }
+    }
     for (i = 0; i < NTRK; i++) {
         trk_t *t = &s->t[i];
         int type = P(s, i, TP_LTYPE), lx = P(s, i, TP_LX), lx2 = P(s, i, TP_LX2), engine = P(s, i, TP_ENGINE);
@@ -1901,12 +1935,7 @@ void synth_prepare(synth_t *s, uint32_t n)
             t->lpitch[k] = pitch;
             t->lgain[k] = gain;
         }
-        for (k = 0; k < NVOICE; k++)             /* the meter: the loudest voice of the track */
-            if (s->v[k].trk == i) {
-                if (s->v[k].peak > pk)
-                    pk = s->v[k].peak;
-                s->v[k].peak = 0.0f;
-            }
+        pk = tpk[i];                             /* the meter: the loudest voice of the track (gathered above) */
         {
             uint32_t q = (uint32_t)(fm_minf(pk, 1.0f) * 32767.0f), old = synth_peak[i];
             old = old - (old >> 4);              /* the fall: about 1/16 a block */
@@ -2003,8 +2032,17 @@ static void char_prep(synth_t *s, voice_t *v, int dest, float off)
     if (type == CT_OFF)
         return;
     c->cx[7] = fm_minf((float)mix, 127.0f) * (1.0f / 127.0f);
-    char_coefs(type, fm_minf(pf(s, trk, TP_CAMT, dest, off), 127.0f) * (1.0f / 127.0f),
-               fm_minf((float)P(s, trk, TP_CTONE), 127.0f) * (1.0f / 127.0f), c->freq, c->cx);
+    {   /* (the coefficients cost exps: made again only when what they come from moved) */
+        float a = fm_minf(pf(s, trk, TP_CAMT, dest, off), 127.0f) * (1.0f / 127.0f);
+        float t = fm_minf((float)P(s, trk, TP_CTONE), 127.0f) * (1.0f / 127.0f), f = type == CT_RING ? c->freq : 0.0f;
+        if (type != c->cin_type || a != c->cin[0] || t != c->cin[1] || f != c->cin[2]) {
+            char_coefs(type, a, t, c->freq, c->cx);
+            c->cin_type = (uint8_t)type;
+            c->cin[0] = a;
+            c->cin[1] = t;
+            c->cin[2] = f;
+        }
+    }
     if (type == CT_RING) {                       /* the phasor back to unit length, once a chunk (or at 1 + 0i) */
         float re = v->cz[4], im = v->cz[5], r2 = re * re + im * im, g = r2 > 0.5f ? fm_rsqrtf(r2) : 0.0f;
         v->cz[4] = g > 0.0f ? re * g : 1.0f;
@@ -2518,15 +2556,25 @@ void synth_render(synth_t *s, int v0, int v1, float *l, float *r, float *s1, flo
         v0 = 0;
     if (v1 > NVOICE)
         v1 = NVOICE;
+    uint32_t (*clk)(void) = synth_clock;
+    volatile uint32_t *prof = synth_prof[v0 == 0 && v1 < NVOICE];   /* (the second core's half: [0, k), k < 16) */
     for (vi = v0; vi < v1; vi++) {
         voice_t *v = &s->v[vi];
-        uint32_t i = 0;
+        uint32_t i = 0, t0 = 0, tc = 0, tk = 0;
+        const int timed = clk && (v_sounding(v) || v->pos == 0);
+        if (timed)
+            t0 = clk();
         while (i < n) {
             uint32_t m = SY_CHUNK - v->pos;
             if (m > n - i)
                 m = n - i;
-            if (v->pos == 0)
+            if (v->pos == 0) {
+                if (timed)
+                    tk = clk();
                 voice_chunk(s, v);
+                if (timed)
+                    tc += clk() - tk;
+            }
             if (v_sounding(v))
                 voice_samples(s, v, l + i, r + i, s1 + i, s2 + i, (int)m);
             else
@@ -2534,6 +2582,22 @@ void synth_render(synth_t *s, int v0, int v1, float *l, float *r, float *s1, flo
             if (v->pos >= SY_CHUNK)
                 v->pos = 0;
             i += m;
+        }
+        if (timed) {
+            tk = clk() - t0;
+            prof[NENGINE] += tc;
+            prof[v->engine < NENGINE ? v->engine : 0] += tk - tc;
+            if (tk > synth_vworst[0]) {
+                synth_vworst[0] = tk;
+                synth_vworst[1] = v->engine;
+                synth_vworst[2] = n;
+            }
+            if (v_sounding(v)) {
+                float c = (float)tk * (256.0f / (float)n);
+                v->tcost = v->tcost > 0.0f ? v->tcost + (c - v->tcost) * 0.25f : c;
+            } else {
+                v->tcost = 0.0f;
+            }
         }
     }
 }

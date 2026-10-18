@@ -81,8 +81,9 @@ static const float SPU_HB[10] = {0x2806 / 32768.0f, -0x0B90 / 32768.0f, 0x0534 /
 typedef struct {
     int32_t a[NREG];                  /* the addresses at the size now (samples) and the dAPF displacements */
     float viir, vwall, vapf1, vapf2, vcomb[4];
-    float in[64];                     /* the decimator's input, 44.1 kHz (mono) */
-    float up[2][32];                  /* the interpolators' input, 22.05 kHz */
+    float in[128];                    /* the decimator's input, 44.1 kHz (mono): a ring of 64, each sample written
+                                       * twice (at ip and ip + 64) so the taps read it straight, without a mask */
+    float up[2][64];                  /* the interpolators' input, 22.05 kHz: rings of 32, written twice the same way */
     float out[2][2];                  /* the two samples a tick gives, a side */
     float tl, th, tr, thr;            /* the tone's states */
     uint32_t base;
@@ -113,9 +114,9 @@ static void spu_derive(spu_t *s, int mode, float size, float decay, float damp)
 static void spu_reset(spu_t *s, int mode)
 {
     int i;
-    for (i = 0; i < 64; i++)
+    for (i = 0; i < 128; i++)
         s->in[i] = 0.0f;
-    for (i = 0; i < 32; i++)
+    for (i = 0; i < 64; i++)
         s->up[0][i] = s->up[1][i] = 0.0f;
     s->out[0][0] = s->out[0][1] = s->out[1][0] = s->out[1][1] = 0.0f;
     s->tl = s->th = s->tr = s->thr = 0.0f;
@@ -184,22 +185,23 @@ static inline int32_t spu_tick(spu_t *s, int16_t *w, float x, float *lo, float *
 /* the decimator: the 39 taps over the last 39 inputs (the newest at ip - 1) */
 static inline float spu_decimate(const spu_t *s)
 {
-    const float *z = s->in;
-    const uint32_t c = (uint32_t)s->ip + 64u - 20u;                  /* the centre: 19 samples back */
-    float y = 0.5f * z[c & 63u];
+    const float *z = s->in + s->ip + 64u - 20u;                      /* the centre: 19 samples back (z[-19..19] lie
+                                                                      * in the doubled ring) */
+    float y = 0.5f * z[0];
     int k;
     for (k = 0; k < 10; k++)
-        y += SPU_HB[k] * (z[(c - 1u - 2u * (uint32_t)k) & 63u] + z[(c + 1u + 2u * (uint32_t)k) & 63u]);
+        y += SPU_HB[k] * (z[-1 - 2 * k] + z[1 + 2 * k]);
     return y;
 }
 /* an interpolator: the zero-stuffed 22.05 kHz side through the same FIR, x2: one output is the side taps'
  * sum (between two inputs), the next the input 10 ticks back (the centre tap, 0.5 x 2) */
 static inline void spu_interp(const float *u, uint32_t w, float *o0, float *o1)
 {
+    const float *z = u + w + 31u - 9u;                               /* (z[-9..9]: in the doubled ring) */
     float y = 0.0f;
     int k;
     for (k = 0; k < 10; k++)
-        y += SPU_HB[k] * (u[(w + 31u - 9u + (uint32_t)k) & 31u] + u[(w + 31u - 10u - (uint32_t)k) & 31u]);
+        y += SPU_HB[k] * (z[k] + z[-1 - k]);
     *o0 = 2.0f * y;
-    *o1 = u[(w + 31u - 9u) & 31u];
+    *o1 = z[0];
 }

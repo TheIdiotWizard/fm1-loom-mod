@@ -15,8 +15,16 @@
 #include "dsp/fx.h"
 
 extern seq_t seq;                      /* the sequencer (its pattern pointer is the project's) */
-enum { PR_SEQ, PR_SYNTH0, PR_SYNTH1, PR_DRUM, PR_FX, PR_MST, PR_WAIT, ENG_PROF_N };   /* the PERF screen's stages */
-extern volatile uint32_t eng_prof[ENG_PROF_N], eng_prof_frames;
+/* the profiler's stages (samples.c SB_PROF, tools/perf_read.py), in plat_cycles() units: the sequencer and the queue,
+ * the synth's voices on the first core and the second core's job (timed where it ran), the drum tracks, FX I, FX II
+ * (with the returns), the master, the first core waiting for the second, a stretch's set-up (the buffers, the
+ * performance state, the synth's prepare, the split), the halves' sum and meters, the output's conversion, the whole
+ * render; PR_SUBS counts the stretches; PR_NOTE: the notes, hits and locks the sequencer sends (inside PR_SEQ). eng_prof_worst: the stages of the slowest block since eng_prof_reset was set */
+enum { PR_SEQ, PR_SYNTH0, PR_SYNTH1, PR_DRUM, PR_FX, PR_MST, PR_WAIT, PR_FX2, PR_PREP, PR_MIX, PR_OUT, PR_ALL, PR_SUBS,
+       PR_NOTE, PR_SIX, PR_STEP, PR_SUB, PR_FXJ, ENG_PROF_N };
+extern volatile uint32_t eng_prof[ENG_PROF_N], eng_prof_frames, eng_prof_worst[ENG_PROF_N];
+extern volatile uint8_t eng_prof_reset;
+extern volatile uint32_t eng_prof_drum[NTRK];          /* each drum track's time (in PR_DRUM) */
 
 void engine_init(patterns_t *P, uint8_t (*par)[NTP]);    /* par: NALLTRK arrays (the project's) */
 void engine_render(int32_t *out_lr, uint32_t n, uint32_t gain_q12);   /* ISR: n stereo frames, 24-bit in int32 */

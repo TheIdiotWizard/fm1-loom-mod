@@ -42,6 +42,7 @@ sys.path.insert(0, str(REMOTE.parent))
 sys.path.insert(0, str(ROOT / "tools"))
 import fm1_remote as fr  # noqa: E402
 import loom_samples as ls  # noqa: E402
+import perf_read as pr  # noqa: E402
 
 PY = sys.executable
 TOOLS = ROOT / "base" / "tools"
@@ -291,6 +292,8 @@ def play_song(row, every, overhead_note):
     pm = row.get("project_model") or {}
     limit = (pm.get("seconds") or 90) * 1.6 + 20
     reads, stopped_n, g0, x0 = [], 0, None, None
+    p_first = p_prev = prof_snap()
+    p_last, worst = p_first, None
     while time.time() - t0 < limit:
         time.sleep(max(0.0, every - 0.3))
         s = where()
@@ -300,6 +303,18 @@ def play_song(row, every, overhead_note):
                 glo("Status")
             continue
         r["t"] = round(time.time() - t0, 2)
+        pn = prof_snap()
+        if pn and p_prev:
+            dd = pr.diff(p_prev, pn)
+            if dd:
+                for k in pr.STAGES:
+                    r["st_" + k] = round(dd["stage"][k], 1)
+                r["worst_all"] = round(dd["worst"]["all"])
+                if r["playing"] and (worst is None or dd["worst"]["all"] > worst["all"]):
+                    worst = dict(dd["worst"])
+            if r["playing"]:
+                p_last = pn
+        p_prev = pn or p_prev
         if g0 is None:
             g0, x0 = r["guard"], r["drop"]
         reads.append(r)
@@ -312,9 +327,15 @@ def play_song(row, every, overhead_note):
     secs = round(time.time() - t0, 1)
     playing = [r for r in reads if r["playing"]] or reads
     log = crash_log()
-    crashed = log[:2] != log0
+    for _ in range(3):                       # (an FM-1 at full load can miss the request: an empty answer is no answer)
+        if log:
+            break
+        time.sleep(1.0)
+        log = crash_log()
+    crashed = bool(log) and bool(log0) and log[:2] != log0
     with open(DEV / f"load_{song}.csv", "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["t", "load", "peak", "voices", "of", "saws", "guard", "drop", "playing"])
+        w = csv.DictWriter(f, fieldnames=["t", "load", "peak", "voices", "of", "saws", "guard", "drop", "playing"] +
+                           ["st_" + k for k in pr.STAGES] + ["worst_all"], extrasaction="ignore")
         w.writeheader()
         w.writerows(reads)
     res = {"song": song, "slot": slot, "seconds": secs, "reads": len(reads),
@@ -326,6 +347,15 @@ def play_song(row, every, overhead_note):
            "saws": min((r["saws"] for r in reads), default=9),
            "guard": (reads[-1]["guard"] - g0) if reads else None, "drop": (reads[-1]["drop"] - x0) if reads else None,
            "ended": stopped_n >= 2, "crash": crashed, "log": log, "model": pm}
+    whole = pr.diff(p_first, p_last) if p_first and p_last else None
+    if whole:
+        res["stages"] = {k: round(v, 2) for k, v in whole["stage"].items()}
+        res["eng"] = {h: {k: round(v, 2) for k, v in whole[h].items()} for h in ("eng0", "eng1")}
+        res["drum"] = [round(v, 2) for v in whole["drum"]]
+        res["worst"] = {k: round(v, 1) for k, v in (worst or {}).items()}
+        print("  stages: " + pr.line(whole))
+        if worst:
+            print("  slowest block: " + " ".join(f"{k} {v:.0f}" for k, v in worst.items() if v >= 1 or k == "subs"))
     print(f"  {secs} s, {len(reads)} reads: load mean {res['mean']} %, highest read {res['max_load']} %, peak "
           f"{res['peak']} %, voices {res['voices']} (cap {res['of_min']}), saws {res['saws']}, guard +{res['guard']}, "
           f"dropouts +{res['drop']}, {'ended' if res['ended'] else 'DID NOT END'}, "
@@ -333,6 +363,39 @@ def play_song(row, every, overhead_note):
     if not res["ended"]:
         stop()
     return res
+
+
+def prof_snap():
+    """the profiler's totals (tools/perf_read.py), None if the build has none"""
+    try:
+        return pr.snap(d)
+    except TimeoutError:
+        return None
+
+
+def stages_table(results):
+    order = ["jungle", "garage", "hyperpop", "house", "pop", "hiphop"]
+    results = sorted([r for r in results if r.get("stages")], key=lambda r: order.index(r["song"]) if r["song"] in order else 99)
+    cols = [k for k in pr.STAGES]
+    lines = ["LOOM-8 demo songs on the FM-1: the render's stages, % of the budget, over the song (tools/perf_read.py)",
+             "", f"{'song':<9} " + " ".join(f"{c:>6}" for c in cols)]
+    for r in results:
+        lines.append(f"{r['song']:<9} " + " ".join(f"{r['stages'][c]:>6.1f}" for c in cols))
+    lines += ["", "the slowest block (% of one block's budget)", f"{'song':<9} " + " ".join(f"{c:>6}" for c in cols)]
+    for r in results:
+        w = r.get("worst") or {}
+        lines.append(f"{r['song']:<9} " + " ".join(f"{w.get(c, 0):>6.0f}" for c in cols))
+    lines += ["", "each engine (both cores, % of the budget) and the drum tracks"]
+    for r in results:
+        eng = {}
+        for h in ("eng0", "eng1"):
+            for k, v in r["eng"][h].items():
+                eng[k] = eng.get(k, 0.0) + v
+        lines.append(f"{r['song']:<9} " + " ".join(f"{k} {v:.1f}" for k, v in sorted(eng.items(), key=lambda kv: -kv[1])) +
+                     " | drums " + " ".join(f"T{i + 1} {v:.1f}" for i, v in enumerate(r["drum"]) if v >= 0.05))
+    text = "\n".join(lines)
+    print("\n" + text)
+    (DEV / "stages.txt").write_text(text + "\n")
 
 
 def table(results, overhead):
@@ -355,6 +418,7 @@ def table(results, overhead):
     print("\n" + text)
     (DEV / "device_load.txt").write_text(text + "\n")
     (DEV / "device_load.json").write_text(json.dumps(results, indent=1) + "\n")
+    stages_table(results)
 
 
 def main():

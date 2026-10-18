@@ -308,7 +308,17 @@ static inline float cho_tap(const fxslot_t *f, float p)      /* the short line, 
     return a + (p - (float)i0) * (s16f(f->cho[(i0 + 1) & (CHO_N - 1)]) - a);
 }
 
-static void do_chorus(fxslot_t *f, const float *x, float *ol, float *orr, int m)
+/* lag (fx_process_lag): the send arrives that many samples late; the effects with a line take it back by writing
+ * the send that far into the line's past (a slot not read yet: every tap reads further back), so their output is
+ * where it would have been, but for the line's rounding: the delay and the chorus add it to the feedback already
+ * there (one int16 rounding more, and the delay's soft clip on the sum read back), the plate's combs likewise (its
+ * 12 bits) */
+static inline int16_t add16(int16_t a, float x)                /* a + x on the int16 line (x in its units) */
+{
+    float v = (float)a + x * 16384.0f;
+    return (int16_t)(v > 32767.0f ? 32767.0f : v < -32767.0f ? -32767.0f : v);
+}
+static void do_chorus(fxslot_t *f, const float *x, float *ol, float *orr, int m, int lag)
 {
     const float inc = f->pc[0] / SR, range = f->pc[1], fb = f->pc[2], side = 1.0f - 2.0f * f->pc[3];
     const float centre = 15.0f * (SR / 1000.0f), slew = 1.0f - fm_expf(-1.0f / (0.070f * SR));
@@ -318,7 +328,12 @@ static void do_chorus(fxslot_t *f, const float *x, float *ol, float *orr, int m)
     int i;
     for (i = 0; i < m; i++) {
         float tri, st, pl, pr, wl, wr;
-        f->cho[w] = f16(x[i] + fz * fb);
+        if (lag) {
+            f->cho[w] = f16(fz * fb);
+            f->cho[(w - lag) & (CHO_N - 1)] = add16(f->cho[(w - lag) & (CHO_N - 1)], x[i]);
+        } else {
+            f->cho[w] = f16(x[i] + fz * fb);
+        }
         w = (w + 1) & (CHO_N - 1);
         tri = 2.0f * fm_fabsf(2.0f * ph - 1.0f) - 1.0f;     /* the JP's stepped triangle */
         ph += inc;
@@ -354,7 +369,7 @@ static inline float tap16(const int16_t *b, float rp)
     return a + (c - a) * fr;
 }
 
-static void do_delay(fxslot_t *f, const float *x, float *ol, float *orr, int m, int any)
+static void do_delay(fxslot_t *f, const float *x, float *ol, float *orr, int m, int any, int lag)
 {
     const float target = f->pt[0], fb = f->pc[2], tc = f->pc[3];
     float dcur = f->dcur, lpl = f->dlpl, lpr = f->dlpr;
@@ -375,7 +390,7 @@ static void do_delay(fxslot_t *f, const float *x, float *ol, float *orr, int m, 
         tr = tap16(f->dr, rp);
         lpl += tc * (tl - lpl);               /* tone: the repeats darken */
         lpr += tc * (tr - lpr);
-        a = x[i] + lpr * fb;                  /* ping-pong: the send and the right into the left, */
+        a = (lag ? 0.0f : x[i]) + lpr * fb;   /* ping-pong: the send and the right into the left, */
         b = lpl * fb;                         /* the left into the right */
         if (a > 1.0f || a < -1.0f) a = fm_tanhf(a);
         if (b > 1.0f || b < -1.0f) b = fm_tanhf(b);
@@ -383,6 +398,12 @@ static void do_delay(fxslot_t *f, const float *x, float *ol, float *orr, int m, 
             int16_t ka = f16(a), kb = f16(b);
             f->dl[w] = ka;
             f->dr[w] = kb;
+            if (lag) {                        /* the send into the line's past (not read yet: the time is longer) */
+                int32_t p = w - lag < 0 ? w - lag + FX_DLY_LEN : w - lag;
+                float v = s16f(f->dl[p]) + x[i];
+                if (v > 1.0f || v < -1.0f) v = fm_tanhf(v);
+                f->dl[p] = f16(v);
+            }
             quiet = (ka == 0 && kb == 0 && x[i] == 0.0f) ? quiet + 1 : 0;
         }
         if (++w >= FX_DLY_LEN)
@@ -470,7 +491,7 @@ static void do_phaser(fxslot_t *f, const float *x, float *ol, float *orr, int m)
     f->pal = al; f->par_ = ar; f->pzl = zl; f->pzr = zr;
 }
 
-static void do_reverb(fxslot_t *f, const float *x, float *ol, float *orr, int m, int any)
+static void do_reverb(fxslot_t *f, const float *x, float *ol, float *orr, int m, int any, int lag)
 {
     const float damp = f->pc[3], fb = f->pc[4], hpk = 0.017f;                          /* ~120 Hz on the send */
     const float tlk = f->pc[2], thk = f->pc[5];                                        /* the tone's filters */
@@ -499,52 +520,83 @@ static void do_reverb(fxslot_t *f, const float *x, float *ol, float *orr, int m,
     ab[1] = ab[0] + RV_AP[0];
     ab[2] = ab[1] + RV_AP[1];
     ab[3] = ab[2] + RV_AP[2];
-    for (i = 0; i < m; i++) {
-        float acc = 0.0f, accr = 0.0f, y, yr;
-        int32_t wr = 0;
-        hp += hpk * (x[i] - hp);
-        y = x[i] - hp;
-        for (c = 0; c < 4; c++) {
-            int16_t *b = cb[c];
-            const int32_t cap = RV_CAP[c], p = cp[c];
-            float rp, a, bb, v;
-            int32_t i0, i1, k;
-            cd[c] += cdd[c];
-            rp = (float)p - cd[c];
-            if (rp < 0.0f)
-                rp += (float)cap;
-            i0 = (int32_t)rp;
-            i1 = i0 + 1 >= cap ? 0 : i0 + 1;
-            a = (float)b[i0];
-            bb = (float)b[i1];
-            v = (a + (bb - a) * (rp - (float)i0)) * (1.0f / 2048.0f);
-            acc += v;
-            accr += (c & 1) ? -v : v;
-            cdmp[c] = v + (cdmp[c] - v) * damp;
-            k = (int32_t)((y + cdmp[c] * fb) * 2048.0f);      /* 12 bits in the loop, as 9W9 */
-            if (k > 32767) k = 32767;
-            if (k < -32767) k = -32767;
-            b[p] = (int16_t)k;
-            wr |= k;
-            cp[c] = p + 1 >= cap ? 0 : p + 1;
+    {   /* the four combs and four allpasses unrolled, every state a local (the same operations, in the same order) */
+        int16_t *const b0 = cb[0], *const b1 = cb[1], *const b2 = cb[2], *const b3 = cb[3];
+        int16_t *const a0 = ab[0], *const a1 = ab[1], *const a2 = ab[2], *const a3 = ab[3];
+        float cd0 = cd[0], cd1 = cd[1], cd2 = cd[2], cd3 = cd[3];
+        const float dd0 = cdd[0], dd1 = cdd[1], dd2 = cdd[2], dd3 = cdd[3];
+        float m0 = cdmp[0], m1 = cdmp[1], m2 = cdmp[2], m3 = cdmp[3];
+        int32_t p0 = cp[0], p1 = cp[1], p2 = cp[2], p3 = cp[3], q0 = ap[0], q1 = ap[1], q2 = ap[2], q3 = ap[3];
+#define LAG lag
+#define RV_COMB_STEP(B, CAP, CD, DD, MD, P, NEG)                                              \
+        do {                                                                                   \
+            float rp_, a_, bb_, v_;                                                           \
+            int32_t i0_, i1_, k_;                                                             \
+            CD += DD;                                                                          \
+            rp_ = (float)P - CD;                                                               \
+            if (rp_ < 0.0f)                                                                    \
+                rp_ += (float)(CAP);                                                           \
+            i0_ = (int32_t)rp_;                                                                \
+            i1_ = i0_ + 1 >= (CAP) ? 0 : i0_ + 1;                                             \
+            a_ = (float)B[i0_];                                                                \
+            bb_ = (float)B[i1_];                                                               \
+            v_ = (a_ + (bb_ - a_) * (rp_ - (float)i0_)) * (1.0f / 2048.0f);                   \
+            acc += v_;                                                                         \
+            accr += NEG ? -v_ : v_;                                                            \
+            MD = v_ + (MD - v_) * damp;                                                        \
+            if (LAG) {                        /* the send into the comb's past, its feedback here */ \
+                int32_t q_ = P - LAG < 0 ? P - LAG + (CAP) : P - LAG, j_;                     \
+                k_ = (int32_t)(MD * fb * 2048.0f);                                             \
+                j_ = (int32_t)B[q_] + (int32_t)(y * 2048.0f);                                  \
+                j_ = j_ > 32767 ? 32767 : j_ < -32767 ? -32767 : j_;                           \
+                B[q_] = (int16_t)j_;                                                           \
+                wr |= j_;                                                                      \
+            } else {                                                                           \
+                k_ = (int32_t)((y + MD * fb) * 2048.0f);   /* 12 bits in the loop, as 9W9 */   \
+            }                                                                                  \
+            if (k_ > 32767) k_ = 32767;                                                        \
+            if (k_ < -32767) k_ = -32767;                                                      \
+            B[P] = (int16_t)k_;                                                                \
+            wr |= k_;                                                                          \
+            P = P + 1 >= (CAP) ? 0 : P + 1;                                                    \
+        } while (0)
+#define RV_AP_STEP(B, LEN, Q, S)                                                              \
+        do {                                                                                   \
+            float bo_ = (float)B[Q] * (1.0f / 2048.0f), nv_ = (S + bo_ * 0.5f) * 2048.0f;     \
+            B[Q] = (int16_t)fm_clampf(nv_, -32767.0f, 32767.0f);                              \
+            S = bo_ - S * 0.5f;                                                                \
+            Q = Q + 1 >= (LEN) ? 0 : Q + 1;                                                    \
+        } while (0)
+        for (i = 0; i < m; i++) {
+            float acc = 0.0f, accr = 0.0f, y, yr;
+            int32_t wr = 0;
+            hp += hpk * (x[i] - hp);
+            y = x[i] - hp;
+            RV_COMB_STEP(b0, RV_CAP[0], cd0, dd0, m0, p0, 0);
+            RV_COMB_STEP(b1, RV_CAP[1], cd1, dd1, m1, p1, 1);
+            RV_COMB_STEP(b2, RV_CAP[2], cd2, dd2, m2, p2, 0);
+            RV_COMB_STEP(b3, RV_CAP[3], cd3, dd3, m3, p3, 1);
+            y = acc * 0.25f;
+            yr = accr * 0.25f;
+            RV_AP_STEP(a0, RV_AP[0], q0, y);       /* two allpasses a side, int16 */
+            RV_AP_STEP(a1, RV_AP[1], q1, y);
+            RV_AP_STEP(a2, RV_AP[2], q2, yr);
+            RV_AP_STEP(a3, RV_AP[3], q3, yr);
+            tl0 += tlk * (y - tl0);           /* the tone: a low-pass (k = 1 passes), then a high-pass (k = 0 passes) */
+            tl1 += tlk * (yr - tl1);
+            th0 += thk * (tl0 - th0);
+            th1 += thk * (tl1 - th1);
+            ol[i] += (tl0 - th0) * RV_WET;
+            orr[i] += (tl1 - th1) * RV_WET;
+            quiet = (wr == 0 && x[i] == 0.0f) ? quiet + 1 : 0;
         }
-        y = acc * 0.25f;
-        yr = accr * 0.25f;
-        for (c = 0; c < 4; c++) {             /* two allpasses a side, int16 */
-            int16_t *b = ab[c];
-            const int32_t p = ap[c];
-            float *s = c < 2 ? &y : &yr, bo = (float)b[p] * (1.0f / 2048.0f), nv = (*s + bo * 0.5f) * 2048.0f;
-            b[p] = (int16_t)fm_clampf(nv, -32767.0f, 32767.0f);
-            *s = bo - *s * 0.5f;
-            ap[c] = p + 1 >= RV_AP[c] ? 0 : p + 1;
-        }
-        tl0 += tlk * (y - tl0);               /* the tone: a low-pass (k = 1 passes), then a high-pass (k = 0 passes) */
-        tl1 += tlk * (yr - tl1);
-        th0 += thk * (tl0 - th0);
-        th1 += thk * (tl1 - th1);
-        ol[i] += (tl0 - th0) * RV_WET;
-        orr[i] += (tl1 - th1) * RV_WET;
-        quiet = (wr == 0 && x[i] == 0.0f) ? quiet + 1 : 0;
+#undef RV_COMB_STEP
+#undef RV_AP_STEP
+#undef LAG
+        cd[0] = cd0; cd[1] = cd1; cd[2] = cd2; cd[3] = cd3;
+        cdmp[0] = m0; cdmp[1] = m1; cdmp[2] = m2; cdmp[3] = m3;
+        cp[0] = p0; cp[1] = p1; cp[2] = p2; cp[3] = p3;
+        ap[0] = q0; ap[1] = q1; ap[2] = q2; ap[3] = q3;
     }
     for (c = 0; c < 4; c++) {
         f->cd[c] = cd[c];
@@ -578,14 +630,14 @@ static void do_spu(fxslot_t *f, const float *x, float *ol, float *orr, int m, in
     spu_derive(s, f->mode, f->pc[0], f->pc[1], f->pc[3]);
     for (i = 0; i < m; i++) {
         float yl, yr;
-        s->in[s->ip] = x[i];
+        s->in[s->ip] = s->in[s->ip + 64u] = x[i];
         s->ip = (uint8_t)((s->ip + 1u) & 63u);
         if (s->phase) {                       /* the second of a pair: a tick */
             float lo, ro;
             int wr = spu_tick(s, w, -spu_decimate(s), &lo, &ro);   /* vLIN = 8000h: -1 */
             s->quiet = (wr == 0 && !any) ? s->quiet + 2 : 0;
-            s->up[0][s->up_w] = lo;
-            s->up[1][s->up_w] = ro;
+            s->up[0][s->up_w] = s->up[0][s->up_w + 32u] = lo;
+            s->up[1][s->up_w] = s->up[1][s->up_w + 32u] = ro;
             s->up_w = (uint8_t)((s->up_w + 1u) & 31u);
             spu_interp(s->up[0], s->up_w, &s->out[0][0], &s->out[0][1]);
             spu_interp(s->up[1], s->up_w, &s->out[1][0], &s->out[1][1]);
@@ -606,7 +658,13 @@ static void do_spu(fxslot_t *f, const float *x, float *ol, float *orr, int m, in
     s->thr = fm_flush(thr);
 }
 
+int fx_lags(const fxslot_t *f) { return f->type_t == FXT_CHORUS || f->type_t == FXT_DELAY || f->type_t == FXT_REVERB; }
+
 void fx_process(fxslot_t *f, const float *in, float *out_l, float *out_r, uint32_t n)
+{
+    fx_process_lag(f, in, out_l, out_r, n, 0);
+}
+void fx_process_lag(fxslot_t *f, const float *in, float *out_l, float *out_r, uint32_t n, int lag)
 {
     uint32_t o;
     if (f->type_t != f->type || f->mode_t != f->mode) {   /* a new effect or mode: start it at rest */
@@ -638,13 +696,13 @@ void fx_process(fxslot_t *f, const float *in, float *out_l, float *out_r, uint32
         f->hps = fm_flush(hps);
         f->lps = fm_flush(lps);
         switch (f->type) {
-        case FXT_CHORUS: do_chorus(f, x, out_l + o, out_r + o, m); break;
-        case FXT_DELAY: do_delay(f, x, out_l + o, out_r + o, m, any); break;
+        case FXT_CHORUS: do_chorus(f, x, out_l + o, out_r + o, m, lag); break;
+        case FXT_DELAY: do_delay(f, x, out_l + o, out_r + o, m, any, lag); break;
         case FXT_LOFI: do_lofi(f, x, out_l + o, out_r + o, m); break;
         case FXT_PHASER: do_phaser(f, x, out_l + o, out_r + o, m); break;
         case FXT_REVERB:
             if (f->mode == RV_PLATE)
-                do_reverb(f, x, out_l + o, out_r + o, m, any);
+                do_reverb(f, x, out_l + o, out_r + o, m, any, lag);
             else
                 do_spu(f, x, out_l + o, out_r + o, m, any);
             break;
@@ -833,15 +891,6 @@ void master_key(master_t *m, int src, int vel)
         m->pump_tgt = t;
 }
 
-static inline float biq(const biq_t *q, biqs_t *s, float x)
-{
-    float y = q->b0 * x + q->b1 * s->x1 + q->b2 * s->x2 - q->a1 * s->y1 - q->a2 * s->y2;
-    s->x2 = s->x1;
-    s->x1 = x;
-    s->y2 = s->y1;
-    s->y1 = fm_flush(y);
-    return y;
-}
 static inline float gr_of(const master_t *m, float lv)       /* the static curve, soft knee (dB) */
 {
     float over = lv - m->thr_db, h = 0.5f * m->knee;
@@ -873,28 +922,49 @@ int fx_host_stage = 9;                        /* the host's taps (host.c LOOM_MS
 #else
 #define STAGE(k) 1
 #endif
+/* one biquad over a block, its state in registers (the band-major order of master_process: each band's samples
+ * are the same as the sample-major loop's, operation for operation) */
+static inline void biq_block(const biq_t *q, biqs_t *st, float *x, uint32_t n)
+{
+    const float b0 = q->b0, b1 = q->b1, b2 = q->b2, a1 = q->a1, a2 = q->a2;
+    float x1 = st->x1, x2 = st->x2, y1 = st->y1, y2 = st->y2;
+    uint32_t i;
+    for (i = 0; i < n; i++) {
+        float in = x[i], y = b0 * in + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+        x2 = x1;
+        x1 = in;
+        y2 = y1;
+        y1 = fm_flush(y);
+        x[i] = y;
+    }
+    st->x1 = x1;
+    st->x2 = x2;
+    st->y1 = y1;
+    st->y2 = y2;
+}
 void master_process(master_t *m, float *perc_l, float *perc_r, float *mel_l, float *mel_r, float *out_l,
                     float *out_r, uint32_t n)
 {
     uint32_t i;
     float gp = m->gp_c, gm = m->gm_c, lev = m->lev_c, grmax = 0.0f, pmax = 0.0f;
     const int eq_on = m->eq_on, comp_on = m->comp_on;
-    /* the groups, the EQ and the tape into the bus (the tape a block of 32 at a time, in place in mel) */
-    for (i = 0; i < n; i++) {
-        float s, sr;
-        gp = glide1(gp, m->gp);
-        gm = glide1(gm, m->gm);
-        s = perc_l[i] * gp + mel_l[i] * gm;
-        sr = perc_r[i] * gp + mel_r[i] * gm;
-        if (eq_on && STAGE(1)) {
-            int b;
-            for (b = 0; b < 3; b++) {
-                s = biq(&m->eq[b], &m->eqs[0][b], s);
-                sr = biq(&m->eq[b], &m->eqs[1][b], sr);
-            }
+    /* the groups into the bus, then the EQ a band at a time, then the tape (a block of 32 at a time, in place in
+     * mel). (Every state is a local in its loop: a load from RAM costs this core more than a multiply.) */
+    {
+        const float tgp = m->gp, tgm = m->gm;
+        for (i = 0; i < n; i++) {
+            gp = glide1(gp, tgp);
+            gm = glide1(gm, tgm);
+            mel_l[i] = perc_l[i] * gp + mel_l[i] * gm;
+            mel_r[i] = perc_r[i] * gp + mel_r[i] * gm;
         }
-        mel_l[i] = s;
-        mel_r[i] = sr;
+    }
+    if (eq_on && STAGE(1)) {
+        int b;
+        for (b = 0; b < 3; b++) {
+            biq_block(&m->eq[b], &m->eqs[0][b], mel_l, n);
+            biq_block(&m->eq[b], &m->eqs[1][b], mel_r, n);
+        }
     }
     if (m->ts.on && STAGE(2)) {
         uint32_t o;
@@ -907,76 +977,95 @@ void master_process(master_t *m, float *perc_l, float *perc_r, float *mel_l, flo
     } else {
         m->tape_on = 0;
     }
-    for (i = 0; i < n; i++) {
-        float s = mel_l[i], sr = mel_r[i];
-        lev = glide1(lev, m->glev);
-        if (comp_on && STAGE(3)) {
-            float want;
-            /* the level: mean square over ~8 ms of both sides, x2 so a sine reads its peak; the static
-             * curve every MST_CR samples; the reduction smoothed (attack / release) and ramped as a
-             * linear gain (X0X's master.c: read every sample, the gain chased each cycle of a bass) */
-            m->ms = fm_flush(m->a_det * m->ms + 0.5f * ((1.0f - m->a_det) * s * s + (1.0f - m->a_det) * sr * sr));
-            if (m->cr == 0) {
-                float lv = 2.0f * m->ms;
-                m->want = (lv > 1e-12f && m->slope > 0.0f) ? gr_of(m, 3.0103f * fm_log2f(lv)) : 0.0f;
-            }
-            want = m->want;
-            m->gr = want > m->gr ? m->a_att * m->gr + (1.0f - m->a_att) * want
-                                 : m->a_rel * m->gr + (1.0f - m->a_rel) * want;
-            if (m->gr > grmax)
-                grmax = m->gr;
-            if (m->cr == 0) {
-                if (m->pump_tgt > m->pump) {          /* PUMP (X0X's): rise to the hit's depth ... */
-                    m->pump = m->a_up * m->pump + (1.0f - m->a_up) * m->pump_tgt;
-                    if (m->pump_tgt - m->pump < 0.05f)
-                        m->pump_tgt = 0.0f;           /* ... then let go: the release swells back */
-                } else {
-                    m->pump = fm_flush(m->a_down * m->pump);
+    {
+        const float glev = m->glev, a_det = m->a_det, a_att = m->a_att, a_rel = m->a_rel, slope = m->slope;
+        const float a_up = m->a_up, a_down = m->a_down, makeup = m->makeup;
+        float ms = m->ms, want = m->want, gr = m->gr, pump = m->pump, pump_tgt = m->pump_tgt;
+        float g_lin = m->g_lin, g_step = m->g_step, env = m->env, inv_env = m->inv_env, gain = m->gain;
+        float *la = m->la, *la_r = m->la_r;
+        int32_t la_pos = m->la_pos, hold = m->hold;
+        int cr = m->cr;
+        for (i = 0; i < n; i++) {
+            float s = mel_l[i], sr = mel_r[i];
+            lev = glide1(lev, glev);
+            if (comp_on && STAGE(3)) {
+                /* the level: mean square over ~8 ms of both sides, x2 so a sine reads its peak; the static
+                 * curve every MST_CR samples; the reduction smoothed (attack / release) and ramped as a
+                 * linear gain (X0X's master.c: read every sample, the gain chased each cycle of a bass) */
+                ms = fm_flush(a_det * ms + 0.5f * ((1.0f - a_det) * s * s + (1.0f - a_det) * sr * sr));
+                if (cr == 0) {
+                    float lv = 2.0f * ms;
+                    want = (lv > 1e-12f && slope > 0.0f) ? gr_of(m, 3.0103f * fm_log2f(lv)) : 0.0f;
                 }
-                if (m->pump > pmax)
-                    pmax = m->pump;
-                /* (the pump at 0: + 0.0f, the compressor's gain exactly as before) */
-                m->g_step = (m->makeup * fm_db2lin(-(m->gr + m->pump)) - m->g_lin) * (1.0f / MST_CR);
-                m->cr = MST_CR;
+                gr = want > gr ? a_att * gr + (1.0f - a_att) * want : a_rel * gr + (1.0f - a_rel) * want;
+                if (gr > grmax)
+                    grmax = gr;
+                if (cr == 0) {
+                    if (pump_tgt > pump) {            /* PUMP (X0X's): rise to the hit's depth ... */
+                        pump = a_up * pump + (1.0f - a_up) * pump_tgt;
+                        if (pump_tgt - pump < 0.05f)
+                            pump_tgt = 0.0f;          /* ... then let go: the release swells back */
+                    } else {
+                        pump = fm_flush(a_down * pump);
+                    }
+                    if (pump > pmax)
+                        pmax = pump;
+                    /* (the pump at 0: + 0.0f, the compressor's gain exactly as before) */
+                    g_step = (makeup * fm_db2lin(-(gr + pump)) - g_lin) * (1.0f / MST_CR);
+                    cr = MST_CR;
+                }
+                cr--;
+                g_lin += g_step;
+                s *= g_lin;
+                sr *= g_lin;
             }
-            m->cr--;
-            m->g_lin += m->g_step;
-            s *= m->g_lin;
-            sr *= m->g_lin;
-        }
-        s *= lev;
-        sr *= lev;
-        {   /* X0X's limiter: a peak is seen MST_LA samples before it comes out of the line; the gain
-             * eases down over those samples and holds for them */
-            float a = fm_maxf(fm_fabsf(s), fm_fabsf(sr)), d, dr, want;
-            if (a >= m->env) {
-                float r = 1.0f / fm_maxf(a, 0.8f);                   /* safe on its own: a clamp inside
-                                                                      * the branch is folded away */
-                m->env = a;
-                m->hold = MST_LA;
-                m->inv_env = a > 0.8f ? r : 0.0f;
-            } else if (m->hold) {
-                m->hold--;
-            } else {
-                m->env *= 0.99985f;
-                m->inv_env *= 1.0001500225f;
-            }
-            want = m->env > 0.8f ? 0.8f * m->inv_env : 1.0f;
-            m->gain += (want - m->gain) * (want < m->gain ? (5.0f / MST_LA) : 0.002f);
-            d = m->la[m->la_pos];
-            dr = m->la_r[m->la_pos];
-            m->la[m->la_pos] = s;
-            m->la_r[m->la_pos] = sr;
-            m->la_pos = (m->la_pos + 1) & (MST_LA - 1);
-            out_l[i] = soft_ceiling(d * m->gain);
-            out_r[i] = soft_ceiling(dr * m->gain);
+            s *= lev;
+            sr *= lev;
+            {   /* X0X's limiter: a peak is seen MST_LA samples before it comes out of the line; the gain
+                 * eases down over those samples and holds for them */
+                float a = fm_maxf(fm_fabsf(s), fm_fabsf(sr)), d, dr, w;
+                if (a >= env) {
+                    float r = 1.0f / fm_maxf(a, 0.8f);                   /* safe on its own: a clamp inside
+                                                                          * the branch is folded away */
+                    env = a;
+                    hold = MST_LA;
+                    inv_env = a > 0.8f ? r : 0.0f;
+                } else if (hold) {
+                    hold--;
+                } else {
+                    env *= 0.99985f;
+                    inv_env *= 1.0001500225f;
+                }
+                w = env > 0.8f ? 0.8f * inv_env : 1.0f;
+                gain += (w - gain) * (w < gain ? (5.0f / MST_LA) : 0.002f);
+                d = la[la_pos];
+                dr = la_r[la_pos];
+                la[la_pos] = s;
+                la_r[la_pos] = sr;
+                la_pos = (la_pos + 1) & (MST_LA - 1);
+                out_l[i] = soft_ceiling(d * gain);
+                out_r[i] = soft_ceiling(dr * gain);
 #ifdef PLAT_HOST
-            if (!STAGE(4)) {                  /* (a tap before the limiter: the bus as it comes, unlimited) */
-                out_l[i] = d;
-                out_r[i] = dr;
-            }
+                if (!STAGE(4)) {                  /* (a tap before the limiter: the bus as it comes, unlimited) */
+                    out_l[i] = d;
+                    out_r[i] = dr;
+                }
 #endif
+            }
         }
+        m->ms = ms;
+        m->want = want;
+        m->gr = gr;
+        m->pump = pump;
+        m->pump_tgt = pump_tgt;
+        m->g_lin = g_lin;
+        m->g_step = g_step;
+        m->env = env;
+        m->inv_env = inv_env;
+        m->gain = gain;
+        m->la_pos = la_pos;
+        m->hold = hold;
+        m->cr = (uint8_t)cr;
     }
     m->gp_c = gp;
     m->gm_c = gm;

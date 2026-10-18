@@ -449,7 +449,7 @@ static float load_model(int *nsyn, int *ndrum)
     static uint32_t hits0;
     static float hit_pct;
     static int hit_ms;
-    int k = (int)split_at(), v0 = 0, v1 = 0, n = 0, t;
+    int k = (int)split_at(0), v0 = 0, v1 = 0, n = 0, t;
     float serial = LOAD_IDLE, c0, c1;
     const uint8_t *ms = proj.master;
     *ndrum = 0;

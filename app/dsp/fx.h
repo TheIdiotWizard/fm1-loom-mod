@@ -45,7 +45,7 @@ extern const uint8_t RV_SPU_DEFAULT[4];         /* the SPU modes' */
 #define FX_RV_LEN 32768               /* int16 samples: the reverb's lines (the plate uses 11.4 k of them; an SPU mode at
                                        * x4 up to 32766: the chaos echo's and the delay's 1FFFh x 4) */
 typedef struct fxslot fxslot_t;
-#define FXSLOT_BYTES 5376             /* the chorus line (2048 int16: 4 KB, the lofi's spread reads it too) and the states */
+#define FXSLOT_BYTES 5760             /* the chorus line (2048 int16: 4 KB, the lofi's spread reads it too) and the states */
 
 void fx_init(fxslot_t *f, int16_t *dly_l, int16_t *dly_r, int16_t *rv);   /* a slot gets the lines it may use;
                                                                             * a slot without a reverb line (0) has no
@@ -56,6 +56,12 @@ void fx_tempo(fxslot_t *f, float bpm);
 void fx_filter(fxslot_t *f, int hp, int lp);                /* the slot's filter page: high-pass, low-pass 0..127 */
 /* process n frames of the send (mono in) into out L/R (added) */
 void fx_process(fxslot_t *f, const float *in, float *out_l, float *out_r, uint32_t n);
+/* the same for a send that arrives lag samples late (0..256: the engine runs the effects a block behind, on the
+ * second core): the chorus, the delay and the plate put it back in time in their lines (their output as without the
+ * lag, but for the lines' rounding); the SPU modes take it as that much more pre-delay. fx_lags: the effect is one of
+ * those (the lofi and the phaser have no line to hide it in: the engine runs them in time) */
+void fx_process_lag(fxslot_t *f, const float *in, float *out_l, float *out_r, uint32_t n, int lag);
+int fx_lags(const fxslot_t *f);
 int fx_has(const fxslot_t *f, int pick);                    /* the slot can do this effect (reverb needs its line) */
 int fx_awake(const fxslot_t *f);                            /* the slot works this block: its input heard, or its line
                                                             * still ringing (a delay or reverb sleeps on silence; the

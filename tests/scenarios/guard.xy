@@ -95,6 +95,43 @@ wait 1000
 expect saws 9
 where
 unsaid saws
+# the voice guard: one block over 92 % does not trip it (a spike: capping afterwards would not save it)
+load 60
+wait 2000
+expect guard 16
+load 98
+wait 6
+load 60
+wait 500
+expect guard 16
+# three in a row do: eight voices; then, the average under 70 % with blocks of 90 % now and then (a song's
+# spikes), two voices back each second
+load 98
+wait 25
+load 60
+wait 200
+expect guard 8
+load 90
+wait 6
+load 60
+wait 1000
+expect guard 10
+wait 1000
+expect guard 12
+load 90
+wait 6
+load 60
+wait 2000
+expect guard 16
+# a sustained 86 % trips it (the average) and holds it while it lasts
+load 86
+wait 1500
+expect guard 8
+wait 1500
+expect guard 8
+load 60
+wait 4500
+expect guard 16
 play 3 G3 off
 play 3 B3 off
 play 3 D4 off

@@ -20,13 +20,14 @@ or a setting change (and the UI's text), never once a sample or a block. The sam
 Code built for size computes the same samples: the FPU is single precision only and no fused multiply-add
 or reassociation is allowed at any level (-ffp-contract=off); only its speed differs.
 
-XY_RAM_DSP=1 placed the effects' and the master's code (RAM_DSP) in .ram_dsp: RAM beside .ram_text
-(app.ld RAMTEXT, 24 KB), copied there at boot, out of the XIP cache's way. LOOM-8's own platform had that section;
-fm1-base's linker script has not, so the experiment is off here (the code stays for a platform that has it). A direct call
-does not reach from the XIP window to that RAM (R_PI32V2_LONG_JUMP_23M2: 4 MB) or back, so the set is
-closed (RAM_INLINE: what both sides call is inlined into each) and engine.c calls in through a pointer
-(DSP_FAR); the linker refuses any call that was missed. An experiment for the device
-(tools/measure_load.sh): off by default.
+The effects' and the master's per-sample code (RAM_DSP, of dsp/fx.c) runs from RAM: in section .c1_text.dsp, which
+fm1-base's app.ld keeps in .ram_text's RAM (RAMTEXT, 24 KB; .c1_text*: the second core's RAM code, copied at boot,
+inside the PC guard's window, and left out of the check that RAM code calls nothing in the flash: it runs only from the
+audio interrupt and the second core's job, never while the flash is off). Out of the XIP cache's way, it leaves the
+cache to the synth, the drums and the sequencer (on the FM-1, 2026-10-18: the master as fast either way, the rest
+~10 % faster). A direct call does not reach from the XIP window to that RAM (R_PI32V2_LONG_JUMP_23M2: 4 MB) or back,
+so the set is closed (RAM_INLINE: what both sides call is inlined into each) and engine.c calls in through a pointer
+(DSP_FAR); the linker refuses any call that was missed.
 
     size_fns.py IN.ll OUT.ll [UNIT]        (XY_SIZE=0: copy unchanged; UNIT: an o2 unit, relative to app/)"""
 import os
@@ -51,10 +52,12 @@ COLD = {
                   "rec_key_on", "restart", "track_reset", "seq_rec_pos", "deg_to_note", "seq_cue_pattern",
                   "arp_stop", "keys_all_off"],
 }
-# XY_RAM_DSP=1: the two FX slots' and the master's per-sample code, closed under calls (~20 KB; the 24 KB
-# RAMTEXT region holds .ram_text's ~3 KB and .c1_text besides)
-RAM_DSP = ["fx_process", "do_spu", "spu_interp", "master_process", "ts_side", "ts_wf", "ts_block_pole"]
+# the two FX slots' and the master's per-sample code, closed under calls (~18 KB; the 24 KB RAMTEXT region holds
+# .ram_text's ~3 KB and the second core's loop besides)
+RAM_DSP = ["fx_process", "fx_process_lag", "do_spu", "spu_interp", "master_process", "ts_side", "ts_wf", "ts_block_pole"]
 RAM_INLINE = ["fx_states", "zero16"]
+RAM_UNITS = ["dsp/fx.c"]
+RAM_SECTION = ".c1_text.dsp"
 ROOTS = re.compile(r"^(?:\w+_irq|fm1_fault_c|fm1_fatal_common|core2_job)$")
 DEF = re.compile(r"^(?:static\s+|inline\s+|const\s+|unsigned\s+|signed\s+|struct\s+\w+\s+|__attribute__\s*\(\(.*?\)\)\s*)*"
                  r"(?:void|int|char|float|uint\d+_t|int\d+_t|size_t|\w+_t)\s*\**\s*([A-Za-z_]\w*)\s*\(", re.M)
@@ -125,7 +128,7 @@ def ram_place(ir, names, inl, groups, made):
                 extra[g] = 1 + max([int(x) for x in groups] + list(made.values()) + list(extra.values()))
             line = line.replace(f" #{g} ", f" #{extra[g]} ", 1)
         if n in names and " section " not in line:
-            line = line[:-1].rstrip() + ' section ".ram_dsp" {'
+            line = line[:-1].rstrip() + ' section "' + RAM_SECTION + '" {'
         return line
     ir = re.sub(r"^define [^\n]* #\d+ [^\n]*\{$", place, ir, flags=re.M)
     for g, new in extra.items():
@@ -169,9 +172,8 @@ def main(src, dst, unit=None):
             nxt += 1
         return m.group(0)[:m.start(1) - m.start(0)] + str(made[g]) + m.group(0)[m.end(1) - m.start(0):]
     ir = re.sub(r"^define [^\n]* #(\d+) [^\n]*\{$", mark, ir, flags=re.M)
-    ram = os.environ.get("XY_RAM_DSP", "")
-    if ram and ram != "0":            # (fm1-base's app.ld has no .ram_dsp: see the top)
-        raise SystemExit("size_fns: XY_RAM_DSP needs a .ram_dsp section in RAM, which fm1-base's app.ld has not")
+    if unit in RAM_UNITS:
+        ir = ram_place(ir, RAM_DSP, RAM_INLINE, groups, made)
     for g, new in made.items():
         a = groups[g] if "optsize" in groups[g].split() else "optsize " + groups[g]
         if unit and "noinline" not in a.split():
