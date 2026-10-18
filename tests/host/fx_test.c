@@ -4,7 +4,7 @@
  * on the beat at 120 BPM (time 1/4 = 0.5 s, dotted 1/8 = 0.375 s) and ping-pongs; the delay and the reverb
  * return only the wet (plain send / return); the delay's tone brightens its repeats, the plate's damp darkens
  * its tail; the reverbs decay (the SPU modes too, each, and grow with size); the lofi's width spreads the
- * sides; the master is bit-transparent with the EQ's blend at 0 (apart from the
+ * sides; the master is bit-transparent with the EQ flat (apart from the
  * limiter's 64-sample lookahead), its limiter never passes 1.0, its compressor pulls loud input down, its
  * EQ moves the bands; its PUMP ducks by its depth on its source's hits and swells back with the release (at 0
  * it changes nothing, sample for sample; accented hits deeper); and the cost of each in instructions a sample (macOS: proc_pid_rusage). Each effect's
@@ -511,31 +511,14 @@ int main(void)
             }
             n += BLK;
         }
-        check("EQ blend at 0: bit-transparent (perc + mel, 64 samples late)", ok);
-        /* an EQ set but blend 0: still transparent; blend 127: the bands move */
-        master_set(ms, MS_EQ_LO, 127);
-        master_set(ms, MS_EQ_HI, 0);
-        ok = 1;
-        for (b = 0; b < 50; b++) {
-            for (i = 0; i < BLK; i++) {
-                pl[i] = pr[i] = 0.3f * noise();
-                mll[i] = mlr[i] = 0.0f;
-                hist_l[(n + i) % (BLK * 4)] = pl[i];
-            }
-            master_process(ms, pl, pr, mll, mlr, ol2, or2, BLK);
-            for (i = 0; i < BLK; i++) {
-                int t0 = n + i - 64;
-                if (t0 >= 0 && b > 4)
-                    ok &= ol2[i] == hist_l[t0 % (BLK * 4)];
-            }
-            n += BLK;
-        }
-        check("EQ set, blend 0: still transparent", ok);
+        check("EQ flat (64): bit-transparent (drums + melodic, 64 samples late)", ok);
+        /* the EQ set: the bands move */
         {
             float lo0 = 0.0f, lo1 = 0.0f, hi0 = 0.0f, hi1 = 0.0f;
             int pass;
             for (pass = 0; pass < 2; pass++) {
-                master_set(ms, MS_EQ_BLEND, pass ? 127 : 0);
+                master_set(ms, MS_EQ_LO, pass ? 127 : 64);
+                master_set(ms, MS_EQ_HI, pass ? 0 : 64);
                 for (b = 0; b < 120; b++) {
                     for (i = 0; i < BLK; i++) {
                         pl[i] = pr[i] = 0.2f * fm_sin_turns((float)(b * BLK + i) * (60.0f / SR));
@@ -557,7 +540,7 @@ int main(void)
                             *(pass ? &hi1 : &hi0) += ol2[i] * ol2[i];
                 }
             }
-            snprintf(name, sizeof name, "EQ blend 127: low +12 dB (%.1f dB), high -12 dB (%.1f dB)",
+            snprintf(name, sizeof name, "EQ low 127, high 0: low +12 dB (%.1f dB), high -12 dB (%.1f dB)",
                      (double)(10.0f * 0.30103f * fm_log2f(lo1 / lo0)), (double)(10.0f * 0.30103f * fm_log2f(hi1 / hi0)));
             check(name, lo1 > lo0 * 10.0f && lo1 < lo0 * 20.0f && hi1 < hi0 * 0.1f && hi1 > hi0 * 0.05f);
         }
@@ -841,7 +824,7 @@ int main(void)
             master_process(ms, p1, p2, m1, m2, a, c, 256);
         di = instr_now() - i0;
         printf("  master off  %5.0f  (levels and the limiter)\n", (double)di / (20.0 * 256.0));
-        master_set(ms, MS_EQ_LO, 80); master_set(ms, MS_EQ_BLEND, 127);
+        master_set(ms, MS_EQ_LO, 80);
         master_set(ms, MS_COMP, 80);
         for (b = 0; b < 10; b++)
             master_process(ms, p1, p2, m1, m2, a, c, 256);

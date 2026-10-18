@@ -138,7 +138,6 @@ knob 12 e3 64
 knob 12 e4 40
 # the master: the top lifted (the genre wants it sharp), the bottom firm,
 # the bus compressor hard and the level up: the limiter at work, as these records are
-mst blend 127
 mst hi 96
 mst lo 72
 mst mid 54

@@ -69,7 +69,7 @@ enum { P_ARRANGE, P_SONG, P_STEPS, P_BAR, P_ENGINE, P_PLAY, P_SUB, P_ENV, P_FILT
 static const char *const PAGE_NAME[NPAGES] = {"Arrange", "Song", "Steps", "Bar", "Engine", "Play", "Sub", "Envelope",
                                               "Filter", "Filter env", "Kit filter", "Character", "Sends", "FX I",
                                               "FX II", "Throws", "LFO", "LFO 2", "Players", "Players 2", "Hold", "Mix",
-                                              "Master EQ", "Master out", "Setup", "Status"};
+                                              "Master EQ", "Master out", "Setup", "Debug"};
 static int mst_base(int p) { return p == P_MASTER ? MS_EQ_LO : MS_PERC; }   /* a master page's first knob */
 static const struct { uint8_t btn, first, n; } PAGE_BTN[] = {
     {B_HOME, P_ARRANGE, 2}, {B_SEQ, P_STEPS, 2}, {B_EDIT, P_ENGINE, 3}, {B_ENV, P_ENV, 4}, {B_FX, P_CHARACTER, 5},
@@ -480,6 +480,8 @@ static int group_n(int g)
         return pl_type(trk) == PL_ARP ? 3 : 2;
     if (b == B_ENV)
         return is_drum(trk) ? 4 : 3;                 /* a kit: the key's envelope, filter; the kit's envelope, filter */
+    if (b == B_GLO)
+        return DEBUG_BUILD ? 5 : 4;                  /* Debug last, in a debug build only */
     return PAGE_BTN[g].n;
 }
 /* the TP_* a page's knob k edits, -1 none */
@@ -1016,6 +1018,8 @@ static void page_knobs(knob_t *k)
     case P_MASTER: case P_MASTER3:
         for (int i = 0; i < 4; i++) {
             int m = mst_base(p) + i;
+            if (m == MS_RSV3)
+                continue;                            /* (EQ: three knobs) */
             if (m == MS_PUMP) {
                 char t[12];
                 pump_text(proj.master[m], t);
@@ -1028,9 +1032,10 @@ static void page_knobs(knob_t *k)
         kname(&k[0], "LIGHTS", LIGHTS_NAME, proj.lights, 3);
         kname(&k[1], "CLOCK", ONOFF, proj.send_clock != 0, 2);
         kname(&k[2], "NOTES", ONOFF, proj.send_notes != 0, 2);
-        kv(&k[3], "CORES", proj.one_core ? "one" : "two", 0, 0);
+        kv(&k[3], "THEME", THEME_OF_PROJ()->name, 0, 0);
         break;
-    case P_STATUS: case P_ARRANGE + 100:
+    case P_STATUS:
+        kv(&k[0], "CORES", proj.one_core ? "one" : "two", 0, 0);
         break;
     default:                                         /* the sound pages: every knob through tp_info_par */
         if (!is_aux(trk))
@@ -1559,9 +1564,9 @@ static const struct { uint8_t btn; uint32_t pages; const char *title, *l1, *l2; 
     {B_ARP, PG(P_STEPS), "Tricks", "With a step held, ARP: KNOB 1 and 3 pick its two tricks,",
      "KNOB 2 and 4 their values. Let go of the step when done."},
     {B_GLO, PG_ANY, "Mix", "Sends, pan, level. Black keys: a tap mutes a track, held: solo.",
-     "SELECT: Master, Setup and Status. SEL has the projects."},
+     "SELECT: Master EQ, Master out and Setup. HOME's SEL has the projects."},
     {B_HOME, PG_ANY, "Arrange", "Each track's pattern in the scene. White keys: scenes, black: mutes.",
-     "SEL: when scenes switch. HOME + REC undoes, HOME + PLAY redoes."},
+     "SEL: projects (load, new) and when scenes switch. HOME + REC undoes, + PLAY redoes."},
     {B_SEL, PG_ANY, "Lists", "The page's knobs, then its actions. SEL runs the one picked.",
      "SELECT moves, ALGORITHM changes, HOME goes back."},
     {B_SAVE, PG(P_STEPS), "Save", "Tap to save the project. With a step held, clears its locks.",
@@ -1705,7 +1710,10 @@ static void list_build(void)
             list_add(ACTION_NAME[A_ROT_BACK], 0, LK_ACTION, A_ROT_BACK);
             list_add(ACTION_NAME[A_DUP_BAR], 0, LK_ACTION, A_DUP_BAR);
         }
-    } else if (keep == P_ARRANGE) {
+    } else if (keep == P_ARRANGE) {                 /* the projects, then the scenes */
+        proj_slot_text(ui.pick_slot % NPROJ, slot_t);
+        list_add(ACTION_NAME[A_LOAD_PROJ], slot_t, LK_PICK, A_LOAD_PROJ);
+        list_add(ACTION_NAME[A_NEW_PROJ], 0, LK_ACTION, A_NEW_PROJ);
         list_add(ACTION_NAME[A_SCENE_AT], proj.rsv[2] & SCENES_AT_END ? "pattern end" : "next bar", LK_PICK, A_SCENE_AT);
         list_add(ACTION_NAME[A_CLEAR_SCENE], 0, LK_ACTION, A_CLEAR_SCENE);
         list_add(ACTION_NAME[A_PANIC], 0, LK_ACTION, A_PANIC);
@@ -1764,10 +1772,6 @@ static void list_build(void)
             list_add(ACTION_NAME[A_FOLLOW], fol_t, LK_PICK, A_FOLLOW);
         }
     } else if (keep == P_MIX) {
-        if (!is_aux(trk)) {
-            s_cat(fol_t, FOLLOW_NAME[proj.trk[trk].par[TP_BRAIN] % 3]);
-            list_add(ACTION_NAME[A_FOLLOW], fol_t, LK_PICK, A_FOLLOW);
-        }
         list_add(ACTION_NAME[A_PANIC], 0, LK_ACTION, A_PANIC);
     } else if (keep == P_MASTER3) {                 /* the out page: the pump's settings, the level */
         static char by[8], rel[12], lev[8];
@@ -1778,16 +1782,8 @@ static void list_build(void)
         list_add(ACTION_NAME[A_PUMP_REL], rel, LK_PICK, A_PUMP_REL);
         list_add(ACTION_NAME[A_PUMP_ACC], proj.master[MS_PUMP_ACC] ? "on" : "off", LK_PICK, A_PUMP_ACC);
         list_add(ACTION_NAME[A_LEVEL], lev, LK_PICK, A_LEVEL);
-    } else if (keep == P_SETUP || keep == P_STATUS) {
-        proj_slot_text(ui.pick_slot % NPROJ, slot_t);
-        list_add(ACTION_NAME[A_LOAD_PROJ], slot_t, LK_PICK, A_LOAD_PROJ);
-        list_add(ACTION_NAME[A_NEW_PROJ], 0, LK_ACTION, A_NEW_PROJ);
+    } else if (keep == P_SETUP) {
         list_add(ACTION_NAME[A_USB_AUDIO], USBA_NAME[proj.usb_full & 1u], LK_PICK, A_USB_AUDIO);
-        {
-            static const char *const CIN[3] = {"off", "1 bar", "2 bars"};
-            list_add(ACTION_NAME[A_COUNT_IN], CIN[proj.rsv[0] % 3u], LK_PICK, A_COUNT_IN);   /* (rsv[0]: the count-in) */
-        }
-        list_add(ACTION_NAME[A_THEME], THEME_OF_PROJ()->name, LK_PICK, A_THEME);   /* (rsv[1]: the theme) */
     }
     if (lst.sel >= lst.n)
         lst.sel = (uint8_t)(lst.n ? lst.n - 1 : 0);
@@ -3501,6 +3497,8 @@ static void draw_mix(void)
     static float m_db[NALLTRK], m_hold[NALLTRK];
     static uint32_t m_hold_ms[NALLTRK], m_last;
     static const char *const SHORT_NM[NALLTRK] = {"1", "2", "3", "4", "5", "6", "7", "8", "CO", "TH", "F1", "F2"};
+    static const int8_t COL[NALLTRK] = {0, 1, 2, 3, 4, 5, 6, 7, -1, -1, 8, 9};   /* the strips' places (the conductor and the
+                                                                              * throws make no sound: none) */
     uint32_t now = plat_ms(), dt = now - m_last;
     int sel = sel_trk();
     uint32_t h = hash_u(hash_u(2166136261u, 0x3Cu), (uint32_t)sel | (uint32_t)seq.mute << 4 | (uint32_t)ui.solo << 20);
@@ -3529,7 +3527,9 @@ static void draw_mix(void)
     for (int i = 0; i < 3; i++)                  /* the scale, at the right */
         text_r(236, y0 - mix_y((float)MARK[i]) - 4, &FONT_XS, MARK_NM[i], K_FAINT);
     for (int t = 0; t < NALLTRK; t++) {
-        int32_t x = 4 + t * 18;
+        if (COL[t] < 0)
+            continue;
+        int32_t x = 4 + COL[t] * 18 + (COL[t] >= 8 ? 14 : 0);
         int muted = t < NSEQT && (seq.mute >> t & 1u), sound = t < NTRK || is_fx(t);
         uint16_t ink = muted ? K_LINE : trk_ink(t);
         text_c(x + 7, 94, &FONT_XS, SHORT_NM[t], t == sel ? K_TEXT : muted || !sound ? K_FAINT : K_DIM);
@@ -3581,12 +3581,11 @@ static void draw_master(void)
             g0 = (float)m[BAND[i]];
             g1 = (float)m[BAND[i < 2 ? i + 1 : 2]];
             b = g0 + (g1 - g0) * t;
-            pen_to(&pn, (float)(x0 + x), (float)cy - (b - 64.0f) * (float)(hh / 2 - 6) * (float)m[MS_EQ_BLEND] / (64.0f * 127.0f),
-                   K_NOW);
+            pen_to(&pn, (float)(x0 + x), (float)cy - (b - 64.0f) * (float)(hh / 2 - 6) / 64.0f, K_NOW);
         }
-        cv_text(x0, y0 + hh + 3, &FONT_XS, "low  mid  high, by the blend", K_DIM);
+        cv_text(x0, y0 + hh + 3, &FONT_XS, "low  mid  high: 64 is flat", K_DIM);
     } else {
-        static const char *const NM[4] = {"drums", "melodic", "comp", "pump"};
+        static const char *const NM[4] = {"drums", "melodic", "comp", "pump"};   /* (the knobs' names, MS_NAME) */
         for (int i = 0; i < 4; i++) {
             int32_t x = x0 + i * 52, v = m[MS_PERC + i] * (hh - 10) / 127;
             cv_round(x + 8, y0, 30, hh, 4, K_PANEL);
@@ -3615,15 +3614,13 @@ static void draw_setup(void)
     for (int i = 0; i < NAME_LEN; i++)
         nm[i] = proj.name[i];
     nm[NAME_LEN] = 0;
-    num_s((uint32_t)proj_slot + 1u, s_cat(t, "slot "));
-    setup_row(2, "project", t);
-    setup_row(18, "name", nm[0] ? nm : "-");
-    setup_row(34, "clock", seq.ext ? "MIDI in" : "internal");
-    setup_row(50, "MIDI out", proj.send_clock || proj.send_notes ? (proj.send_clock && proj.send_notes ? "clock, notes"
-                                                                  : proj.send_clock ? "clock" : "notes") : "off");
-    setup_row(66, "count-in", proj.rsv[0] % 3u == 2u ? "2 bars" : proj.rsv[0] % 3u ? "1 bar" : "off");
-    setup_row(82, "theme", THEME_OF_PROJ()->name);
-    setup_row(98, "version", APP_VERSION);
+    (void)t;
+    setup_row(4, "tempo from", seq.ext ? "MIDI clock in" : "LOOM-8");
+    setup_row(22, "sends clock", proj.send_clock ? "yes" : "no");
+    setup_row(40, "sends notes", proj.send_notes ? "yes" : "no");
+    setup_row(58, "USB audio", USBA_NAME[proj.usb_full & 1u]);
+    setup_row(76, "theme", THEME_OF_PROJ()->name);
+    setup_row(94, "version", APP_VERSION);
     cv_blit(0, MAIN_Y);
 }
 static uint32_t status_peak;                          /* the highest peak shown since the screen reader said it (ui.c) */

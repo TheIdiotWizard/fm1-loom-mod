@@ -105,7 +105,6 @@ knob 7 send2 30
 # FX II a short room
 knob 12 engine room
 # the master: the low end up, narrow
-mst blend 127
 mst lo 74
 mst hi 64
 mst comp 40

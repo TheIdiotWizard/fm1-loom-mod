@@ -106,7 +106,6 @@ knob 11 e4 84
 knob 12 engine studio_M
 knob 12 e3 72
 # the master: a little air, the compressor light
-mst blend 127
 mst hi 74
 mst lo 64
 mst comp 56

@@ -220,9 +220,9 @@ static void master_case(const char *name, const int *set)
 static void master_cases(void)
 {
     static const int off[] = {-1};
-    static const int full[] = {MS_EQ_LO, 100, MS_EQ_MID, 20, MS_EQ_HI, 90, MS_EQ_BLEND, 127, MS_COMP, 127,
+    static const int full[] = {MS_EQ_LO, 100, MS_EQ_MID, 20, MS_EQ_HI, 90, MS_COMP, 127,
                                MS_PERC, 80, MS_MEL, 120, MS_LEVEL, 110, -1};
-    static const int eq[] = {MS_EQ_LO, 80, MS_EQ_BLEND, 127, MS_COMP, 80, -1};
+    static const int eq[] = {MS_EQ_LO, 80, MS_COMP, 80, -1};
     static const int lev[] = {MS_PERC, 30, MS_MEL, 127, MS_LEVEL, 127, MS_COMP, 40, -1};
     master_case("master off", off);
     master_case("master eq comp levels 127", full);

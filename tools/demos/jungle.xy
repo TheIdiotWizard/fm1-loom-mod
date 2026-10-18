@@ -88,7 +88,6 @@ knob 11 e4 50
 knob 12 engine hall
 knob 12 e2 70
 # the master: the grit is on the amen; the low end held, the top lifted a little for the breaks
-mst blend 127
 mst hi 76
 mst lo 62
 mst comp 56

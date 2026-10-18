@@ -26,8 +26,7 @@
  * The reverb has modes: the plate above, and the PlayStation's SPU reverbs (psxrev.h, from
  * schwung-psxverb: MIT), which run on the same line, all of it.
  *
- * Master: the two groups' levels, a 3-band EQ (RBJ shelves and a peak, their gains scaled by blend
- * so blend 0 is a true bypass), X0X's bus compressor behind its one-knob macro with X0X's PUMP in its gain
+ * Master: the two groups' levels, a 3-band EQ (RBJ shelves and a peak; all three at 64 a true bypass), X0X's bus compressor behind its one-knob macro with X0X's PUMP in its gain
  * (a hit of the pump's source ducks the whole mix: the sequencer keys it, so it needs no detector and a
  * muted track keys it too; at 0 the stage is as before, sample for sample), the master level and X0X's
  * lookahead limiter.
@@ -723,8 +722,8 @@ int fx_awake(const fxslot_t *f)
 /* ================================================================ master === */
 /* the master's knob names, short enough for the knob strip: percussion, melodic, compressor
  * and pump are perc, mel, comp, pump; then the out page's list */
-const char *const MS_NAME[NMS] = {"low", "mid", "high", "blend", "-", "-", "-", "-",
-                                  "perc", "mel", "comp", "pump", "pump by", "release", "accent", "level"};
+const char *const MS_NAME[NMS] = {"low", "mid", "high", "-", "-", "-", "-", "-",
+                                  "drums", "melodic", "comp", "pump", "pump by", "release", "accent", "level"};
 
 typedef struct { float b0, b1, b2, a1, a2; } biq_t;
 typedef struct { float x1, x2, y1, y2; } biqs_t;
@@ -790,15 +789,13 @@ static void biq_peak(biq_t *q, float hz, float db, float Q)
 
 static void eq_coefs(master_t *m)
 {
-    float bl = (float)m->pot[MS_EQ_BLEND] * (1.0f / 127.0f);
-    float lo = ((float)m->pot[MS_EQ_LO] - 64.0f) * (12.0f / 64.0f) * bl;
-    float mid = ((float)m->pot[MS_EQ_MID] - 64.0f) * (12.0f / 64.0f) * bl;
-    float hi = ((float)m->pot[MS_EQ_HI] - 64.0f) * (12.0f / 64.0f) * bl;
+    float lo = ((float)m->pot[MS_EQ_LO] - 64.0f) * (12.0f / 64.0f);
+    float mid = ((float)m->pot[MS_EQ_MID] - 64.0f) * (12.0f / 64.0f);
+    float hi = ((float)m->pot[MS_EQ_HI] - 64.0f) * (12.0f / 64.0f);
     biq_shelf(&m->eq[0], 120.0f, lo, 0);
     biq_peak(&m->eq[1], 1000.0f, mid, 0.8f);
     biq_shelf(&m->eq[2], 6000.0f, hi, 1);
-    m->eq_on = m->pot[MS_EQ_BLEND] != 0 &&
-               (m->pot[MS_EQ_LO] != 64 || m->pot[MS_EQ_MID] != 64 || m->pot[MS_EQ_HI] != 64);
+    m->eq_on = m->pot[MS_EQ_LO] != 64 || m->pot[MS_EQ_MID] != 64 || m->pot[MS_EQ_HI] != 64;
 }
 
 /* X0X's one-knob COMP: the threshold falls (-4 .. -32 dB), the ratio climbs (1.5:1 .. 6:1), the
@@ -850,10 +847,10 @@ void master_set(master_t *m, int p, int v)
     if (p < 0 || p >= NMS)
         return;
     m->pot[p] = (uint8_t)(v < 0 ? 0 : v > master_max(p) ? master_max(p) : v);
-    if (p <= MS_EQ_BLEND)
+    if (p <= MS_EQ_HI)
         eq_coefs(m);
     else if (p <= MS_RSV7)
-        return;                                           /* (the tape's, gone) */
+        return;                                           /* (the blend's and the tape's, gone) */
     else if (p == MS_PERC)
         m->gp = level_lin(v);
     else if (p == MS_MEL)

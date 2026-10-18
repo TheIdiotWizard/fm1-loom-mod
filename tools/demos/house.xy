@@ -103,7 +103,6 @@ knob 12 e3 56
 # the master: warm, the low end a little up, no top lift, a gentle compressor; the whole mix breathing with the kick
 # (the master's pump: 4 dB by the kick, swelling back over ~170 ms, most of a beat; the bass's and the pad's own
 # pumps stay: theirs is the parts' room around the kick)
-mst blend 127
 mst lo 72
 mst hi 64
 mst comp 56

@@ -74,7 +74,9 @@ void app_init(void)
     engine_init(&pats, proj_par);
     project_apply();
 #ifndef PLAT_HOST
-    if (plat_cpu2_barred() && !proj.one_core) {     /* it crashed (or was given up) with two cores: one from now on */
+    if (!DEBUG_BUILD)                               /* a release: two cores, unless the second was given up */
+        proj.one_core = (uint8_t)(plat_cpu2_barred() != 0);
+    else if (plat_cpu2_barred() && !proj.one_core) {     /* it crashed (or was given up) with two cores: one from now on */
         proj.one_core = 1;
         project_save(proj_slot);                    /* written now, on one core, the project as it loaded;
                                                      * Setup > 2nd core turns it back on */

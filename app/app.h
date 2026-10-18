@@ -110,6 +110,8 @@ int plat_last_crash(uint32_t v[5]);     /* 1: a crash since power-on (vec, pc, e
 /* the lights: lit buttons and keys; glow: the unlit buttons dim (PLAY's green one); dim_keys dim; red: PLAY red */
 void loom_lights(uint32_t buttons, uint32_t keys, int glow, uint32_t dim_keys, int red);
 
+/* a debug build (not tools/build.py --release): GLO's last page, Debug, with the load, the voices and CORES */
+#define DEBUG_BUILD (APP_VERSION[0] == 'D' && APP_VERSION[1] == 'E' && APP_VERSION[2] == 'V' && !APP_VERSION[3])
 #define PROJ_MAGIC 0x384D4F4Cu          /* "LOM8" (was "XXY1": XY-1's projects start fresh) */
 #define PROJ_FORMAT 7u                  /* (pre-release: an older project does not load, nothing is migrated)
                                          * 7: a kit step's sounds as bits (pattern.h kit_*: any of the 11);

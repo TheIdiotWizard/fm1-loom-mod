@@ -176,7 +176,6 @@ void project_defaults(void)
      * was: 0, and ignored) */
     for (k = 0; k < NMS; k++)
         proj.master[k] = 64;
-    proj.master[MS_EQ_BLEND] = 0;
     for (k = MS_RSV4; k <= MS_RSV7; k++)
         proj.master[k] = 0;
     proj.master[MS_PERC] = 100;

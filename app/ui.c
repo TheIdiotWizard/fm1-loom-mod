@@ -1333,6 +1333,8 @@ static void bar_knob(int k, int32_t e)
 static void master_knob(int k, int32_t e)
 {
     int m = mst_base(ui.page) + k;
+    if (m == MS_RSV3)
+        return;                                  /* (EQ: three knobs) */
     proj.master[m] = (uint8_t)clampi(proj.master[m] + e, 0, 127);
     engine_master(m, proj.master[m]);
     mark_dirty();
@@ -1345,10 +1347,16 @@ static void setup_knob(int k, int32_t e)
         seq.send_clock = proj.send_clock = (uint8_t)(e > 0);
     else if (k == 2)
         seq.send_notes = proj.send_notes = (uint8_t)(e > 0);
-    else {
-        proj.one_core = (uint8_t)(e > 0);
-        plat_cpu2_set(!proj.one_core);
-    }
+    else
+        proj.rsv[1] = (uint8_t)((proj.rsv[1] + NTHEMES + (e > 0 ? 1u : NTHEMES - 1u)) % NTHEMES);   /* the theme */
+    mark_dirty();
+}
+static void debug_knob(int k, int32_t e)         /* Debug: KNOB 1 the cores */
+{
+    if (k)
+        return;
+    proj.one_core = (uint8_t)(e > 0);
+    plat_cpu2_set(!proj.one_core);
     mark_dirty();
 }
 static void fx_pick(int trk, int d)              /* the effect (the reverb's modes among them): only those the slot can do */
@@ -1408,7 +1416,7 @@ static void knob(int k, int32_t e)
     case P_BAR: bar_knob(k, e); return;
     case P_MASTER: case P_MASTER3: master_knob(k, e); return;
     case P_SETUP: setup_knob(k, e); return;
-    case P_STATUS: return;
+    case P_STATUS: debug_knob(k, e); return;
     default: break;
     }
     if (fx_page(ui.page)) {                      /* an effect's knobs: the effect track's own */

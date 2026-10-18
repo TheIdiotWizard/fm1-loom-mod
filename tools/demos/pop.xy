@@ -128,7 +128,6 @@ knob 12 e1 76
 knob 12 e3 70
 knob 12 e4 44
 # the master: air on top, the low end firm, the compressor gluing, loud
-mst blend 127
 mst hi 78
 mst lo 70
 mst comp 64

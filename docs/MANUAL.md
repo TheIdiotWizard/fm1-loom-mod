@@ -152,7 +152,7 @@ press…" means keep **HOME** down while you press the next thing.
 | play a progression | Turn **ALGORITHM** to COND (the conductor). Press **EDIT** and play a chord: it moves the tracks that follow. Press **SEQ** and press a step: the chord goes on it. Set the scale to 4 on the Bar page so a step is a beat. |
 | save | Press **SAVE**. Hold **SAVE** and press white key 1 to 3 to save to that slot. |
 | keep a sound | On a sound page, hold **SAVE** and press a white key. The sound becomes that user preset. |
-| load a project | Press **GLO**, turn **SELECT** to Setup, press **SEL** and pick LOAD PROJECT. |
+| load a project | Press **HOME**, press **SEL**, turn **ALGORITHM** on LOAD PROJECT to the slot, and press **SEL**. NEW PROJECT starts an empty one. |
 
 ### The buttons
 
@@ -168,7 +168,7 @@ press…" means keep **HOME** down while you press the next thing.
 | **FX** | Opens Character, the track's own effect. Then Sends, the track's sends to FX I and FX II. Then FX I and FX II, the two effects. |
 | **LFO** | Opens LFO. Its page 2 has the type's fourth and fifth knobs. |
 | **ARP** | Opens Players. With the arp, page 2 is its second set of knobs and page 3 is hold. |
-| **GLO** | Opens Mix. Turn **SELECT** for Master EQ, Master out, Setup and Status. |
+| **GLO** | Opens Mix. Turn **SELECT** for Master EQ, Master out and Setup. |
 | **SAVE** | Saves. Hold it and press a white key to save to a slot, or to keep a sound. With a step held, clears its locks. |
 | **OCT−** / **OCT+** | Move the keys an octave. On Steps, show the bar before or after; with a step held, nudge it. In step record, move the cursor. |
 | **SELECT** | Turns to a button's next page. In a list, it moves up and down. |
@@ -196,7 +196,7 @@ From top to bottom, the screen has five parts.
   knob you just turned shows in the text colour.
 - **The two bottom lines** say what the encoders and the keys do here.
 
-The screen comes in two themes (Setup, THEME): **tape deck**, warm brown-black with cream text, and
+The screen comes in two themes (Setup's THEME knob): **tape deck**, warm brown-black with cream text, and
 **blueprint**, deep blue with white lines. In both, every instrument track has its own colour; in tape deck
 T1 mustard, T2 rust, T3 olive, T4 teal, T5 blue, T6 plum, T7 tan, T8 sage. A track's steps with notes are
 its colour, dimmed; what sounds now is its colour, bright: the step playing, the scene playing, a meter. On
@@ -761,11 +761,12 @@ Turn **ALGORITHM** past T8. Each aux track has its own page under **EDIT** and i
 
 Press **GLO**. The Mix page shows a meter for each track. A black key picks its track: a tap mutes or unmutes
 it, and holding it solos the track until you let go. The knobs are the sends to FX I and FX II, the pan and the
-level. Turn **SELECT** for Master EQ (low, mid, high and a blend from flat to the EQ) and
+level. Turn **SELECT** for Master EQ (low, mid and high; 64 is flat) and
 Master out (the drums' level, the melodic tracks' level, the compressor and the pump; its **SEL** list has
-what the pump follows, its release and accent, and the output level). Setup has the lights, MIDI clock and notes out, and one or two cores; its **SEL** list loads
-a project, starts a new one, and sets the USB audio level, the count-in and the theme (tape deck or blueprint). Status shows the audio load, the
-voices and the second core.
+what the pump follows, its release and accent, and the output level). Setup's knobs are the lights, sending MIDI
+clock, sending MIDI notes and the theme (tape deck or blueprint); the page also says where the tempo comes from
+(LOOM-8, or a MIDI clock coming in), the USB audio level and the version, and its **SEL** list sets the USB audio
+level. The projects are on **HOME**'s **SEL** list; the count-in is on **REC**'s knobs.
 
 **Pump** (Master out's fourth knob) lowers the whole mix each time the kick plays, by up to 24 dB, and lets it
 swell back up: the big-beat breathing of house and French touch. Accented kicks pump harder. It works even with
@@ -784,7 +785,7 @@ the mix breathes to a beat nobody hears. At 0 (a new project's) it is off. Its *
 The pump is the whole mix's; a track's own duck LFO (above) still ducks just that track, for a bass that gets
 out of the kick's way while the rest plays on.
 
-<img src="img/screen-mix.png" width="240" alt="Mix: a meter for each track while playing; knobs fx I, fx II, pan and level" title="The mixer"> <img src="img/screen-sends.png" width="240" alt="FX&#x27;s Sends page: the track&#x27;s sends to FX I (delay) and FX II (reverb plate), its pan and level" title="The sends"> <img src="img/screen-master.png" width="240" alt="Master EQ: low, mid, high and the blend from flat to the EQ" title="Master EQ"> <img src="img/screen-master-out.png" width="240" alt="Master out: bars for drums, melodic, comp and pump; knobs perc 100, mel 100, comp 30, pump 4.0 dB" title="Master out"> <img src="img/screen-status.png" width="240" alt="Status: audio load, peak, voices, the second core, guard trips and dropouts" title="Status">
+<img src="img/screen-mix.png" width="240" alt="Mix: a meter for each track while playing; knobs fx I, fx II, pan and level" title="The mixer"> <img src="img/screen-sends.png" width="240" alt="FX&#x27;s Sends page: the track&#x27;s sends to FX I (delay) and FX II (reverb plate), its pan and level" title="The sends"> <img src="img/screen-master.png" width="240" alt="Master EQ: low, mid and high, flat at 64" title="Master EQ"> <img src="img/screen-master-out.png" width="240" alt="Master out: bars for drums, melodic, comp and pump; knobs drums 100, melodic 100, comp 30, pump 4.0 dB" title="Master out">
 
 ## Saving
 
@@ -805,7 +806,7 @@ On a sound page, hold **SAVE** and press white key 1 to 16 to keep the track's s
 
 | Button | Page | KNOB 1 | KNOB 2 | KNOB 3 | KNOB 4 | Keys |
 | --- | --- | --- | --- | --- | --- | --- |
-| HOME | Arrange | tempo | groove | amount | click | white: scenes, black: mutes; SEL: when scenes switch |
+| HOME | Arrange | tempo | groove | amount | click | white: scenes, black: mutes; SEL: load or new project, when scenes switch |
 | HOME, SELECT | Song | slot | scene | bars | at end | white: add a scene |
 | SEQ | Steps | pattern | length | scale | groove | white: steps, black: sound (drums); SEQ held: a keyboard |
 | SEQ, a step held | Steps | velocity | length | chance | pitch | white: length, black: sounds |
@@ -830,10 +831,9 @@ On a sound page, hold **SAVE** and press white key 1 to 16 to keep the track's s
 | ARP | Players | player | its first | its second | its third | play, through the player |
 | ARP, SELECT | Players 2, Hold | the arp's length, style, glide, stereo; hold | | | | play |
 | GLO | Mix | FX I | FX II | pan | level | black: a tap mutes, held: solo |
-| GLO, SELECT | Master EQ | low | mid | high | blend | |
-| GLO, SELECT | Master out | perc | mel | comp | pump | SEL: pump by, release, accent, level |
-| GLO, SELECT | Setup | lights | clock | notes | cores | |
-| GLO, SELECT | Status | | | | | |
+| GLO, SELECT | Master EQ | low | mid | high | | |
+| GLO, SELECT | Master out | drums | melodic | comp | pump | SEL: pump by, release, accent, level |
+| GLO, SELECT | Setup | lights | clock | notes | theme | SEL: USB audio |
 
 The aux tracks' Engine page: COND has mode, key, scale and link, and page 2 the routing; THROW has latch;
 FX I and FX II have the effect's four knobs, and on page 2 hp, lp

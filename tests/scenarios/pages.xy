@@ -112,7 +112,7 @@ expect page Setup
 wait 40
 shot setup.png
 turn SELECT 1
-expect page Status
+expect page Debug
 wait 40
 shot status.png
 # the help cards
