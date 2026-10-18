@@ -1001,8 +1001,8 @@ static void br_init(voice_t *v)                  /* the saws from random phases,
 #include "braids.h"
 
 /* sample: a sample of the bank (dsp/sample.h) at the note's pitch; its root note plays it at its own rate
- * (22.05 kHz: half a sample a frame), linearly interpolated. start: where in it (0..99 %); length: how much
- * of the rest (127 = to its end): the region. Modes: one-shot (the region once; then the voice ends), loop
+ * (sm->rate: the factory's 22.05 kHz, half a sample a frame), linearly interpolated. start: where in it
+ * (0..99 %); length: how much of the rest (127 = to its end): the region. Modes: one-shot (the region once; then the voice ends), loop
  * (from the region's start, round its loop: the sample's own loop if it lies inside the region, else the
  * region), reverse (the region once, backwards), pingpong (into the loop, then forth and back across it).
  * o[0] the position (a whole sample: exact in a float), o[1] its fraction, o[2] the direction (+-1), o[3]
@@ -1031,7 +1031,7 @@ static void smp_prep(voice_t *v)
     }
     /* the rate: the note over the root, times the sample's rate over ours (at most 3 octaves above its own) */
     c->ex[0] = fm_minf(c->freq / (440.0f * fm_exp2f(((float)sm->root - 69.0f) * (1.0f / 12.0f))) *
-                       ((float)SMP_RATE / SY_SR), 8.0f);
+                       ((float)sm->rate / SY_SR), 8.0f);
     c->ex[1] = s0;
     c->ex[2] = s1;
     c->ex[3] = ls;
@@ -1095,9 +1095,9 @@ static void smp_run(voice_t *v, float *xl, float *xr, int m)
 }
 
 /* slice: a loop cut into even slices (synth.h EG_SLICE), the note choosing one: (note - root) mod slices. Its
- * rate: a sample that states its bars lasts that many bars at the tempo (n samples in bars * 4 beats), else
- * its own (22.05 kHz); the pitch knob (and the bend, an LFO on the pitch) on top, so a slice pitched down
- * plays longer than its place in the bar. The gate is the share of the slice that plays, then the voice
+ * rate: a sample that states its bars lasts that many bars at the tempo (n samples in bars * 4 beats, whatever
+ * its rate), else its own (sm->rate); the pitch knob (and the bend, an LFO on the pitch) on top, so a slice
+ * pitched down plays longer than its place in the bar. The gate is the share of the slice that plays, then the voice
  * ends (as one-shot); every slice fades in over SL_FADE_IN frames and out over the last SL_FADE_OUT before
  * its gate's end, so a cut never clicks. A mono retrigger, or a legato note picking another slice, fades the
  * old one out over SL_SWITCH frames first (one cache window a voice: no second read position to crossfade
@@ -1122,7 +1122,7 @@ static void slc_prep(voice_t *v, float bpm)
         c->ex[0] = 0.0f;
         return;
     }
-    rate = sm->bars ? (float)sm->n * bpm * (1.0f / (240.0f * SY_SR)) / (float)sm->bars : (float)SMP_RATE / SY_SR;
+    rate = sm->bars ? (float)sm->n * bpm * (1.0f / (240.0f * SY_SR)) / (float)sm->bars : (float)sm->rate / SY_SR;
     semi = fm_clampf(c->ek[2], 40.0f, 88.0f) - 64.0f + c->pitch_off * 0.01f;
     c->ex[0] = fm_clampf(rate * fm_exp2f(semi * (1.0f / 12.0f)), 0.01f, 8.0f);
     c->ex[1] = fm_maxf(c->e[3], 0.02f);

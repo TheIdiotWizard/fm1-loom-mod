@@ -536,7 +536,7 @@ static void start(drumline_t *d, dvoice_t *v, int sound, int vel, int pitch_semi
         }
         {   /* the pitch knob (40..88: +-24 semitones), its random a fifth of the others', the hit's transpose */
             float st = fm_clampf(knob(p, 1, rnd * 0.2f, &v->rng) * 127.0f - 64.0f, -24.0f, 24.0f) + semi;
-            v->inc = fm_minf(((float)SMP_RATE / SR) * fm_exp2f(st * (1.0f / 12.0f)), 4.0f);
+            v->inc = fm_minf(((float)sm->rate / SR) * fm_exp2f(st * (1.0f / 12.0f)), 4.0f);
         }
         v->w = (int32_t)(fm_minf(k3, 0.99f) * (float)sm->n);   /* the start */
         v->a = (p[DP_K4] & 1u) ? -1.0f : 1.0f;

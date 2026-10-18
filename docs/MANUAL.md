@@ -503,8 +503,8 @@ fifth takes the oldest's place.
 ### Samples
 
 LOOM-8 carries a bank of samples: eight of its own, made for now as placeholders (kick, snare, hat, clap, ah,
-piano, sweep, and break: a bar of drums at 120 BPM for the slice engine), then sixteen of yours, user 1 to
-user 16. The sample model on a drum key and the sample engine
+piano, sweep, and break: a bar of drums at 120 BPM for the slice engine), then thirty-two of yours, user 1 to
+user 32. The sample model on a drum key and the sample engine
 on a synth track both play them, the knob naming each one.
 
 The **sample** engine plays a sample at the pitch of the note: the sample's root note plays it at its own rate,
@@ -561,22 +561,36 @@ shuttle (thirty-two, driven), heddle (four, an octave down, heavy), treadle (up 
 folder:
 
 ```sh
-pip install mido python-rtmidi
-python3 tools/loom_samples.py load kick.wav snare.wav "vox=ah_A3.wav" "pad=pad.wav:57" "amen=amen.wav@1"
+pip install mido python-rtmidi numpy
+python3 tools/loom_samples.py load kick.wav snare.wav "vox=ah_A3.wav" "pad=pad.wav:57" "amen=amen.wav@1%32k"
 python3 tools/loom_samples.py info
 python3 tools/loom_samples.py erase
 ```
 
-`load` replaces the user samples with the files given, in that order: user 1, user 2... Each WAV (any rate,
-mono or stereo, 8 to 32 bit) is made mono at 22050 Hz and its peak evened out. `NAME=` names it on the screen
-(11 characters; else the file's name); `:ROOT` is the note that plays it at its own pitch on a synth track
-(else a note in the file's name, as "ah_A3", or C4). A loop in the WAV is kept. `@BARS` says the file is a
+`load` replaces the user samples with the files given, in that order: user 1, user 2... (up to 32). Each WAV
+(any rate, mono or stereo, 8 to 32 bit) is made mono at its sample rate and its peak evened out. `NAME=` names it
+on the screen (11 characters; else the file's name); `:ROOT` is the note that plays it at its own pitch on a synth
+track (else a note in the file's name, as "ah_A3", or C4). A loop in the WAV is kept. `@BARS` says the file is a
 loop of that many bars (1 to 16), for the slice engine: it then follows the tempo, and its root (slice 1) is F3
 unless `:ROOT` says otherwise; the tool prints the tempo the loop has at its own speed. Trim the loop to exactly
-its bars first: the slices are even cuts of the whole file. The bank holds about four seconds of sound in all
-(a bar at 120 BPM is two seconds); `loom_samples.py` says when the files are too long. The sound stops for a few seconds
-while it writes; then the screen says LOADED. A sample a track was playing keeps its place: user 2 is still user
-2, whatever is in it now.
+its bars first: the slices are even cuts of the whole file.
+
+**How much fits.** The bank holds 214 KB of sound. Each sample keeps its own rate, and a lower rate fits more:
+
+| rate | keeps sound up to | fits in all |
+|---|---|---|
+| 32000 Hz (`%32k`) | 16 kHz: bright drums and loops | 12 seconds |
+| 22050 Hz (`%22k`) | 11 kHz: most sounds | 17.7 seconds |
+| 16000 Hz (`%16k`) | 8 kHz: bass, pads, voices | 24 seconds |
+| 11025 Hz (`%11k`) | 5.5 kHz: lo-fi, sub bass | 35 seconds |
+
+`%RATE` after a file sets its rate; `--rate RATE` (right after `load`) sets the rest; else the tool picks the
+highest of 22050, 16000 and 11025 Hz at which everything fits, and prints each sample's rate, length and size and
+the seconds left at each rate. (A bar at 120 BPM is two seconds: eight one-bar breaks fit at 22050 Hz.) A sample
+plays at its own pitch whatever its rate, and a loop with `@BARS` keeps the tempo; a higher rate only costs room,
+and a little more of the FM-1's time while it plays. One sample may be up to about 16 seconds at 22050 Hz.
+The sound stops while it writes (longer for a fuller bank); then the screen says LOADED: the FM-1 has checked
+every byte. A sample a track was playing keeps its place: user 2 is still user 2, whatever is in it now.
 
 ### The synth pages
 

@@ -20,10 +20,14 @@
 /* the store, all in the data area: the panel calibration (the platform's, where every fm1-base firmware keeps it),
  * the user presets at 0xDE000, then NPROJ project slots of PROJ_NOBJ objects each (the settings, then the LZ chunks
  * of the patterns), two 4 KB sectors an object, from 0x97000 up to 0xC1000. The user sample bank is raw flash
- * beside them (dsp/sample.h: 0xCF000..0xDBFFF, plat_data). Free: 0xC1000..0xCEFFF (room for a bigger sample bank)
- * and Felucca's settings pair at 0xFC000. LOOM-8 was never released, so this map did not have to keep its own
- * platform's (four slots); it does, but for the fourth slot: the same numbers at the same places, so what a
- * development build saved in slots 1 to 3, the presets and the samples carry over */
+ * beside them, 216 KB in three windows (dsp/sample.h SMP_REG*, plat_data): 0xC1000..0xDBFFF (108 KB, after the
+ * projects, up to the calibration), fm1-base's PLAT_XDATA1 0xE5000..0xFBFFF (92 KB, above the update's staging)
+ * and PLAT_XDATA0 0x93000..0x96FFF (16 KB, above the app area); app.c checks that no store object lies in them.
+ * Nothing of LOOM-8's is left free in the data area; above it, 0xE0000..0xE4FFF is the update's staging and
+ * 0xFC000.. Felucca's settings pair (neither LOOM-8's). LOOM-8 was never released, so this map did not have to
+ * keep its own platform's (four slots); it does, but for the fourth slot: the same numbers at the same places, so
+ * what a development build saved in slots 1 to 3 and the presets carry over (the sample bank moved: upload it
+ * again) */
 #define NPROJ 3                         /* project slots in flash */
 #define PROJ_NOBJ 7
 enum { OBJ_PANEL, OBJ_PRESETS, OBJ_PROJ0, OBJ_NOBJ = OBJ_PROJ0 + NPROJ * PROJ_NOBJ };
@@ -35,7 +39,7 @@ enum { OBJ_PANEL, OBJ_PRESETS, OBJ_PROJ0, OBJ_NOBJ = OBJ_PROJ0 + NPROJ * PROJ_NO
 
 /* backup and restore over USB (fm1-base's backup.c; base/tools/fm1_backup.py, base/web/backup): the user presets
  * and the three project slots, all or nothing. Not the user sample bank (raw flash, not store objects: its source is
- * the player's own WAVs, tools/loom_samples.py) */
+ * the player's own WAVs, tools/loom_samples.py); a restore writes only the objects listed here, never its windows */
 #define APP_BACKUP_OBJS {OBJ_PRESETS, \
     OBJ_PROJ0 + 0, OBJ_PROJ0 + 1, OBJ_PROJ0 + 2, OBJ_PROJ0 + 3, OBJ_PROJ0 + 4, OBJ_PROJ0 + 5, OBJ_PROJ0 + 6, \
     OBJ_PROJ0 + 7, OBJ_PROJ0 + 8, OBJ_PROJ0 + 9, OBJ_PROJ0 + 10, OBJ_PROJ0 + 11, OBJ_PROJ0 + 12, OBJ_PROJ0 + 13, \

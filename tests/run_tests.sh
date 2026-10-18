@@ -26,11 +26,14 @@ run() {
         FAIL=1
     fi
 }
-# the factory samples as WAVs, and a user bank from two of them, as tools/loom_samples.py would upload it
-# (tests/scenarios/samples.xy and slice.xy load it)
+# the factory samples as WAVs, and a user bank from two of them (one at 16 kHz), as tools/loom_samples.py would
+# upload it: its image (tests/scenarios/samples.xy and slice.xy load it) and its SysEx frames (upload.xy plays them
+# through samples.c); the bank tool's own tests (layout over the windows, rates, bounds)
 "$PY" tools/gen_samples.py build/gen/samples.h build/gen/wav >/dev/null
-run sample-bank "$PY" tools/loom_samples.py build build/gen/user_bank.bin "piano two=build/gen/wav/piano.wav:60" \
-    "vowel=build/gen/wav/ah.wav:57"
+run sample-bank sh -c "'$PY' tools/loom_samples.py build build/gen/user_bank.bin 'piano two=build/gen/wav/piano.wav:60%16k' \
+    vowel=build/gen/wav/ah.wav:57 && '$PY' tools/loom_samples.py syx build/gen/user_bank.syx \
+    'piano two=build/gen/wav/piano.wav:60%16k' vowel=build/gen/wav/ah.wav:57"
+run bank-tool "$PY" tests/host/bank_test.py
 # the units' own tests, written beside them (their WAVs in build/host/)
 for t in synth brocade braids drumline fx seq; do
     run "$t" sh "tests/host/${t}_test.sh"
@@ -50,6 +53,10 @@ else
     echo "  skip update path (no $B/loom.fwsc: ./build.sh)"
 fi
 run host-build sh build.sh --host
+# a bank image larger than the bank's windows is refused by the simulator's loader (as the tool and the FM-1 refuse it)
+run bank-too-big sh -c "mkdir -p $OUT/big && head -c 221185 /dev/zero > $OUT/big.bin && \
+    printf 'samples $OUT/big.bin\n' > $OUT/big.xy && ! $B/host/loom_host $OUT/big.xy $OUT/big > $OUT/big.out 2>&1 && \
+    grep -q 'larger than' $OUT/big.out"
 if command -v emcc >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then   # the browser build, when it can be built
     run emu sh -c "sh build.sh --web >/dev/null && node tests/host/emu_test.mjs $B/emu/app.wasm"
 else
