@@ -3440,10 +3440,13 @@ static void draw_setup(void)
     setup_row(98, "version", APP_VERSION);
     cv_blit(0, MAIN_Y);
 }
+static uint32_t status_peak;                          /* the highest peak shown since the screen reader said it (ui.c) */
 static void draw_status(void)
 {
     char t[24], *e;
     uint32_t cpu = plat_cpu_pct(), peak = plat_cpu_peak_pct(), xr = plat_xruns();
+    if (peak > status_peak)
+        status_peak = peak;
     uint32_t h = hash_u(2166136261u, 0x57A00u | cpu | peak << 8 | (uint32_t)eng_voices << 16 | (uint32_t)eng_voices_max << 24);
     h = hash_u(h, xr ^ eng_guard_count << 8 ^ (uint32_t)engine_core2_state() << 28 ^ (uint32_t)eng_saws_max << 24);
     if (!begin_main(h))
