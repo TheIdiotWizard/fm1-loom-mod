@@ -74,7 +74,7 @@ knob 7 brain no
 knob 7 ltype wave
 knob 7 lspeed 4
 knob 7 lamt 84
-knob 7 ldest amp
+knob 7 ldest voice
 knob 7 lx 1
 knob 7 lx2 square
 knob 7 level 81

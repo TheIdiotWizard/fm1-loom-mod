@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-"""The six demo songs played on an attached FM-1, their audio load read from the Status page while they play.
+"""The six demo songs played on an attached FM-1, their audio load read from the Debug page while they play.
 
   tools/demos/device_load.py --devtest PKG [--normal PKG] [--groups A,B] [--no-flash] [--no-keep] [--every S]
                              [--songs A,B] [--record] [--quiet]
@@ -14,8 +14,8 @@ What it does:
   3. the idle load once with the screen reader polling every 0.5 s and once asked every 5 s (its overhead);
   4. for each group (tools/demos/device_projects.py's: A jungle garage hyperpop, B house pop hiphop): uploads its
      sample bank (tools/loom_samples.py's upload, no question on the FM-1), restores its backup (fm1_backup.py),
-     then for each slot loads it (GLO, Status, SEL: LOAD PROJECT N), goes to the Song page (HOME, SELECT), PLAY,
-     and on Status reads "audio load N percent, voices N[ of M][, saws N], peak N percent, guard trips N, dropouts
+     then for each slot loads it (HOME, SEL: LOAD PROJECT N), goes to the Song page (HOME, SELECT), PLAY,
+     and on Debug reads "audio load N percent, voices N[ of M][, saws N], peak N percent, guard trips N, dropouts
      N" every --every seconds (0.5) until it says "stopped"; the crash log after each song (a new record stops the
      run: the log is printed, --normal PKG flashed);
   5. a table per song: the load's mean and peak, the most voices, the fewest saws, guard trips and dropouts during
@@ -24,7 +24,7 @@ What it does:
   6. restores before.loom8, flashes --normal PKG (if given) and starts a NEW PROJECT.
 --record: each song's USB audio recorded (ffmpeg, the FM-1 as a Mac audio input: FM1_AUDIO, default "LOOM-8 FM-1")
 into build/demos/device/rec_<song>.wav and scanned for breaks (tools/demos/glitch_scan.py). --quiet: nothing asked
-while a song plays (the Status page read once it has played), as a player has it.
+while a song plays (the Debug page read once it has played), as a player has it.
 Run tools/demos/device_projects.py first (the banks, backups and manifest). Never switch Setup > CORES meanwhile.
 FM1_REMOTE: fm1_remote.py (default base/tools/fm1_remote.py); needs mido + python-rtmidi.
 """
@@ -93,7 +93,7 @@ def hello_name():
 
 
 def where():
-    """what the screen says (as tools/measure_load.sh): the Status page's peak is then reset"""
+    """what the screen says (as tools/measure_load.sh): the Debug page's peak is then reset"""
     s = ""
     for _ in range(4):
         d.sysex(fr.SR + [1, 1])
@@ -126,7 +126,7 @@ def release_all():
     time.sleep(0.2)
 
 
-GLO = ["Mix", "Master EQ", "Master out", "Setup", "Status"]
+GLO = ["Mix", "Master EQ", "Master out", "Setup", "Debug"]   # (Debug: a debug build's, as the DEVTEST one)
 
 
 def glo(page):
@@ -161,8 +161,18 @@ def answer_yes():
         run("tap", "SEL", "wait", 700)
 
 
+def arrange():
+    """HOME until the Arrange page (HOME on Arrange turns to Song: then once more)"""
+    for _ in range(4):
+        s = where()
+        if s.startswith("Arrange,") and " list." not in s and "?" not in s:
+            return s
+        run("tap", "HOME", "wait", 400)
+    raise SystemExit(f"device_load: no Arrange page: {where()!r}")
+
+
 def new_project():
-    glo("Setup")
+    arrange()
     run("tap", "SEL", "wait", 400)
     for _ in range(12):
         if "NEW PROJECT" in where():
@@ -176,8 +186,8 @@ def new_project():
 
 
 def load_slot(slot, name):
-    """GLO, Status, SEL: LOAD PROJECT slot; then HOME HOME: Arrange; SELECT: the Song page"""
-    glo("Status")
+    """HOME's SEL: LOAD PROJECT slot; then (on Arrange) SELECT: the Song page"""
+    arrange()
     run("tap", "SEL", "wait", 400)
     for _ in range(8):
         s = where()
@@ -189,7 +199,7 @@ def load_slot(slot, name):
             s = where()
             m = re.search(r"LOAD PROJECT (\d)", s)
         if not m:
-            raise SystemExit(f"device_load: no LOAD PROJECT in Status's list: {s!r}")
+            raise SystemExit(f"device_load: no LOAD PROJECT in HOME's list: {s!r}")
         if int(m.group(1)) == slot:
             break
         run("turn", "ALGO", 1, "wait", 250)
@@ -197,8 +207,6 @@ def load_slot(slot, name):
         raise SystemExit(f"device_load: slot {slot} is not {name!r}: {s!r}")
     run("tap", "SEL", "wait", 700)
     answer_yes()                             # LOSE UNSAVED CHANGES?
-    run("tap", "HOME", "wait", 300)
-    run("tap", "HOME", "wait", 400)
     s = where()
     for _ in range(3):
         if s.startswith("Song,"):
@@ -218,8 +226,8 @@ def status_read(s):
 
 
 def reader_overhead():
-    """idle (stopped): the Status page read every 0.5 s, and once every 5 s (between, the reader says BYE)"""
-    glo("Status")
+    """idle (stopped): the Debug page read every 0.5 s, and once every 5 s (between, the reader says BYE)"""
+    glo("Debug")
     time.sleep(2.0)
     where()
     fast = []
@@ -318,7 +326,7 @@ def play_song(row, every, overhead_note, record=False, quiet=False):
         disconnect()
         time.sleep(max(1.0, (pm.get("seconds") or 60) - 1.0))
         connect()
-    glo("Status")
+    glo("Debug")
     where()                                  # (the peak from here on)
     limit = (pm.get("seconds") or 90) * 1.6 + 20
     reads, stopped_n, g0, x0 = [], 0, None, None
@@ -329,8 +337,8 @@ def play_song(row, every, overhead_note, record=False, quiet=False):
         s = where()
         r = status_read(s)
         if not r:
-            if not s.startswith("Status,"):
-                glo("Status")
+            if not s.startswith("Debug,"):
+                glo("Debug")
             continue
         r["t"] = round(time.time() - t0, 2)
         pn = prof_snap()
@@ -442,7 +450,7 @@ def stages_table(results):
 def table(results, overhead):
     order = ["jungle", "garage", "hyperpop", "house", "pop", "hiphop"]
     results = sorted(results, key=lambda r: order.index(r["song"]) if r["song"] in order else 99)
-    lines = ["LOOM-8 demo songs on the FM-1 (Status page every ~0.5 s) against the host's model of the same project",
+    lines = ["LOOM-8 demo songs on the FM-1 (Debug page every ~0.5 s) against the host's model of the same project",
              f"screen reader idle: polled {overhead['fast_load']} % (peak {overhead['fast_peak']}), "
              f"asked every 5 s {overhead['slow_load']} % (peak {overhead['slow_peak']})" if overhead else "",
              "",
@@ -472,7 +480,7 @@ def main():
     ap.add_argument("--every", type=float, default=0.5)
     ap.add_argument("--songs", help="only these songs (e.g. hyperpop,house); the others' rows kept from the last run")
     ap.add_argument("--record", action="store_true", help="record each song's USB audio (ffmpeg) and scan it for breaks")
-    ap.add_argument("--quiet", action="store_true", help="nothing asked while a song plays (the Status page read at its "
+    ap.add_argument("--quiet", action="store_true", help="nothing asked while a song plays (the Debug page read at its "
                     "end): the load as a player has it (the reader's polling costs a few %%)")
     a = ap.parse_args()
     man = json.loads((DEV / "manifest.json").read_text())

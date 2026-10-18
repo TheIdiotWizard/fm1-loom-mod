@@ -12,7 +12,7 @@ then the host simulator runs each song's setup (tools/demos/<song>.xy up to "tap
 starts), saves it into slot 1..3 (named after the song), starts a new project for the next, and writes the backup
 (OUT_DIR/group_A.loom8, base/tools/fm1_backup.py's file). OUT_DIR/manifest.json lists, per song: its slot, the
 host's model of the project as the FM-1 will play it (the backup restored in the simulator, the slot loaded from
-Status's list, its song from the Song page until it stops: project_model), render.sh's model with the performance
+HOME's list, its song from the Song page until it stops: project_model), render.sh's model with the performance
 (model, if build/demos/run_<song>/log.txt is there), and what the script does live while it plays (knob moves,
 throws, keys) that a project cannot hold: the FM-1 plays the project's song alone.
 
@@ -83,9 +83,7 @@ restore {backup}
 expect restore_rc 0
 wait 300
 listen
-tap GLO
-wait 300
-turn SELECT 4
+tap HOME
 wait 300
 tap SEL
 wait 300
@@ -94,10 +92,6 @@ wait 200
 tap SEL
 wait 500
 said LOADED slot {slot}
-tap HOME
-wait 300
-tap HOME
-wait 300
 turn SELECT 1
 wait 300
 stats reset
@@ -111,7 +105,7 @@ stats
 
 
 def project_model(host, out, g, slot, bank, backup):
-    """the host's model of what the FM-1 plays: the backup restored, the slot loaded from Status's list (as
+    """the host's model of what the FM-1 plays: the backup restored, the slot loaded from HOME's list (as
     device_load.py does it), its song from the Song page until it stops; no live gestures"""
     sp = out / f"play_{g}{slot}.xy"
     sp.write_text(PLAY_SONG.format(bank=bank, backup=backup, turns=slot - 1, slot=slot, ms=150000))

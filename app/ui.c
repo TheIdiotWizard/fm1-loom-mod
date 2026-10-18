@@ -2036,8 +2036,10 @@ static void action_run(int a)
         ui.ask_arg = ui.pick_slot % NPROJ;
         if (ui.dirty)
             ask("LOSE UNSAVED CHANGES?", do_load_proj);
-        else
+        else {
             do_load_proj();
+            lst.open = 0;                        /* (the other song: back to its page, as after the question) */
+        }
         return;
     case A_NEW_PROJ: ask("NEW PROJECT?", do_new_proj); return;
     case A_CLEAR_SCENE: act_clear_scene_ask(); return;
