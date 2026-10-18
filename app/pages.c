@@ -31,6 +31,7 @@ static const theme_t THEMES[] = {
 #define NTHEMES (sizeof THEMES / sizeof THEMES[0])
 static const theme_t *theme = &THEMES[0];
 #define THEME_OF_PROJ() (&THEMES[proj.rsv[1] % NTHEMES])
+#define SCENES_AT_END 2u                              /* proj.rsv[2]: a scene's key waits for T1's pattern's end (bit 0: REC's mode) */
 #define K_BG theme->bg
 #define K_PANEL theme->panel
 #define K_PANEL2 theme->panel2
@@ -63,15 +64,15 @@ static uint16_t trk_tint(int t) { return ink_mix(trk_ink(t), theme->tint); }
  * the page says so), its sends and the two effects; ARP three with the arp (its page 2, then hold). EDIT has a
  * third page where the engine has a second page of knobs (TP_X1..X4): brocade's Sub */
 enum { P_ARRANGE, P_SONG, P_STEPS, P_BAR, P_ENGINE, P_PLAY, P_SUB, P_ENV, P_FILTER, P_ENV2, P_KITF, P_CHARACTER, P_SENDS,
-       P_FX1, P_FX2, P_LFO, P_LFO2, P_PLAYERS, P_PLAYERS2, P_PLAYERS3, P_MIX, P_MASTER, P_MASTER3, P_SETUP,
+       P_FX1, P_FX2, P_THROWS, P_LFO, P_LFO2, P_PLAYERS, P_PLAYERS2, P_PLAYERS3, P_MIX, P_MASTER, P_MASTER3, P_SETUP,
        P_STATUS, NPAGES };
 static const char *const PAGE_NAME[NPAGES] = {"Arrange", "Song", "Steps", "Bar", "Engine", "Play", "Sub", "Envelope",
                                               "Filter", "Filter env", "Kit filter", "Character", "Sends", "FX I",
-                                              "FX II", "LFO", "LFO 2", "Players", "Players 2", "Hold", "Mix",
+                                              "FX II", "Throws", "LFO", "LFO 2", "Players", "Players 2", "Hold", "Mix",
                                               "Master EQ", "Master out", "Setup", "Status"};
 static int mst_base(int p) { return p == P_MASTER ? MS_EQ_LO : MS_PERC; }   /* a master page's first knob */
 static const struct { uint8_t btn, first, n; } PAGE_BTN[] = {
-    {B_HOME, P_ARRANGE, 2}, {B_SEQ, P_STEPS, 2}, {B_EDIT, P_ENGINE, 3}, {B_ENV, P_ENV, 4}, {B_FX, P_CHARACTER, 4},
+    {B_HOME, P_ARRANGE, 2}, {B_SEQ, P_STEPS, 2}, {B_EDIT, P_ENGINE, 3}, {B_ENV, P_ENV, 4}, {B_FX, P_CHARACTER, 5},
     {B_LFO, P_LFO, 2}, {B_ARP, P_PLAYERS, 3}, {B_GLO, P_MIX, 5}};
 #define NPAGE_BTN (sizeof PAGE_BTN / sizeof PAGE_BTN[0])
 static int page_group(int p)
@@ -121,7 +122,7 @@ static const char *const BRAIN_KNOB[4] = {"mode", "key", "scale", "link"};
 static const uint8_t WHITE_K[16] = {0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19, 21, 23, 24, 26};
 static const uint8_t BLACK_K[11] = {1, 3, 5, 8, 10, 13, 15, 17, 20, 22, 25};
 #define KEY_BASE 53                                  /* F3 at octave 0 */
-enum { KM_NONE, KM_PLAY, KM_STEP, KM_CSTEP, KM_COMP, KM_SCENE, KM_MUTE, KM_PUNCH, KM_BRAIN, KM_SOUND,
+enum { KM_NONE, KM_PLAY, KM_STEP, KM_SCENE, KM_MUTE, KM_PUNCH, KM_BRAIN, KM_SOUND,
        KM_TRACK, KM_SAVE, KM_LENGTH, KM_SOLO, KM_SCALE, KM_ROUTE, KM_STEPSOUND, KM_IDLE };   /* KM_IDLE: does nothing */   /* what a held key does */
 
 /* the input's and the screen's state */
@@ -152,10 +153,9 @@ static struct {
     uint8_t chord[8], nchord;                        /* the keys held together now (notes) */
     uint8_t chord_max[8], nchord_max;                /* the most held together since the last all-up (maestro) */
     uint16_t held;                                   /* Steps: the white keys down as steps (bit = cell) */
-    uint16_t cstep;                                  /* Steps: HOME + white keys down: the steps for a component */
     uint8_t held_first;                              /* the first held step (the one edited) */
     uint8_t held_used;                               /* a held step was edited: its release toggles nothing */
-    uint8_t ccomp;                                   /* HOME + step: the component the black keys value */
+    uint8_t trickpg;                                 /* a step held + ARP: its tricks on the knobs */
     uint8_t lockpg;                                  /* a step held + EDIT / ENV / FX / LFO: the lock editor's page + 1 */
     uint8_t cursor;                                  /* step record: the step the keys write */
     uint8_t rec_armed;                               /* REC tapped while stopped: step record */
@@ -183,13 +183,13 @@ enum { A_CLEAR_NOTES, A_CLEAR_LOCKS, A_CLEAR_BOTH, A_COPY_PAT, A_PASTE_PAT, A_RO
        A_ENGINE, A_PRESET, A_SCRAMBLE, A_SAVE_PRESET, A_INIT, A_FOLLOW, A_INSERT_SLOT, A_DELETE_SLOT, A_CLEAR_SONG,
        A_PLAY_SONG, A_LOAD_PROJ, A_NEW_PROJ, A_USB_AUDIO, A_CLEAR_SCENE, A_PANIC, A_EFFECT, A_REMOVE_NOTE,
        A_COUNT_IN, A_PLAYMODE, A_FTYPE, A_FX_HP, A_FX_LP, A_FX_SEND, A_WEAVE, A_THEME, A_PUMP_BY, A_PUMP_REL,
-       A_PUMP_ACC, A_LEVEL, NACTIONS };
+       A_PUMP_ACC, A_LEVEL, A_SCENE_AT, NACTIONS };
 static const char *const ACTION_NAME[NACTIONS] = {
     "CLEAR NOTES", "CLEAR LOCKS", "CLEAR NOTES AND LOCKS", "COPY PATTERN", "PASTE PATTERN", "ROTATE FORWARD",
     "ROTATE BACK", "DUPLICATE BAR", "ENGINE", "PRESET", "SCRAMBLE", "SAVE AS PRESET", "RESET SOUND", "FOLLOWS CONDUCTOR",
     "INSERT SCENE", "DELETE SLOT", "CLEAR SONG", "PLAY SONG", "LOAD PROJECT", "NEW PROJECT", "USB AUDIO", "CLEAR SCENE",
     "ALL NOTES OFF", "EFFECT", "REMOVE", "COUNT-IN", "PLAY MODE", "FILTER TYPE", "HIGH-PASS", "LOW-PASS",
-    "TO FX II", "WEAVE WITH COPIED", "THEME", "PUMP BY", "RELEASE", "ACCENT", "LEVEL"};
+    "TO FX II", "WEAVE WITH COPIED", "THEME", "PUMP BY", "RELEASE", "ACCENT", "LEVEL", "SCENES SWITCH"};
 /* the weave's ways (pattern.h WV_*): what this pattern keeps of itself */
 static const char *const WEAVE_NAME[NWV] = {"bars", "steps", "rhythm", "notes"};
 #define LIST_ROWS 28
@@ -493,10 +493,11 @@ static int tp_page_param(int p, int k, int trk)
         {TP_CUT, TP_RES, TP_FENV, TP_KTRK}, {TP_FA, TP_FD, TP_FS, TP_FR}, {TP_CUT, TP_RES, TP_FENV, TP_KTRK},
         {TP_CTYPE, TP_CAMT, TP_CTONE, TP_CMIX},
         {TP_SEND1, TP_SEND2, TP_PAN, TP_LEVEL},
-        {TP_E1, TP_E2, TP_E3, TP_E4}, {TP_E1, TP_E2, TP_E3, TP_E4}, {TP_LTYPE, TP_LSPEED, TP_LAMT, TP_LDEST},
+        {TP_E1, TP_E2, TP_E3, TP_E4}, {TP_E1, TP_E2, TP_E3, TP_E4}, {-1, -1, -1, -1},
+        {TP_LTYPE, TP_LSPEED, TP_LAMT, TP_LDEST},
         {TP_LX, TP_LX2, -1, -1}, {TP_PLAYER, TP_P1, TP_P2, TP_P3}, {TP_AP1, TP_AP2, TP_AP3, TP_AP4},
         {TP_P4, -1, -1, -1}, {TP_SEND1, TP_SEND2, TP_PAN, TP_LEVEL}};
-    if (p < P_ENGINE || p > P_MIX || k < 0 || k > 3)
+    if (p < P_ENGINE || p > P_MIX || p == P_THROWS || k < 0 || k > 3)
         return -1;
     if (fx_page(p))                                  /* (the effect tracks' own knobs, whatever trk is) */
         return M[p - P_ENGINE][k];
@@ -631,7 +632,7 @@ static void draw_header(void)
         const char *bn = BTN_LABEL[PAGE_BTN[page_group(ui.page)].btn];
         const char *pn = page_name_of(ui.page, sel_trk());
         int32_t w = text_w(&FONT_XS, bn) + 6;
-        if (ui.page >= P_STEPS && ui.page <= P_PLAYERS3) {   /* a track's page: the track first, in its colour */
+        if (ui.page >= P_STEPS && ui.page <= P_PLAYERS3 && ui.page != P_THROWS) {   /* a track's page: the track first */
             int pt = page_trk(ui.page);
             const char *tn = TRACK_NAME[pt];
             int32_t tw = text_w(&FONT_XS, tn) + 10;
@@ -902,7 +903,7 @@ static void page_knobs(knob_t *k)
         lock_knobs(k);
         return;
     }
-    if (p == P_STEPS && ui.cstep && is_seqt(trk)) {
+    if (p == P_STEPS && ui.trickpg && is_seqt(trk)) {
         comp_knobs(k);
         return;
     }
@@ -997,6 +998,11 @@ static void page_knobs(knob_t *k)
             for (int i = 0; i < 4; i++)
                 ktp(&k[i], trk, tp_page_param(p, i, trk));
         break;
+    case P_THROWS: {
+        static const char *const LATCH[2] = {"off", "on"};
+        kname(&k[0], "LATCH", LATCH, proj.trk[AUX_PUNCH].par[TP_E1] & 1u, 2);
+        break;
+    }
     case P_MIX:
         if (is_fx(trk))
             ktp(&k[3], trk, TP_LEVEL);
@@ -1129,7 +1135,7 @@ static void page_tag(char *t)
             if (is_drum(sel_trk()) && (lp == P_ENGINE || lp == P_PLAY || lp == P_ENV || lp == P_FILTER))
                 e = s_cat(s_cat(e, ">"), DL_SOUND_NAME[ui.dsound % DL_NSOUND]);   /* the key the locks reach */
             s_cat(s_cat(e, ">"), page_name_of(lp, sel_trk()));
-        } else if (ui.held || ui.cstep)
+        } else if (ui.held)
             num_s((uint32_t)step_shown(ui.held_first) + 1u, s_cat(t + s_len(t), ">step "));
         break;
     case P_ENGINE: case P_PLAY: case P_SUB: case P_ENV: case P_FILTER: case P_ENV2: case P_KITF: case P_LFO: case P_LFO2:
@@ -1227,21 +1233,13 @@ static void page_footer(char *t)
         return;
     }
     if (home_held()) {
-        if ((ui.page == P_STEPS || ui.page == P_BAR) && ui.cstep)
-            s_cat(t, "WHITE trick|BLACK value");
-        else if (ui.page == P_STEPS || ui.page == P_BAR)
-            s_cat(t, "HOME+WHITE step: trick|REC undo|PLAY redo");
-        else if (ui.page == P_ARRANGE)
-            s_cat(t, "HOME+WHITE scene at the end|REC undo|PLAY redo");
-        else if (ui.page == P_MIX)
-            s_cat(t, "HOME+BLACK mute|REC undo|PLAY redo");
-        else
-            s_cat(t, "HOME+KEYS throws|REC undo|PLAY redo");
+        s_cat(t, "REC undo|PLAY redo|KNOBS fine");
         return;
     }
     switch (ui.page) {
     case P_ARRANGE:
-        s_cat(t, "WHITE scene at the bar, again: now|BLACK mute");
+        s_cat(t, proj.rsv[2] & SCENES_AT_END ? "WHITE scene at the pattern's end|BLACK mute"
+                                             : "WHITE scene at the bar, again: now|BLACK mute");
         break;
     case P_SONG:
         s_cat(t, "WHITE add scene|PLAY song");
@@ -1254,10 +1252,12 @@ static void page_footer(char *t)
             s_cat(t, "ALGO track: no steps here");
         else if (ui.lockpg)
             s_cat(t, "KNOBS lock|SELECT page|SAVE clear");
+        else if (ui.trickpg)
+            s_cat(t, "KNOB 1 3 trick|KNOB 2 4 value");
         else if (ui.held && is_drum(trk))
-            s_cat(t, "BLACK sounds|OCT nudge|EDIT ENV FX LFO lock");
+            s_cat(t, "BLACK sounds|ARP tricks|EDIT ENV FX LFO lock");
         else if (ui.held)
-            s_cat(t, "WHITE length|OCT nudge|EDIT ENV FX LFO lock");
+            s_cat(t, "WHITE length|ARP tricks|EDIT ENV FX LFO lock");
         else if (ui.rec_armed)
             s_cat(t, "KEYS write|OCT+ rest|OCT- back|REC done");
         else if (seq.rec || seq.rec_wait)
@@ -1270,7 +1270,10 @@ static void page_footer(char *t)
             s_cat(t, "WHITE steps|SEQ held: play notes");
         break;
     case P_MIX:
-        s_cat(t, "BLACK track|hold: solo");
+        s_cat(t, "BLACK mute|hold: solo");
+        break;
+    case P_THROWS:
+        s_cat(t, "KEYS throw: low drums, high melodic|KNOB 1 latch");
         break;
     case P_MASTER3:
         s_cat(t, "SEL pump by, level");
@@ -1334,7 +1337,7 @@ static void enc_line(char *t)
     if (n > 1)                        /* SELECT names what it turns to where that is the point of the page */
         e = s_cat(t, p == P_CHARACTER ? "SELECT sends" : p == P_SENDS ? "SELECT effects" : p == P_ENV ? "SELECT filter"
                      : p == P_LFO ? "SELECT more" : "SELECT page");
-    if (p != P_ARRANGE && p != P_SONG && p < P_MASTER)
+    if (p != P_ARRANGE && p != P_SONG && p != P_THROWS && p < P_MASTER)
         e = s_cat(e, *t ? "|ALGO track" : "ALGO track");
     {
         const char *a = p == P_ARRANGE ? "scene" : p == P_SONG ? "slot"
@@ -1545,22 +1548,24 @@ static void draw_footer(void)
                   PG(P_CHARACTER) | PG(P_LFO) | PG(P_LFO2))
 static const struct { uint8_t btn; uint32_t pages; const char *title, *l1, *l2; } CARD[] = {
     {B_SEQ, PG_ANY, "Steps", "The bar's 16 steps on the white keys. Hold SEQ and play the notes,",
-     "then press steps to write them. HOME + a step: tricks."},
+     "then press steps to write them. A step held + ARP: its tricks."},
     {B_EDIT, PG(P_STEPS), "Lock", "With a step held, EDIT, ENV, FX or LFO show that module's knobs.",
      "Turn one to lock it on the step; SELECT turns pages. SAVE clears."},
     {B_EDIT, PG_ANY, "Engine", "The track's engine and its four knobs. PRESETS: its next sound.",
      "SEL changes the engine. Page 2: Play; brocade's 3: Sub. Drums: black keys pick a key."},
     {B_ENV, PG_ANY, "Envelope", "The amp's envelope, then the filter, then the filter's envelope.",
      "PRESETS on Filter: its type. A kit: the key's envelope and filter, then the kit's."},
-    {B_FX, PG_ANY, "Effects", "The track's own character: drive, fold, crush and more. Then its sends, FX I and FX II.",
+    {B_FX, PG_ANY, "Effects", "The track's character, its sends, FX I and FX II, then Throws: the keys fire effects.",
      "PRESETS: the character's type; on FX I and FX II the effect, SEL its filter."},
     {B_LFO, PG_ANY, "LFO", "Type, then its first three knobs.", "Page 2 has the type's fourth and fifth."},
     {B_ARP, PG_ANY, "Players", "Arp, strum or hold on the track's keys.",
      "With strum, REC records the chord you hold next. A key plays it."},
-    {B_GLO, PG_ANY, "Mix", "Sends, pan and level of the track. Black keys pick a track, held: solo.",
+    {B_ARP, PG(P_STEPS), "Tricks", "With a step held, ARP: KNOB 1 and 3 pick its two tricks,",
+     "KNOB 2 and 4 their values. Let go of the step when done."},
+    {B_GLO, PG_ANY, "Mix", "Sends, pan, level. Black keys: a tap mutes a track, held: solo.",
      "SELECT: Master, Setup and Status. SEL has the projects."},
     {B_HOME, PG_ANY, "Arrange", "Each track's pattern in the scene. White keys: scenes, black: mutes.",
-     "Hold HOME + a key: a throw. HOME + REC undoes, HOME + PLAY redoes."},
+     "SEL: when scenes switch. HOME + REC undoes, HOME + PLAY redoes."},
     {B_SEL, PG_ANY, "Lists", "The page's knobs, then its actions. SEL runs the one picked.",
      "SELECT moves, ALGORITHM changes, HOME goes back."},
     {B_SAVE, PG(P_STEPS), "Save", "Tap to save the project. With a step held, clears its locks.",
@@ -1699,6 +1704,7 @@ static void list_build(void)
             list_add(ACTION_NAME[A_DUP_BAR], 0, LK_ACTION, A_DUP_BAR);
         }
     } else if (keep == P_ARRANGE) {
+        list_add(ACTION_NAME[A_SCENE_AT], proj.rsv[2] & SCENES_AT_END ? "pattern end" : "next bar", LK_PICK, A_SCENE_AT);
         list_add(ACTION_NAME[A_CLEAR_SCENE], 0, LK_ACTION, A_CLEAR_SCENE);
         list_add(ACTION_NAME[A_PANIC], 0, LK_ACTION, A_PANIC);
     } else if (keep == P_SONG) {
@@ -1736,7 +1742,7 @@ static void list_build(void)
         num_s((uint32_t)ui.pick_slot % NUSER_PRESETS + 1u, s_cat(slot_t, "U"));
         list_add(ACTION_NAME[A_SAVE_PRESET], slot_t, LK_PICK, A_SAVE_PRESET);
         list_add(ACTION_NAME[A_ENGINE], EG_NAME[ui.pick_engine % NENGINE], LK_PICK, A_ENGINE);
-    } else if (keep >= P_ENGINE && keep <= P_PLAYERS3) {
+    } else if (keep >= P_ENGINE && keep <= P_PLAYERS3 && keep != P_THROWS) {
         if (trk == AUX_BRAIN) {
             for (int t = 0; t < NTRK; t++) {
                 s_cat(num_s((uint32_t)t + 1u, s_cat(nm[t], "T")), " FOLLOWS");
@@ -2042,7 +2048,7 @@ static void draw_steps(void)
     char t[40];
     h = hash_u(h, (uint32_t)ph | (uint32_t)playing() << 8 | (uint32_t)ui.rec_armed << 9 | (uint32_t)ui.cursor << 16 |
                       (uint32_t)ui.lockpg << 24 | (uint32_t)(seq.rec_wait != 0) << 30);
-    h = hash_u(h, ui.cstep | (uint32_t)ui.rem_fx << 16 | (uint32_t)(ui.frame / 8 & 1u) << 31);
+    h = hash_u(h, ui.trickpg | (uint32_t)ui.rem_fx << 16 | (uint32_t)(ui.frame / 8 & 1u) << 31);
     h = hash_pat(h, tp);
     h = hash_s(hash_u(h, proj.trk[trk].par[TP_ENGINE]), proj.trk[trk].name);   /* the sound's name, shown */
     for (int i = 0; i < 4; i++)
@@ -2110,7 +2116,7 @@ static void draw_steps(void)
         }
     }
     for (int i = 0; i < 16; i++) {
-        int s = ui.bar * 16 + i, in = s < tp->len, held = (ui.held | ui.cstep) >> i & 1u, on;
+        int s = ui.bar * 16 + i, in = s < tp->len, held = ui.held >> i & 1u, on;
         const step_t *st = &tp->st[s];
         int32_t x = ST_X + (i % 8) * ST_CW, y = ST_Y + (i / 8) * (ST_CH + 4);
         uint16_t bg, fg;
@@ -3740,6 +3746,7 @@ static void draw_page(void)
             draw_players();
         break;
     case P_MIX: draw_mix(); break;
+    case P_THROWS: draw_punch(); break;
     case P_MASTER: case P_MASTER3: draw_master(); break;
     case P_SETUP: draw_setup(); break;
     default: draw_status(); break;

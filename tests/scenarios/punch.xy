@@ -1,15 +1,17 @@
-# punch-in fx: HOME + a key from an instrument track; on the PUNCH track the keys fire the groups
+# throws: FX's Throws page (its fifth) fires them from any track; on the THROW track the keys fire the groups too
 wait 200
-tap EDIT
+tap FX
+turn SELECT 4
+expect page Throws
 tap PLAY
 wait 500
-press HOME
 key 0 down
 wait 300
 expect punch_drum >0
 shot punch_home.png
 key 0 up
-release HOME
+wait 100
+expect punch_drum 0
 spin ALGO 9
 expect trk 10
 tap EDIT

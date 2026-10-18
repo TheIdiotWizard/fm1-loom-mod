@@ -23,14 +23,12 @@ key w0 down
 wait 100
 tapkey w2
 key w0 up
-# a ramp up on step 4 (HOME + step, white key 5), its value black key 4
-press HOME
+# a ramp up on step 4 (the step held, ARP, KNOB 1 to the fifth trick), its value 4 in 1 (the default)
 key w3 down
 wait 60
-tapkey w4
-tapkey b3
+tap ARP
+turn K1 5
 key w3 up
-release HOME
 expect comp 3 4 5
 # a chance on step 7, a nudge with OCT+
 key w6 down

@@ -41,12 +41,12 @@ to 16 from the left, black keys 1 to 11.
    to hear the shape change.
 
    <img src="img/screen-seq-held.png" width="240" alt="Steps on T2 stack with SEQ held: the keys play notes, and the line above the grid says the notes a step will write" title="SEQ held on Steps"> <img src="img/screen-step-record2.png" width="240" alt="Step record on T2: the red cursor on the next step after the notes written so far; the footer says KEYS write, OCT+ rest, OCT- back, REC done" title="Step record">
-3. **Tricks.** Still on T2's Steps page, hold **HOME**, hold white key 7, and press white key 3: multiply.
-   Press black key 3 for three hits. Let go. Hold **HOME**, hold white key 14, press white key 11: jump, and
-   black key 7 for "forward or back": the pattern starts to wander. Hold **HOME**, hold white key 1 and press
-   white key 14: skip trigger, so step 1 plays every other pass.
+3. **Tricks.** Still on T2's Steps page, hold white key 7 and press **ARP**. Turn **KNOB 1** to multiply and
+   **KNOB 2** to 3 for three hits. Let go. Hold white key 14, press **ARP**, turn **KNOB 1** to jump and
+   **KNOB 2** to "either": the pattern starts to wander. Hold white key 1, press **ARP** and turn **KNOB 1** to
+   skip trig, so step 1 plays every other pass.
 
-   <img src="img/screen-trick.png" width="240" alt="HOME and step 7 held: multiply 3 on the step; the knob strip shows its two trick slots and their values" title="A trick on step 7">
+   <img src="img/screen-trick.png" width="240" alt="Step 7 held with ARP: multiply 3 on the step; the knob strip shows its two trick slots and their values" title="A trick on step 7">
 4. **A chord track.** Turn **ALGORITHM** to T3. Press **EDIT** and turn **PRESETS** until a pad you like
    comes up. Press **SEQ**, hold **SEQ** and hold three keys together, let go and press white key 1. Hold white
    key 1 and press white key 8 so the chord lasts half the bar: a bar under the cells shows how far it
@@ -60,15 +60,15 @@ to 16 from the left, black keys 1 to 11.
    a chord, let go and press a step, and so on: four steps are a bar of progression.
 
    <img src="img/screen-conductor.png" width="240" alt="The conductor&#x27;s Engine page: C major, degree 0, the tracks that follow lit; knobs mode, key, scale, link" title="The conductor">
-6. **Throws.** Go to any track's **EDIT** page. Hold **HOME** and press a low key: F3 mutes the
-   drums, G3 stutters them, B3 echoes, C4 builds, D4 plays four on the floor, E4 jumbles them. Hold **HOME** and press a high
-   key for the same on the melodic tracks. Let go and the pattern comes back.
+6. **Throws.** Press **FX** and turn **SELECT** to its last page, Throws. Hold a low key: F3 mutes the
+   drums, G3 stutters them, A3 repeats, B3 echoes, C4 builds, D4 plays four on the floor, E4 jumbles them. A
+   high key does the same on the melodic tracks. Let go and the pattern comes back.
 
    <img src="img/screen-throws.png" width="240" alt="The throws&#x27; page: the two octaves of the keyboard, drums below and melodic above, with the effect held lit" title="Throws">
 7. **A scene.** Press **HOME**. White key 1 is the scene playing. Press white key 2: a copy. Now change
    something: mute the drums with black key 1 on Arrange, or go to T2's Steps and turn **KNOB 1** to
    P2 for a new pattern. Press white key 1 and 2 in turn: while it plays, each waits for the next bar
-   (press it again to switch at once), or hold **HOME** and press one to wait for the end of T1's pattern.
+   (press it again to switch at once).
 
    <img src="img/screen-arrange.png" width="240" alt="Arrange: each track&#x27;s pattern with its playhead, scene 2 playing; knobs tempo, groove, amount, click" title="Arrange">
 8. **Save.** Press **SAVE**.
@@ -85,8 +85,8 @@ knob on it; press **ARP** on T2 and turn **KNOB 1** to arp; press **GLO**, turn 
   and FX II.
 - **Pattern** (P1 to P8): a track's steps, up to 64 of them in four bars. Each track has eight.
 - **Step**: one cell of a pattern. It holds up to four notes, two tricks, a chance and parameter locks.
-- **Trick**: something a step does as it plays, such as pulse, hold, multiply or jump. There are fourteen, on the
-  white keys while you hold HOME and a step.
+- **Trick**: something a step does as it plays, such as pulse, hold, multiply or jump. There are fourteen; hold
+  a step and press ARP to give it two.
 - **Lock**: a knob value a step sets as it plays.
 - **Scene** (S1 to S16): which pattern each track plays, plus the mutes and the conductor's key.
 - **Song**: a chain of scenes, each played for a number of bars.
@@ -94,7 +94,7 @@ knob on it; press **ARP** on T2 and turn **KNOB 1** to arp; press **GLO**, turn 
 - **Preset**: a sound to load. 224 come with LOOM-8, sixteen for each engine, and 16 are yours.
 - **Player**: what the keys do on a track: arp, strum or hold.
 - **Conductor**: the aux track that moves the other tracks through a key and scale.
-- **Throw**: a momentary effect on the drums or the melodic tracks, from a key while you hold HOME.
+- **Throw**: a momentary effect on the drums or the melodic tracks, from a key on FX's Throws page.
 - **Weave**: a pattern crossed with a copied one: bars or steps in turn, or one's rhythm with the other's notes.
 - **Groove**: a timing and velocity feel. The project picks the type, each track sets how much.
 - **Pump**: the whole mix ducking on each kick and swelling back (Master out). A track's duck LFO does the same
@@ -118,8 +118,8 @@ press…" means keep **HOME** down while you press the next thing.
 | change a step's note | Hold its step and turn **KNOB 4** (a drum step too: its hits play higher or lower), or hold its step, hold **SEQ** and play the new note or chord. |
 | put a second sound on a drum step | Hold the step and press the sound's black key. |
 | take one note off a step | Hold the step, press **SEL**, pick the note and press **SEL**. |
-| add a trick | Hold **HOME**, hold the step, and press a white key: 1 pulse, 2 hold, 3 multiply, 4 velocity, 5 ramp up, 6 ramp down, 7 random, 8 portamento, 9 bend, 10 tonality, 11 jump, 12 skip lock, 13 skip trick, 14 skip trigger. Press a black key for its value: 1 to 9, black key 10 for random. The same white key again takes it off. |
-| set a skip's pattern | With **HOME** and the step held, black key 11 cycles between "on the last pass", "not the last pass" and "only the first". |
+| add a trick | Hold the step and press **ARP**. **KNOB 1** picks the first trick (pulse, hold, multiply, velocity, ramp up, ramp down, random, portamento, bend, tonality, jump, skip lock, skip trick, skip trigger) and **KNOB 2** its value; **KNOB 3** and **KNOB 4** the second. Turn a trick back to "-" to take it off. |
+| set a skip's pattern | Turn its value on past "random": the same cycles come again "not on the last pass", then "only the first". |
 | give a step a chance | Hold the step and turn **KNOB 3**. Past 99 % come the A:B cycles. |
 | lock a knob on a step | Hold the step and press **EDIT**, **ENV**, **FX** or **LFO**. Turn a knob. **SAVE** clears the step's locks. |
 | see the next bar | Press **OCT+** on Steps. |
@@ -142,10 +142,10 @@ press…" means keep **HOME** down while you press the next thing.
 | record step by step | Stopped, on Steps, tap **REC**. The red cursor starts after the last note; each key (or chord) you play writes it and moves on. **OCT+** leaves a rest, **OCT−** goes back. **REC** again ends. |
 | undo | Hold **HOME** and press **REC**. Hold **HOME** and press **PLAY** to redo. |
 | set the tempo | Press **HOME** and turn **KNOB 1**. Hold **HOME** and turn it for tenths. On any page, hold **HOME** and turn **SELECT**. |
-| use a throw | Hold **HOME** and press a key. The lower octave works on the track you are on, the upper octave on its whole group. |
+| use a throw | Press **FX** and turn **SELECT** to Throws. Hold a key: the lower octave works on the drums, the upper octave on the melodic tracks. |
 | make a new scene | Press **HOME** and press an empty white key. It becomes a copy of the scene playing. |
-| switch scenes while playing | On Arrange, press the scene's white key: it starts at the next bar. Press it again to switch at once. Hold **HOME** and press it to wait for the end of T1's pattern. |
-| mute a track | On Arrange, press its black key. On Mix, hold **HOME** and press its black key. |
+| switch scenes while playing | On Arrange, press the scene's white key: it starts at the next bar. Press it again to switch at once. To wait for the end of T1's pattern instead, set **SEL**'s SCENES SWITCH to "pattern end". |
+| mute a track | On Arrange or Mix, press its black key. On Mix, hold it to solo the track while you hold. |
 | make the whole mix pump with the kick | Press **GLO**, turn **SELECT** to Master out and turn **KNOB 4** (pump). **SEL** picks what drives it and how fast it swells back. |
 | solo a track | On Mix, hold its black key. Let go, and the mutes come back. |
 | play a progression | Turn **ALGORITHM** to COND (the conductor). Press **EDIT** and play a chord: it moves the tracks that follow. Press **SEQ** and press a step: the chord goes on it. Set the scale to 4 on the Bar page so a step is a beat. |
@@ -160,7 +160,7 @@ press…" means keep **HOME** down while you press the next thing.
 | **PLAY** | Starts (every track from step 1) and stops. A track whose scale or length you change stays in phase with the rest. On the Song page, it plays the song. With **REC** held, it starts live recording. |
 | **REC** | Held while playing: records while held. Stopped: a tap arms step record. Held, the knobs are the record settings (click, count-in, quantise, mode). On Players with strum, it records the chord. |
 | **SEL** | Opens a list of this page's settings and actions. With a step held, its notes. When LOOM-8 asks a question, **SEL** means yes. |
-| **HOME** | Opens Arrange. On Arrange, it opens the Song page. Held, it is the shift key: tricks, throws, undo and redo, the fine tempo, scenes, mutes on Mix. When LOOM-8 asks a question, **HOME** means no. |
+| **HOME** | Opens Arrange. On Arrange, it opens the Song page. Held, it is the shift key for buttons and knobs: undo and redo, the fine tempo, the scenes on **PRESETS**. When LOOM-8 asks a question, **HOME** means no. |
 | **SEQ** | Opens Steps. Its page 2 is Bar. Hold it on Steps and the keys play the track and set what a step writes. |
 | **EDIT** | Opens Engine. Its page 2 is Play; on a drum track, the key's model, random, pan and volume. Brocade has a page 3, Sub. |
 | **ENV** | Opens Envelope (a drum track: lag, attack, random, length), then Filter, then the filter's envelope. |
@@ -221,7 +221,7 @@ instrument track you picked last, so you hear the effect.
 
 **PLAY** is green while playing and red while recording. **REC** lights while recording or armed. **SAVE**
 lights when there is something to save. The page's button is lit. On Steps, the steps with notes glow and the
-step playing is bright; with **HOME** and a step held, the white keys of its tricks light. On Arrange,
+step playing is bright. On Arrange,
 the scenes in use glow and the one playing is bright. The muted tracks' black keys glow. With Setup's LIGHTS
 on, the other buttons glow too.
 
@@ -249,15 +249,15 @@ effect you played. The four squares at the right are the bars.
 - **Hold a step and press a later white key** to make its note reach that step.
 - **Hold a step and press a black key** on a drum track to put that sound on the step, or take it off.
 - **Hold a step and press SEL** for a list of its notes. Pick one and press **SEL** to take it off.
+- **Hold a step and press ARP** for its tricks (below).
 
 ### Tricks
 
-Hold **HOME** and hold a step. The white keys are now the fourteen tricks, and the
-black keys are their values. Press a white key to add its trick; press it again to take it off. A step
-holds two; a third replaces the second. While you hold, the knob strip shows the step's two tricks and
-their values, and the white keys of the ones it has are lit.
+Hold a step and press **ARP**. The knob strip shows the step's two tricks: **KNOB 1** picks the first and
+**KNOB 2** its value, **KNOB 3** and **KNOB 4** the second. Turn a trick back to "-" to take it off. Hold
+several steps and they all take the same turn. Let go of the steps when you are done.
 
-| White key | Trick | Black keys 1 to 9, 10 = random |
+| # | Trick | Values: 1 to 9, then random |
 | --- | --- | --- |
 | 1 | pulse: repeat the step without moving on | 1 to 9 times |
 | 2 | hold: keep the note over the next steps | 1 to 9 steps |
@@ -274,8 +274,8 @@ their values, and the white keys of the ones it has are lit.
 | 13 | skip trick: the other trick plays every Nth pass | a cycle of 1 to 9 |
 | 14 | skip trigger: the step plays every Nth pass | a cycle of 1 to 9 |
 
-For the three skips, black key 11 cycles which pass of the cycle plays: the last, all but the last, or only
-the first. A new trick starts at its default: pulse and hold 4, multiply 2, velocity 64, the
+For the three skips, the value goes on past random: the same cycles again, playing all but the last pass, then
+again playing only the first. A new trick starts at its default: pulse and hold 4, multiply 2, velocity 64, the
 ramps and random 4, portamento 40 %, bend down-up, tonality fifth up, jump forward, the skips a cycle of 2.
 
 A step's chance and its skip trigger decide whether the step happens at all. When it does not, its tricks do not
@@ -679,9 +679,9 @@ Press **HOME**. Each row is a track with its pattern and a playhead; muted track
 number is at the right, with the next one when a scene is cued, the beats until it starts and its key
 blinking. The 16 white keys are the 16 scenes. Stopped, a press switches at once. Playing, the scene
 starts at the next bar line; press its key again to switch at once, or press the scene playing to take
-the cue back. Hold **HOME** and press one to wait for the end of T1's pattern instead: the tracks can
-have different lengths and drift apart, so T1's pattern is the scene's length (on a 64-step T1, up to
-four bars). Turning **PRESETS** cues the next scene for the bar the same way. An empty scene
+the cue back. **SEL**'s SCENES SWITCH set to "pattern end" makes a key wait for the end of T1's pattern
+instead: the tracks can have different lengths and drift apart, so T1's pattern is the scene's length (on a
+64-step T1, up to four bars). Turning **PRESETS** cues the next scene for the bar the same way. An empty scene
 becomes a copy of the scene playing. Hold a white key for a second to clear that scene. The black keys
 mute: 1 to 8 the tracks, 9 and 10 the conductor and the throws. Hold **HOME** and turn **PRESETS** to change scenes
 from any page.
@@ -729,8 +729,7 @@ Turn **ALGORITHM** past T8. Each aux track has its own page under **EDIT** and i
 | black 4 | chop: short notes |
 | black 5 | ring: long notes |
 
-  On any other page, hold **HOME** and press a key: the lower octave works on the track you are on, the
-  upper octave on its whole group.
+  From any track, **FX**'s last page, Throws, has the same keys and the latch.
 
 - **FX I** and **FX II**: a send effect each: chorus, delay, lofi, phaser or reverb, with its
   four knobs. Press **FX** and turn **SELECT** to reach them from any track: **PRESETS** picks the effect, and
@@ -760,8 +759,8 @@ Turn **ALGORITHM** past T8. Each aux track has its own page under **EDIT** and i
 
 ## Mix and master
 
-Press **GLO**. The Mix page shows a meter for each track; the black keys pick one, and hold one to solo it.
-Hold **HOME** and press a black key to mute. The knobs are the sends to FX I and FX II, the pan and the
+Press **GLO**. The Mix page shows a meter for each track. A black key picks its track: a tap mutes or unmutes
+it, and holding it solos the track until you let go. The knobs are the sends to FX I and FX II, the pan and the
 level. Turn **SELECT** for Master EQ (low, mid, high and a blend from flat to the EQ) and
 Master out (the drums' level, the melodic tracks' level, the compressor and the pump; its **SEL** list has
 what the pump follows, its release and accent, and the output level). Setup has the lights, MIDI clock and notes out, and one or two cores; its **SEL** list loads
@@ -806,11 +805,11 @@ On a sound page, hold **SAVE** and press white key 1 to 16 to keep the track's s
 
 | Button | Page | KNOB 1 | KNOB 2 | KNOB 3 | KNOB 4 | Keys |
 | --- | --- | --- | --- | --- | --- | --- |
-| HOME | Arrange | tempo | groove | amount | click | white: scenes, black: mutes |
+| HOME | Arrange | tempo | groove | amount | click | white: scenes, black: mutes; SEL: when scenes switch |
 | HOME, SELECT | Song | slot | scene | bars | at end | white: add a scene |
 | SEQ | Steps | pattern | length | scale | groove | white: steps, black: sound (drums); SEQ held: a keyboard |
 | SEQ, a step held | Steps | velocity | length | chance | pitch | white: length, black: sounds; SEQ held: its notes |
-| SEQ, HOME + a step | Steps | the tricks and values shown | | | | white: trick, black: value |
+| SEQ, a step held + ARP | Steps | trick 1 | its value | trick 2 | its value | |
 | SEQ, SELECT | Bar | quant | note | groove | shape | black: scale |
 | EDIT | Engine | the engine's four | | | | play |
 | EDIT, SELECT | Play | mode | porta | bend | volume | play |
@@ -825,11 +824,12 @@ On a sound page, hold **SAVE** and press white key 1 to 16 to keep the track's s
 | FX | Character | type | amount | tone | mix | play; PRESETS: the type |
 | FX, SELECT | Sends | fx I | fx II | pan | level | play |
 | FX, SELECT twice | FX I, FX II | the effect's four | | | | play; PRESETS: the effect (and the reverb's mode) |
+| FX, SELECT four times | Throws | latch | | | | low: drum throws, high: melodic throws |
 | LFO | LFO | type | the type's three | | | play |
 | LFO, SELECT | LFO 2 | the type's fourth and fifth | | | | play |
 | ARP | Players | player | its first | its second | its third | play, through the player |
 | ARP, SELECT | Players 2, Hold | the arp's length, style, glide, stereo; hold | | | | play |
-| GLO | Mix | FX I | FX II | pan | level | black: the track, held: solo |
+| GLO | Mix | FX I | FX II | pan | level | black: a tap mutes, held: solo |
 | GLO, SELECT | Master EQ | low | mid | high | blend | |
 | GLO, SELECT | Master out | perc | mel | comp | pump | SEL: pump by, release, accent, level |
 | GLO, SELECT | Setup | lights | clock | notes | cores | |

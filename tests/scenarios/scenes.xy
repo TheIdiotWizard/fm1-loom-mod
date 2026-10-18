@@ -1,5 +1,5 @@
 # scenes on the Arrange page: a second scene cloned, a mute; while playing a white key waits for the bar (again: now),
-# HOME + white key for track 1's end; the song
+# SEL's SCENES SWITCH at the pattern's end: a key waits for track 1's end; the song
 wait 200
 tap HOME
 expect page Arrange
@@ -25,14 +25,20 @@ expect scene 1
 tapkey w1
 wait 40
 expect scene 2
-press HOME
+tap SEL
+turn ALGO 1
+wait 40
+shot scene_switch_list.png
+tap HOME
 tapkey w0
-release HOME
 wait 40
 expect scene 2
 shot scene_cue.png
 wait 2500
 expect scene 1
+tap SEL
+turn ALGO -1
+tap HOME
 tap PLAY
 # holding a scene's key asks CLEAR SCENE?; another scene's key, or that key again, is no
 key w1 down
@@ -66,14 +72,16 @@ tap PLAY
 wait 1500
 shot song_playing.png
 tap PLAY
-# Mix: a black key held solos, HOME + black key mutes
+# Mix: a black key held solos, a tap mutes
 tap GLO
 key b2 down
-wait 100
+wait 500
+expect mute 1019
 shot mix_solo.png
 key b2 up
-press HOME
-tapkey b1
-release HOME
 wait 40
+expect mute 0
+tapkey b1
+wait 40
+expect mute 2
 shot mix_mute.png

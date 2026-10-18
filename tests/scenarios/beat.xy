@@ -27,34 +27,31 @@ expect playing 1
 wait 1200
 shot beat_playing.png
 leds
-# a component on step 7: hold HOME and the step, white key 3 is multiply, black key 3 its value
+# a trick on step 7: hold the step, ARP, KNOB 1 to multiply (the third), KNOB 2 its value (3 hits)
 key w6 down
 wait 100
 shot step_held.png
 key w6 up
-press HOME
 key w6 down
 wait 60
-tapkey w2
-tapkey b2
+tap ARP
+turn K1 3
+turn K2 1
 wait 40
 shot step_component.png
 leds
 key w6 up
-release HOME
 expect comp 1 7 3
-# a second component, skip trigger (white key 14), then off again
-press HOME
+# a second trick, skip trigger (the fourteenth) on KNOB 3, its cycle and mode on KNOB 4, then off again
 key w6 down
 wait 60
-tapkey w13
-tapkey b3
-tapkey b10
+tap ARP
+turn K3 14
+turn K4 12
 wait 40
 shot step_two_comps.png
-tapkey w13
+turn K3 -14
 key w6 up
-release HOME
 # a step held + a black key: that sound on the step
 key w2 down
 wait 60
