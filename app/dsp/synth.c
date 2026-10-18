@@ -140,7 +140,8 @@ typedef struct {
     uint8_t ck;                       /* chunk slot since prepare */
     uint8_t nchunk;                   /* chunks so far (the slow refreshes count on it, not on the block size) */
     env_t amp, flt;                   /* stepped once a sub-block (SUB samples) */
-    uint8_t fresh;                    /* configured mid-block: refresh the coefficients before the next sample */
+    uint8_t fresh;                    /* configured mid-block: refresh the coefficients before the next sample;
+                                       * bit 1: started since the last render, its first configuration due there */
     uint8_t vi;                       /* the voice's index (its sample cache, smp_vc) */
     uint8_t tws, tws_pend;            /* cane: the line slot it plays from, and its pending note's (CN_NONE) */
     float amp_cur, amp_step;          /* the amp level, ramped inside the sub-block */
@@ -170,6 +171,9 @@ typedef struct {
     uint8_t lock[NTP_LOCK];
     perf_t perf;
     int16_t bend_c;
+    uint8_t pb_snap;                  /* a note started: the performance pitch jumps to its value, no glide */
+    float pb_last, pb_base, pb_step;  /* the performance pitch (cents), glided across a stretch's chunks from the
+                                       * last stretch's value: bends and the warble smooth in long stretches */
     uint8_t mono_n, mono_note[8], mono_vel[8];
     uint32_t mono_tag[8];
     int8_t mono_voice;
@@ -1575,7 +1579,7 @@ static void voice_take(synth_t *s, int vi, int trk, int note, int vel, int glide
         v->amp_cur = 0.0f;
         v->glc = v->grc = 0.0f;
         voice_start(s, v, note, vel, glide_ms, tag, 1, 0);
-        voice_config_now(s, v);
+        v->fresh |= 2;                           /* configured by its render (synth_render), on its core */
     } else {                                     /* fade the old note out, then start (voice_steal) */
         v->pend_note = (uint8_t)note;
         v->pend_vel = (uint8_t)vel;
@@ -1618,6 +1622,7 @@ void synth_note_on(synth_t *s, int trk, int note, int vel, int glide_ms, uint32_
     t = &s->t[trk];
     mode = P(s, trk, TP_VMODE);
     lfo_retrigger(s, trk);
+    t->pb_snap = 1;
     if (mode == VM_POLY) {
         voice_take(s, find_voice(s, trk), trk, note, vel, glide_ms, tag);
         return;
@@ -1871,6 +1876,15 @@ void synth_prepare(synth_t *s, uint32_t n)
         int type = P(s, i, TP_LTYPE), lx = P(s, i, TP_LX), lx2 = P(s, i, TP_LX2), engine = P(s, i, TP_ENGINE);
         float hz = type == LT_PUMP ? 0.0f : lfo_hz(P(s, i, TP_LSPEED), s->bpm), dph = hz * CHUNK_S;
         float amt = (float)P(s, i, TP_LAMT), pk = 0.0f, vib = 0.0f, vol = 0.0f;
+        {   /* the performance pitch: from the last stretch's value to this one's over the chunks (one stretch
+             * behind, smooth); a note on the track since: at its value at once */
+            float to = (float)t->perf.pitch_c;
+            t->pb_base = t->pb_snap ? to : t->pb_last;
+            t->pb_step = (to - t->pb_base) / (float)s->nck;
+            t->pb_base = to - t->pb_step * (float)s->nck;      /* (the last chunk exactly at the value) */
+            t->pb_last = to;
+            t->pb_snap = 0;
+        }
         t->ldest = LD_NONE;
         t->lscale = 0.0f;
         t->lf_in = t->lf_out = 0.0f;
@@ -2239,7 +2253,7 @@ static void voice_chunk(synth_t *s, voice_t *v)
     c->g2 = fm_minf((float)(P(s, trk, TP_SEND2) + t->perf.send2), 127.0f) * (1.0f / 127.0f);
     /* pitch: the glide, bend, performance pitch, vibrato, an LFO on the pitch (+-12 semitones at 100 %) */
     v->pitch_cur += (v->pitch - v->pitch_cur) * v->glide_k;
-    c->pitch_off = (float)t->bend_c + (float)t->perf.pitch_c + t->lpitch[k] * lenv;
+    c->pitch_off = (float)t->bend_c + t->pb_base + t->pb_step * (float)(k + 1) + t->lpitch[k] * lenv;
     if (dest == LD_PITCH)
         c->pitch_off += off * (1200.0f / 127.0f);
     {   /* the frequency and the engine's increments: when the pitch or a knob moved (or every 4th
@@ -2570,6 +2584,21 @@ void synth_render(synth_t *s, int v0, int v1, float *l, float *r, float *s1, flo
         const int timed = clk && (v_sounding(v) || v->pos == 0);
         if (timed)
             t0 = clk();
+        if (v->fresh & 2) {                      /* a note started since the last render: its parameters now, from
+                                                  * this stretch's first slot (at a chunk's start the chunk's own
+                                                  * configuration below is the first) */
+            v->fresh &= (uint8_t)~2u;
+            if (v->pos != 0) {
+                uint8_t ck = v->ck;
+                if (timed)
+                    tk = clk();
+                voice_chunk(s, v);
+                if (timed)
+                    tc += clk() - tk;
+                v->ck = ck;
+                v->nchunk = (uint8_t)(v->nchunk - 1);
+            }
+        }
         while (i < n) {
             uint32_t m = SY_CHUNK - v->pos;
             if (m > n - i)

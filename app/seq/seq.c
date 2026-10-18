@@ -2,7 +2,7 @@
 /* LOOM-8 sequencer; see seq.h for the model.
  *
  * Time. Every timer is a count of samples left in Q8 (a 24.8 fixed point: the fraction keeps the
- * tempo exact across steps, X0X's trick), counted down by seq_advance and due when under 256. NEVER
+ * tempo exact across steps, X0X's trick), counted down by seq_advance and due when under SEQ_DUE. NEVER
  * means no event. The sixteenth timer is the master: it drives the metronome, the count-in, the bar
  * (scene cues, the song) and the punch fills; the tracks run their own step timers from the same
  * tempo, so they stay in phase with it. A track's step fires on its grid plus an offset (the groove
@@ -35,6 +35,14 @@
 #include "seq.h"
 
 #define NEVER 0xFFFFFFFFu
+/* due: an event fires when its timer is under SEQ_DUE, so the events of the next few samples fire together at the
+ * first one's sample, up to SEQ_NEAR samples early (a timer's successor still counts from its exact time: the carry is
+ * the whole remainder). One stretch for them all, not one each (the steps, the sixteenth and a note's off often fall a
+ * sample or two apart: each stretch costs the render ~6 % of a block on the FM-1) */
+#ifndef SEQ_NEAR
+#define SEQ_NEAR 8u
+#endif
+#define SEQ_DUE (SEQ_NEAR << 8)
 #define TAG_KEY 0x100u                /* live keys: TAG_KEY | note */
 #define TAG_ARP 0x200u
 #define TAG_PLAYER 0x300u             /* maestro / hold: TAG_PLAYER | note */
@@ -422,7 +430,7 @@ static void add_off(seq_t *s, int t, uint32_t tag, int kind, int note, uint32_t 
         fire_off(s, t, soon, o);
         e = soon;
     }
-    e->off_at = at_q8 < 256u ? 256u : at_q8;
+    e->off_at = at_q8 < SEQ_DUE ? SEQ_DUE : at_q8;
     e->tag = tag;
     e->kind = (uint8_t)kind;
     e->note = (uint8_t)note;
@@ -1177,7 +1185,7 @@ static void fire_step(seq_t *s, int t, const seq_sink_t *o)
     seq_trk_t *tr = &s->t[t];
     const tpat_t *tp;
     const step_t *st;
-    uint32_t L, carry = tr->to_next < 256u ? tr->to_next : 0, nL;
+    uint32_t L, carry = tr->to_next < SEQ_DUE ? tr->to_next : 0, nL;
     int p, wrapped = 0, retrig = 1, happens = 0, plays, np, dummy, trig_ok = 1, lock_ok = 1, kind;
     int32_t off, noff;
     if (!tr->started) {
@@ -1289,8 +1297,8 @@ static void fire_step(seq_t *s, int t, const seq_sink_t *o)
         return;
     }
     nL = L;
-    if ((int32_t)nL + noff - off < 256)
-        nL = 256u;
+    if ((int32_t)nL + noff - off < (int32_t)SEQ_DUE)
+        nL = SEQ_DUE;
     else
         nL = (uint32_t)((int32_t)nL + noff - off);
     tr->to_next = carry + nL;
@@ -1301,7 +1309,7 @@ static void fire_sub(seq_t *s, int t, const seq_sink_t *o)
 {
     seq_trk_t *tr = &s->t[t];
     const step_t *st = &tpat(s, t)->st[tr->pos];
-    uint32_t carry = tr->sub_to_next < 256u ? tr->sub_to_next : 0;
+    uint32_t carry = tr->sub_to_next < SEQ_DUE ? tr->sub_to_next : 0;
     tr->ratchet++;
     if (t < NTRK && tr->act[SC_MULTIPLY])
         fire_notes(s, t, st, tr->pos, tr->step_q8, tr->ratchet, o);
@@ -1587,7 +1595,7 @@ static int arp_style_pos(int style, uint32_t j, int cyc)
 static void arp_fire(seq_t *s, int t, const seq_sink_t *o)
 {
     player_t *pl = &s->player[t];
-    uint32_t P = arp_period(s, t), carry = pl->arp_to_next < 256u ? pl->arp_to_next : 0, gate;
+    uint32_t P = arp_period(s, t), carry = pl->arp_to_next < SEQ_DUE ? pl->arp_to_next : 0, gate;
     uint8_t list[16];
     int n = pl->nheld, i, j, oct = s->par[t][TP_P3], range, pat = s->par[t][TP_P2], idx, note, total, cyc, style,
         len = s->par[t][TP_AP1], glide = s->par[t][TP_AP3], stereo = s->par[t][TP_AP4];
@@ -1676,7 +1684,7 @@ static void maestro_play(seq_t *s, int t, int key, int vel, const seq_sink_t *o)
 static void roll_fire(seq_t *s, int t, const seq_sink_t *o)
 {
     player_t *pl = &s->player[t];
-    uint32_t carry = pl->roll_to_next < 256u ? pl->roll_to_next : 0;
+    uint32_t carry = pl->roll_to_next < SEQ_DUE ? pl->roll_to_next : 0;
     int roll = s->par[t][TP_P1], note;
     if (roll > 63)
         roll = 63;
@@ -2129,7 +2137,7 @@ static void do_stop(seq_t *s, const seq_sink_t *o)
 static void six_tick(seq_t *s, const seq_sink_t *o)
 {
     int click = s->metronome == 2 || (s->metronome == 1 && (s->rec || s->count_in));
-    uint32_t carry = s->six_to_next < 256u ? s->six_to_next : 0;
+    uint32_t carry = s->six_to_next < SEQ_DUE ? s->six_to_next : 0;
     if (s->count_in) {
         if (s->countin_six >= 16) {
             s->countin_six = 0;
@@ -2256,13 +2264,13 @@ void seq_init(seq_t *s, patterns_t *P, uint8_t (*par)[NTP_ALL])
     s->mute = P->scene[0].mute;
     s->brain_scale = BS_MAJOR;
     s->six_to_next = NEVER;
-    s->clk_to_next = NEVER;
+    s->clk_to_next = 0;
     bar_len_update(s);
 }
 
 uint32_t seq_until_event(seq_t *s, uint32_t n)
 {
-    uint32_t m = n, e;
+    uint32_t m = n, mo = NEVER, e;    /* the next event; the next off (an off may wait for an event just after it) */
     int t, i;
     if (s->kq_r != s->kq_w || s->req_start || s->req_cont || s->req_stop || s->req_scene != 0xFF)
         return 1;                     /* keys or requests wait: play them now */
@@ -2270,30 +2278,30 @@ uint32_t seq_until_event(seq_t *s, uint32_t n)
         const player_t *pl = &s->player[t];
         if (pl->arp_to_next != NEVER && (e = pl->arp_to_next >> 8) < m)
             m = e;
-        if (pl->arp_to_off != NEVER && (e = pl->arp_to_off >> 8) < m)
-            m = e;
+        if (pl->arp_to_off != NEVER && (e = pl->arp_to_off >> 8) < mo)
+            mo = e;
         if (pl->roll_to_next != NEVER && (e = pl->roll_to_next >> 8) < m)
             m = e;
     }
     for (t = 0; t < NSEQT; t++) {
         const seq_trk_t *tr = &s->t[t];
         for (i = 0; i < SEQ_PENDING && tr->off_mask; i++)
-            if (tr->off[i].used && (e = tr->off[i].off_at >> 8) < m)
+            if (tr->off[i].used && (e = tr->off[i].off_at >> 8) < mo)
+                mo = e;
+    }
+    if (s->playing) {
+        for (t = 0; t < NSEQT; t++) {
+            const seq_trk_t *tr = &s->t[t];
+            if (tr->to_next != NEVER && (e = tr->to_next >> 8) < m)
                 m = e;
-    }
-    if (!s->playing)
-        return m ? m : 1;
-    for (t = 0; t < NSEQT; t++) {
-        const seq_trk_t *tr = &s->t[t];
-        if (tr->to_next != NEVER && (e = tr->to_next >> 8) < m)
-            m = e;
-        if (tr->sub_to_next != NEVER && (e = tr->sub_to_next >> 8) < m)
+            if (tr->sub_to_next != NEVER && (e = tr->sub_to_next >> 8) < m)
+                m = e;
+        }
+        if (s->six_to_next != NEVER && (e = s->six_to_next >> 8) < m)
             m = e;
     }
-    if (s->six_to_next != NEVER && (e = s->six_to_next >> 8) < m)
-        m = e;
-    if (!s->ext && s->send_clock && (e = s->clk_to_next >> 8) < m)
-        m = e;
+    if (mo != NEVER && mo + SEQ_NEAR < m)   /* an off on its own: on time; else it joins the event after it */
+        m = mo;
     if (s->chunk_cap && m > SY_CHUNK)
         m = SY_CHUNK;
     return m ? m : 1;
@@ -2387,13 +2395,14 @@ void seq_advance(seq_t *s, uint32_t k, const seq_sink_t *o)
         if (s->rec_note[i])
             s->rec_age[i] += dq;
     dec(&s->six_to_next, dq);
-    if (!s->ext && s->send_clock)
-        dec(&s->clk_to_next, dq);
+    if (!s->ext && s->send_clock)     /* the clock waits for a stretch's end (its byte leaves after the render anyway):
+                                       * not clamped, so a late tick keeps its lateness and the next is on time */
+        s->clk_to_next -= (int32_t)dq;
     /* fire what is due */
     SQ_T(qf);
     for (guard = 0; guard < 8; guard++) {
         int fired = 0;
-        if (s->playing && s->six_to_next < 256u) {   /* the sixteenth first: its bar may restart tracks */
+        if (s->playing && s->six_to_next < SEQ_DUE) {   /* the sixteenth first: its bar may restart tracks */
             SQ_T(q0);
             six_tick(s, o);
             SQ_ADD(0, q0);
@@ -2404,19 +2413,19 @@ void seq_advance(seq_t *s, uint32_t k, const seq_sink_t *o)
             t = i2 < NSEQT - NTRK ? NTRK + i2 : i2 - (NSEQT - NTRK);
             tr = &s->t[t];
             for (i = 0; i < SEQ_PENDING && tr->off_mask; i++)   /* note-offs before a new step at the same time */
-                if (tr->off[i].used && tr->off[i].off_at < 256u) {
+                if (tr->off[i].used && tr->off[i].off_at < SEQ_DUE) {
                     fire_off(s, t, &tr->off[i], o);
                     fired = 1;
                 }
             if (!s->playing)
                 continue;
-            if (tr->to_next < 256u) {
+            if (tr->to_next < SEQ_DUE) {
                 SQ_T(q1);
                 fire_step(s, t, o);
                 SQ_ADD(1, q1);
                 fired = 1;
             }
-            if (tr->sub_to_next < 256u) {
+            if (tr->sub_to_next < SEQ_DUE) {
                 SQ_T(q2);
                 fire_sub(s, t, o);
                 SQ_ADD(2, q2);
@@ -2425,15 +2434,15 @@ void seq_advance(seq_t *s, uint32_t k, const seq_sink_t *o)
         }
         for (t = 0; t < NTRK; t++) {
             player_t *pl = &s->player[t];
-            if (pl->arp_to_off < 256u) {
+            if (pl->arp_to_off < SEQ_DUE) {
                 arp_off(s, t, o);
                 fired = 1;
             }
-            if (pl->arp_to_next < 256u) {
+            if (pl->arp_to_next < SEQ_DUE) {
                 arp_fire(s, t, o);
                 fired = 1;
             }
-            if (pl->roll_to_next < 256u) {
+            if (pl->roll_to_next < SEQ_DUE) {
                 roll_fire(s, t, o);
                 fired = 1;
             }
@@ -2442,15 +2451,13 @@ void seq_advance(seq_t *s, uint32_t k, const seq_sink_t *o)
             break;
     }
     SQ_ADD(6, qf);
-    if (s->playing && !s->ext && s->send_clock && s->clk_to_next < 256u) {
+    if (s->playing && !s->ext && s->send_clock && s->clk_to_next < (int32_t)SEQ_DUE) {
         midi(o, 0xF8, 0, 0);
-        s->clk_to_next += six_q8(s) / 6u;           /* 24 ppqn */
+        s->clk_to_next += (int32_t)(six_q8(s) / 6u);   /* 24 ppqn */
     }
-    /* the smooth things: bends and lock ramps, each chunk */
-    for (t = 0; t < NSEQT; t++) {
+    /* the smooth things: bends (each stretch: the synth glides them across its chunks) and lock ramps (each chunk) */
+    for (t = 0; t < NSEQT; t++)
         bend_tick(s, t, k, o);
-        cap |= s->t[t].bend_on;
-    }
     locks_tick(s, k, o);
     for (i = 0; i < NLANE; i++)
         cap |= s->lrt[i].ramp;

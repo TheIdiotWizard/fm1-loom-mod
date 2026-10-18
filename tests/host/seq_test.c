@@ -91,6 +91,14 @@ static void run(uint32_t n)
     }
 }
 static void run_to(uint32_t t) { run(t > now ? t - now : 0); }
+static void run_blocks(uint32_t n)    /* as engine_render: a block (256) at a time, each split at its events */
+{
+    while (n) {
+        uint32_t b = n < 256u ? n : 256u;
+        run(b);
+        n -= b;
+    }
+}
 static void start(void)
 {
     now = 0;
@@ -487,7 +495,7 @@ static void t_bend(void)
     st(0, 0)->comp = SC_BEND;
     st(0, 0)->cval = 1;               /* up-down */
     start();
-    run(2 * L16);
+    run_blocks(2 * L16);              /* (a bend moves once a stretch: the synth glides it across the chunks) */
     for (i = 0; i < nev; i++)
         if (ev[i].kind == E_BEND) {
             if (ev[i].a > max)
@@ -628,13 +636,13 @@ static void t_skip(void)
     stop();
     nev = 0;
     start();
-    run(8 * L16);
+    run(8 * L16 - L16 / 2);           /* (mid-step: a step due at the window's end may fire a few samples early) */
     CHECK(count(E_ON, 0) == 6 && on_n(0)->t == 0 && near(on_n(3)->t, 4 * L16 + 2, 2));
     st(0, 0)->cval = SK_VAL(3, 2);    /* only the first of four */
     stop();
     nev = 0;
     start();
-    run(8 * L16);
+    run(8 * L16 - L16 / 2);
     CHECK(count(E_ON, 0) == 2 && on_n(0)->t == 0 && near(on_n(1)->t, 4 * L16 + 2, 2));
     st(0, 0)->cval = SK_VAL(9, 0);    /* a random cycle length: some passes play */
     stop();
@@ -651,7 +659,7 @@ static void t_skip(void)
     k = lane_alloc(P.lane, 0, 0, TP_CUT);
     P.lane[k].val[0] = 40;
     start();
-    run(4 * L16);
+    run(4 * L16 - L16 / 2);
     CHECK(count(E_ON, 0) == 4 && count(E_LOCK, 0) == 1 && near(nth(E_LOCK, 0, 0)->t, L16, 1));
     /* skip the step component: the velocity component in comp2 runs on the cycle's last pass only */
     reset();
@@ -662,7 +670,7 @@ static void t_skip(void)
     st(0, 0)->comp2 = SC_VELOCITY;
     st(0, 0)->cval2 = 0;              /* 4 */
     start();
-    run(4 * L16);
+    run(4 * L16 - L16 / 2);
     CHECK(count(E_ON, 0) == 4 && on_n(0)->b == 100 && on_n(1)->b == 4 && on_n(2)->b == 100 && on_n(3)->b == 4);
     /* the skip in comp2 gates the component in comp the same way */
     st(0, 0)->comp = SC_MULTIPLY;
@@ -672,7 +680,7 @@ static void t_skip(void)
     stop();
     nev = 0;
     start();
-    run(4 * L16);
+    run(4 * L16 - L16 / 2);
     CHECK(count(E_ON, 0) == 6);
     printf("ok %s\n", cur);
 }
@@ -793,7 +801,7 @@ static void t_cond(void)
     stop();
     nev = 0;
     start();
-    run(6 * L16);
+    run(6 * L16 - L16 / 2);
     CHECK(count(E_ON, 0) == 3 && on_n(1)->t > 2 * L16 - 2);
     st(0, 0)->cond = COND_AB + 1;     /* 2:2 */
     stop();
@@ -1005,7 +1013,7 @@ static void t_arp(void)
     seq_key(&S, 0, 60, 1, 100);
     seq_key(&S, 0, 64, 1, 100);
     seq_key(&S, 0, 67, 1, 100);
-    run(4 * L16);
+    run(4 * L16 - L16 / 2);
     CHECK(count(E_ON, 0) == 4 && on_n(0)->a == 60 && on_n(1)->a == 64 && on_n(2)->a == 67 && on_n(3)->a == 60);
     CHECK(near(on_n(1)->t, L16 + 1, 2) && near(on_n(2)->t, 2 * L16 + 1, 2));
     CHECK(nth(E_OFF, 0, 0) && near(nth(E_OFF, 0, 0)->t, L16 / 4 + 1, 2));   /* length short: a quarter period */
@@ -1021,7 +1029,7 @@ static void t_arp(void)
     par[0][TP_P3] = 2;
     seq_key(&S, 0, 60, 1, 100);
     seq_key(&S, 0, 64, 1, 100);
-    run(8 * L16);
+    run(8 * L16 - L16 / 2);
     CHECK(count(E_ON, 0) == 4 && on_n(0)->a == 76 && on_n(1)->a == 72 && on_n(2)->a == 64 && on_n(3)->a == 60);
     CHECK(near(on_n(1)->t - on_n(0)->t, 2 * L16 + 1, 2));
     /* hold: the keys may go */
@@ -1420,7 +1428,7 @@ static void t_fills(void)
     note(0, 6, 60, 100);
     seq_punch_key(&S, PX_MEL + PX_BUILD, 1, -1);
     start();
-    run(8 * L16);
+    run(8 * L16 - L16 / 2);
     CHECK(count(E_ON, 0) == 8 && on_n(0)->a == 60 && on_n(1)->a == 64 && on_n(2)->a == 67 && on_n(3)->a == 60 &&
           near(on_n(1)->t, L16, 1) && near(nth(E_OFF, 0, 0)->t, L16 / 2, 1));
     seq_punch_key(&S, PX_MEL + PX_BUILD, 0, -1);
@@ -1823,7 +1831,7 @@ static void t_midi_out(void)
     par[0][TP_CHAN] = 3;
     note(0, 0, 60, 100);
     start();
-    run(4 * L16 + 1);
+    run_blocks(4 * L16 + 1);          /* (the clock waits for a stretch's end: at most a block late, never early) */
     for (i = 0; i < nev; i++)
         if (ev[i].kind == E_MIDI) {
             clocks += ev[i].a == 0xF8;
@@ -1831,7 +1839,8 @@ static void t_midi_out(void)
             ons += ev[i].a == 0x92 && ev[i].b == 60;
         }
     CHECK(clocks >= 24 && clocks <= 25 && starts == 1 && ons == 1);
-    CHECK(near(nth(E_MIDI, -1, 3)->t, 918, 2));   /* start, note on, clock, clock at 1/24 of a quarter */
+    CHECK(nth(E_MIDI, -1, 3)->t >= 918 && nth(E_MIDI, -1, 3)->t < 918 + 256);   /* start, note on, clock, clock at
+                                                                                * 1/24 of a quarter (by a block) */
     stop();
     CHECK(ev[nev - 1].kind == E_MIDI && ev[nev - 1].a == 0xFC);
     printf("ok %s\n", cur);

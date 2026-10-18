@@ -108,7 +108,7 @@ typedef struct {
 
 #define SEQ_PENDING 16                /* note-offs a track may have waiting */
 typedef struct {
-    uint32_t off_at;                  /* samples left, Q8 (counted down; due under 256) */
+    uint32_t off_at;                  /* samples left, Q8 (counted down; due under SEQ_DUE: seq.c) */
     uint32_t tag;
     uint8_t used;
     uint8_t kind;                     /* OFF_NOTE: sink note_off; OFF_PUNCH: clear a punch_seq bit;
@@ -220,7 +220,8 @@ typedef struct {
     seq_trk_t t[NSEQT];
     lane_rt_t lrt[NLANE];
     player_t player[NTRK];
-    uint32_t clk_to_next, bar_to_next;   /* Q8 */
+    uint32_t bar_to_next;             /* Q8 */
+    int32_t clk_to_next;              /* Q8; the MIDI clock's goes below 0 when it waits for a stretch to end */
     uint32_t ext_since, ext_period;
     volatile uint32_t ext_pending;
     volatile uint8_t req_start, req_stop, req_cont, req_from_start;
@@ -239,7 +240,7 @@ typedef struct {
     uint8_t countin_six;
     uint8_t bar_fresh;                /* the bar count just restarted: the next sixteenth is not a bar's end */
     uint8_t ext_six;                  /* external clock: ticks into the sixteenth */
-    uint8_t chunk_cap;                /* a bend or a lock ramp runs: advance in chunks */
+    uint8_t chunk_cap;                /* a lock ramp runs: advance in chunks */
     uint8_t brain_seen[4];            /* the BRAIN track's E1..E4 last read */
     uint32_t punch_sent_d, punch_sent_m;
     uint8_t rec_note[8], rec_trk[8], rec_step[8];   /* live record: keys down and the steps they took */
