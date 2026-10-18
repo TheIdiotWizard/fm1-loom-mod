@@ -2371,6 +2371,156 @@ static void pic_brocade(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint
         }
     }
 }
+/* cane: the model's instrument. pluck: a string bent at color's place, swinging (longer at a higher timbre); bow:
+ * the string and the bow across it at color's place, heavier with timbre; reed and flute: the tube and its
+ * holes, the breath's specks at the mouth (fewer as timbre steadies it), the flute's embouchure at color; bell:
+ * the bell and its rings (more as timbre lengthens them); drum: the head, its ripples; damp dims the ink */
+static inline float pic_wrap(float x) { return x - fm_floorf(x); }
+static void pic_cane(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
+{
+    int md = p[TP_E1] < NCANE ? p[TP_E1] : 0;
+    float tb = (float)p[TP_E2] / 127.0f, co = (float)p[TP_E3] / 127.0f, cy = (float)(y0 + h / 2);
+    float xl = (float)(x0 + 8), xr = (float)(x0 + w - 8), xp = xl + (0.1f + 0.8f * co) * (xr - xl);
+    uint16_t ink = p[TP_E4] > 64 ? K_DIM : K_NOW;
+    uint32_t r = 77u ^ (f / 2);
+    pen_t pn = {0, 0, 0};
+    if (md <= 1) {                                   /* a string between its nut and its bridge */
+        float a = (float)h * 0.3f * fm_sin_turns((float)f * 0.09f) * (md ? 0.25f : 0.3f + 0.7f * tb);
+        cv_round(x0 + 2, (int32_t)cy - 8, 6, 16, 2, K_DIM);
+        cv_round(x0 + w - 8, (int32_t)cy - 8, 6, 16, 2, K_DIM);
+        pen_to(&pn, xl, cy, ink);
+        if (md == 0) {
+            pen_to(&pn, xp, cy - a, ink);
+        } else {
+            for (int k = 1; k <= 16; k++) {           /* the bowed string's swing, a lens */
+                float t = (float)k / 16.0f;
+                pen_to(&pn, xl + t * (xr - xl), cy - a * fm_sin_turns(t * 0.5f), ink);
+            }
+            cv_round((int32_t)xp - 2 - (int32_t)(tb * 3.0f), y0 + 4, 4 + (int32_t)(tb * 6.0f), h - 8, 3, K_DIM);
+        }
+        pen_to(&pn, xr, cy, ink);
+    } else if (md <= 3) {                            /* a tube, its holes; the breath at its mouth */
+        int32_t th = md == 2 ? 26 : 16, tx = x0 + 34, tw = w - 40;
+        cv_frame(tx, (int32_t)cy - th / 2, tw, th, th / 2, ink, K_BG);
+        for (int k = 0; k < 6; k++)
+            cv_dotf((float)(tx + tw / 3 + k * (tw * 2 / 3 - 12) / 5), cy, md == 2 ? 3.0f : 2.2f, ink);
+        if (md == 2) {                               /* the reed's mouthpiece */
+            pen_to(&pn, (float)tx, cy - 9.0f, ink);
+            pen_to(&pn, (float)(tx - 16), cy - 3.0f, ink);
+            pen_to(&pn, (float)(tx - 16), cy + 3.0f, ink);
+            pen_to(&pn, (float)tx, cy + 9.0f, ink);
+        } else {                                     /* the embouchure, at color's place along the head */
+            cv_round(tx + 6 + (int32_t)(co * 16.0f), (int32_t)cy - 4, 8, 8, 4, K_DIM);
+        }
+        for (int k = 0; k < 4 + (int)((1.0f - tb) * 20.0f); k++) {
+            r = r * 1664525u + 1013904223u;
+            cv_rect(x0 + 2 + (int32_t)((r >> 8) % 26u), (int32_t)cy - 10 + (int32_t)((r >> 20) % 20u), 2, 2, K_DIM);
+        }
+    } else if (md == 4) {                            /* the bell, its clapper swinging, its rings */
+        float bx = (float)(x0 + w / 2), sw = 3.0f * fm_sin_turns((float)f * 0.05f);
+        for (int k = 0; k <= 20; k++) {
+            float t = (float)k / 20.0f, half = 8.0f + 26.0f * t * t * t + 6.0f * t;
+            pen_to(&pn, bx - half, (float)(y0 + 10) + t * (float)(h - 26), ink);
+        }
+        pen_up(&pn);
+        for (int k = 0; k <= 20; k++) {
+            float t = (float)k / 20.0f, half = 8.0f + 26.0f * t * t * t + 6.0f * t;
+            pen_to(&pn, bx + half, (float)(y0 + 10) + t * (float)(h - 26), ink);
+        }
+        cv_line(x0 + w / 2 - 40, y0 + h - 16, x0 + w / 2 + 40, y0 + h - 16, ink);
+        cv_dotf(bx + sw, (float)(y0 + h - 10), 3.5f, K_DIM);
+        for (int k = 0; k < 1 + (int)(tb * 4.0f); k++) {
+            float rr = 46.0f + (float)((int)(f * 2u + (uint32_t)k * 9u) % 36);
+            cv_rect((int32_t)(bx + rr), y0 + h / 2 - 4, 1, 8, K_FAINT);
+            cv_rect((int32_t)(bx - rr), y0 + h / 2 - 4, 1, 8, K_FAINT);
+        }
+    } else {                                         /* the drum: its head, the ripples a strike sends */
+        float dx = (float)(x0 + w / 2), dy = (float)(y0 + 26), ex = 60.0f, ey = 12.0f;
+        for (int k = 0; k <= 32; k++)
+            pen_to(&pn, dx + ex * fm_sin_turns((float)k / 32.0f + 0.25f), dy + ey * fm_sin_turns((float)k / 32.0f), ink);
+        cv_line((int32_t)(dx - ex), (int32_t)dy, (int32_t)(dx - ex + 6), y0 + h - 6, ink);
+        cv_line((int32_t)(dx + ex), (int32_t)dy, (int32_t)(dx + ex - 6), y0 + h - 6, ink);
+        cv_line((int32_t)(dx - ex + 6), y0 + h - 6, (int32_t)(dx + ex - 6), y0 + h - 6, ink);
+        {
+            float g = (float)(f % 24u) / 24.0f;
+            pen_up(&pn);
+            for (int k = 0; k <= 24; k++)
+                pen_to(&pn, dx + g * ex * fm_sin_turns((float)k / 24.0f + 0.25f), dy + g * ey * fm_sin_turns((float)k / 24.0f),
+                       co > 0.5f ? K_DIM : K_FAINT);
+        }
+    }
+}
+/* voile: the voice's spectrum: its formants as peaks over the note's harmonics (vosim: timbre's and color's;
+ * vowel and choir: the vowel's along timbre, color moving them; whisper: two, sharper with timbre, apart by
+ * color), the breath as specks under them */
+static void pic_voile(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
+{
+    int md = p[TP_E1] < NVOILE ? p[TP_E1] : 0, np = md == 0 || md == 3 ? 2 : md == 1 ? 3 : 5;
+    float tb = (float)p[TP_E2] / 127.0f, co = (float)p[TP_E3] / 127.0f, cx[5], wd, base = (float)(y0 + h - 4);
+    uint32_t r = 31u ^ (f / 3);
+    pen_t pn = {0, 0, 0};
+    if (md == 0) {
+        cx[0] = tb;
+        cx[1] = co;
+    } else if (md == 3) {
+        cx[0] = 0.3f;
+        cx[1] = fm_clampf(0.3f + (co - 0.5f) * 0.9f, 0.02f, 0.98f);
+    } else {
+        float sh = 0.8f + 0.4f * co;
+        for (int k = 0; k < np; k++)
+            cx[k] = fm_minf((0.08f + 0.19f * (float)k + 0.08f * fm_sin_turns(tb * 0.8f + (float)k * 0.31f)) * sh, 0.97f);
+    }
+    wd = md == 3 ? 0.012f + (1.0f - tb) * 0.05f : 0.035f;
+    if (md != 3)
+        for (int32_t x = 6; x < w; x += 12)          /* the harmonics */
+            cv_rect(x0 + x, y0 + 30, 1, h - 34, K_PANEL2);
+    for (int32_t x = 0; x <= w; x += 2) {
+        float t = (float)x / (float)w, y = 0.0f;
+        for (int k = 0; k < np; k++) {
+            float d = (t - cx[k]) / wd;
+            y += fm_expf(-d * d) / (1.0f + 0.5f * (float)k);
+        }
+        pen_to(&pn, (float)(x0 + x), base - fm_minf(y, 1.2f) * (float)(h - 14), K_NOW);
+    }
+    for (int k = 0; k < p[TP_E4] / 3; k++) {
+        r = r * 1664525u + 1013904223u;
+        cv_rect(x0 + (int32_t)((r >> 8) % (uint32_t)w), y0 + h - 4 - (int32_t)((r >> 20) % 24u), 2, 2, K_DIM);
+    }
+}
+/* gingham: the checked cloth (its checks larger as timbre rises), the model's wave drawn over it in steps,
+ * the pixels; the arp's chord below, its step now lit */
+static void pic_gingham(int32_t x0, int32_t y0, int32_t w, int32_t h, const uint8_t *p, uint32_t f)
+{
+    static const uint8_t ALEN[9] = {0, 2, 2, 3, 3, 3, 4, 4, 3};
+    int md = p[TP_E1] < NGINGHAM ? p[TP_E1] : 0, ar = p[TP_E4] < 9 ? p[TP_E4] : 0;
+    int32_t cs = 6 + p[TP_E2] * 10 / 127, wh = h - 18, py = 0;
+    float co = (float)p[TP_E3] / 127.0f;
+    uint32_t r = 5u;
+    for (int32_t j = 0; j * cs < wh; j++)
+        for (int32_t i = 0; i * cs < w; i++) {
+            int a = i & 1, b = j & 1;
+            cv_rect(x0 + i * cs, y0 + j * cs, cs, j * cs + cs > wh ? wh - j * cs : cs, a && b ? K_FAINT : a || b ? K_PANEL2 : K_PANEL);
+        }
+    for (int32_t x = 0; x < w; x += 4) {
+        float t = (float)x / (float)w * 3.0f, ph = t - fm_floorf(t), y;
+        switch (md) {
+        case 0: y = fm_floorf((1.0f - ph) * (3.0f + co * 8.0f)) / (3.0f + co * 8.0f) * 2.0f - 1.0f; break;
+        case 1: y = ((ph < 0.5f ? 1.0f : -1.0f) + (pic_wrap(t * 1.26f) < 0.5f ? 1.0f : -1.0f) + (pic_wrap(t * 1.5f) < 0.5f ? 1.0f : -1.0f)) / 3.0f; break;
+        case 2: y = fm_sin_turns(t) * fm_sin_turns(t * (1.5f + co)); break;
+        case 5: r = r * 1664525u + 1013904223u; y = (float)((r >> 24) & 3u) / 1.5f - 1.0f; break;
+        default: y = (1.0f - ph) * fm_sin_turns(ph * (2.0f + 6.0f * (float)p[TP_E2] / 127.0f)); break;
+        }
+        {
+            int32_t yy = y0 + wh / 2 - (int32_t)(y * (float)(wh / 2 - 6));
+            yy -= (yy - y0) % 4;
+            if (x)
+                cv_rect(x0 + x - 1, yy < py ? yy : py, 3, (yy < py ? py - yy : yy - py) + 3, K_NOW);
+            py = yy;
+        }
+    }
+    for (int k = 0; k < ALEN[ar]; k++)
+        cv_round(x0 + w / 2 - ALEN[ar] * 9 + k * 18, y0 + h - 12, 14, 10, 3, (int)(f / 3u) % ALEN[ar] == k ? K_NOW : K_PANEL2);
+}
 /* the sample engine: the sample's waveform (each column its lowest and highest), the region that plays bright,
  * the rest faint, the loop's ends marked; its name, root and the mode above */
 static int8_t smp_col_lo[200], smp_col_hi[200];
@@ -2569,6 +2719,9 @@ static void draw_engine(void)
     case EG_SAMPLE: pic_sample(20, 24, 200, 88, p); break;
     case EG_SLICE: pic_slice(20, 24, 200, 88, p, trk); break;
     case EG_BROCADE: pic_brocade(20, 24, 200, 88, p, ui.frame); break;
+    case EG_CANE: pic_cane(20, 24, 200, 88, p, ui.frame); break;
+    case EG_VOILE: pic_voile(20, 24, 200, 88, p, ui.frame); break;
+    case EG_GINGHAM: pic_gingham(20, 24, 200, 88, p, ui.frame); break;
     default: pic_drumline(10, 26, 220, 90, p, ui.frame); break;
     }
     cv_blit(0, MAIN_Y);

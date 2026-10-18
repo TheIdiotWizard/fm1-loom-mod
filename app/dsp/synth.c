@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* LOOM-8 voices: sixteen voices playing eleven engines (synth.h), each with two ADSRs, a filter (six
+/* LOOM-8 voices: sixteen voices playing fourteen engines (synth.h), each with two ADSRs, a filter (six
  * types), a character stage (six types: drive, fold, crush, ring, tilt, rectify), a steal fade and sends; per track an LFO, a mono stack, parameter locks and
  * performance offsets.
  *
@@ -20,7 +20,8 @@
  *
  * brocade's saw bank is NuSaw's (the NuSaw plugin, Copyright (c) Charles Vestal, MIT; through its FM-1 port,
  * fm1-nusaw): the detune offsets and curve, the mix and its power normalisation, the pans, the keytracked
- * high-pass. */
+ * high-pass. cane, voile and gingham are Mutable Instruments Braids' models (Copyright 2012 Emilie Gillet, MIT),
+ * ported in dsp/braids.h (MIT), included below. */
 #include "synth.h"
 #include "fastmath.h"
 #include "drumline.h"
@@ -44,17 +45,19 @@
 
 /* ------------------------------------------------------------------ names --- */
 const char *const EG_NAME[NENGINE] = {"weft", "stack", "wavetable", "orbit", "tines", "organ", "sync",
-                                      "swarm", "kit", "sample", "slice", "brocade"};
+                                      "swarm", "kit", "sample", "slice", "brocade", "cane", "voile", "gingham"};
 const char *const EG_KNOB[NENGINE][4] = {
     {"bend", "wave", "sweep", "spread"},   {"wave", "ratio", "detune", "spread"}, {"table", "scan", "bend", "ripple"},
     {"bright", "ratio", "edge", "wobble"}, {"bright", "grit", "bite", "bell"},    {"stops", "pedal", "rotor", "rate"},
     {"reach", "sub", "hiss", "thin"},      {"swarm", "ring", "tone", "spread"},   {"-", "-", "-", "-"},
-    {"sample", "start", "length", "mode"},  {"sample", "slices", "pitch", "gate"}, {"saws", "detune", "mix", "spread"}};
-/* each engine's plain sound (INIT), 0..127; the organ's four and stack's ratio are discrete 1..8, brocade's saws 1..9 */
+    {"sample", "start", "length", "mode"},  {"sample", "slices", "pitch", "gate"}, {"saws", "detune", "mix", "spread"},
+    {"model", "timbre", "color", "damp"},   {"model", "timbre", "color", "breath"}, {"model", "timbre", "color", "arp"}};
+/* each engine's plain sound (INIT), 0..127; the organ's four and stack's ratio are discrete 1..8, brocade's saws 1..9,
+ * the Braids engines' models and gingham's arp a name each (synth.h NCANE ...) */
 static const uint8_t EG_DEF[NENGINE][4] = {{40, 0, 20, 0}, {0, 2, 12, 64}, {0, 40, 0, 0}, {40, 25, 0, 0},
                                            {50, 0, 40, 50}, {3, 4, 2, 5},  {30, 0, 0, 0}, {30, 0, 30, 20},
                                            {0, 0, 0, 0},    {5, 0, 127, SM_ONESHOT}, {SMP_BREAK, 1, 64, 127},
-                                           {7, 50, 90, 70}};
+                                           {7, 50, 90, 70}, {0, 64, 64, 0}, {2, 0, 64, 0}, {1, 78, 84, 0}};
 static const char *const VMODE_N[3] = {"poly", "mono", "legato"};
 static const char *const FTYPE_N[NFT] = {"lp24", "ladder", "lp12", "hp12", "dynamic", "bp12"};
 static const char *const LTYPE_N[NLT] = {"off", "wave", "wobble", "drift", "pump"};
@@ -85,6 +88,10 @@ static const char *const CTYPE_N[NCT] = {"off", "drive", "fold", "crush", "ring"
 static const char *const SMODE_N[NSM] = {"one-shot", "loop", "reverse", "ping-pong"};
 static const char *const SLICES_N[SL_NCOUNT] = {"4", "8", "16", "32"};
 static const char *const DFTYPE_N[NDF] = {"off", "lp", "hp", "bp"};
+static const char *const CANE_N[NCANE] = {"pluck", "bow", "reed", "flute", "bell", "drum"};   /* (dsp/braids.h) */
+static const char *const VOILE_N[NVOILE] = {"vosim", "vowel", "choir", "whisper"};
+static const char *const GING_N[NGINGHAM] = {"toy", "chord", "ring", "peak", "band", "noise"};
+static const char *const ARP_N[NARP] = {"off", "oct", "fifth", "power", "major", "minor", "maj7", "min7", "sus4"};
 /* ring: the modulator's ratios to the note, tone / 8 */
 static const float RING_R[16] = {0.25f, 0.5f, 0.75f, 1.0f, 1.25f, 1.414f, 1.5f, 1.75f, 2.0f, 2.5f, 2.76f, 3.0f, 3.5f,
                                  4.0f, 5.0f, 7.0f};
@@ -131,6 +138,7 @@ typedef struct {
     env_t amp, flt;                   /* stepped once a sub-block (SUB samples) */
     uint8_t fresh;                    /* configured mid-block: refresh the coefficients before the next sample */
     uint8_t vi;                       /* the voice's index (its sample cache, smp_vc) */
+    uint8_t tws, tws_pend;            /* cane: the line slot it plays from, and its pending note's (CN_NONE) */
     float amp_cur, amp_step;          /* the amp level, ramped inside the sub-block */
     float steal_gain, sg_step;
     float glc, grc, gl_step, gr_step; /* the dry gains, ramped */
@@ -290,6 +298,9 @@ static inline float pf(const synth_t *s, int trk, int p, int dest, float off)
  * eng_run() writes m <= SUB raw samples to xl (and xr when c.stereo); the amplitude of a cycle is
  * about 1; eng_chunk() moves the engine's own slow parts every chunk */
 static void br_init(voice_t *v);
+static void cn_init(voice_t *v);
+static void vo_init(voice_t *v);
+static void gh_init(voice_t *v);
 static void eng_init(voice_t *v)
 {
     int i;
@@ -307,6 +318,12 @@ static void eng_init(voice_t *v)
     v->o[14] = 1.0f;
     if (v->engine == EG_ORGAN)
         v->o[13] = 1.0f, v->o[14] = 0.0f;        /* the rotor's gain and its ramp */
+    if (v->engine == EG_CANE)
+        cn_init(v);
+    else if (v->engine == EG_VOILE)
+        vo_init(v);
+    else if (v->engine == EG_GINGHAM)
+        gh_init(v);
 }
 
 /* a rising saw crossfading into a pulse that is low first and high after pw: the two in step, so the
@@ -979,6 +996,10 @@ static void br_init(voice_t *v)                  /* the saws from random phases,
     v->o[9] = -1.0f;
 }
 
+/* cane, voile and gingham: Braids' models (dsp/braids.h, MIT) */
+#define CN_NONE 0xFFu
+#include "braids.h"
+
 /* sample: a sample of the bank (dsp/sample.h) at the note's pitch; its root note plays it at its own rate
  * (22.05 kHz: half a sample a frame), linearly interpolated. start: where in it (0..99 %); length: how much
  * of the rest (127 = to its end): the region. Modes: one-shot (the region once; then the voice ends), loop
@@ -1230,6 +1251,9 @@ static void eng_chunk(voice_t *v)                /* every chunk: the engines' ow
     case EG_ORBIT: orbit_chunk(v); break;
     case EG_TINES: tines_chunk(v); break;
     case EG_ORGAN: organ_chunk(v); break;
+    case EG_CANE: cn_chunk(v); break;
+    case EG_VOILE: vo_chunk(v); break;
+    case EG_GINGHAM: gh_chunk(v); break;
     default: break;
     }
 }
@@ -1246,6 +1270,9 @@ static void eng_prep(voice_t *v, float bpm)
     case EG_SAMPLE: smp_prep(v); break;
     case EG_SLICE: slc_prep(v, bpm); break;
     case EG_BROCADE: br_prep(v); break;
+    case EG_CANE: cn_prep(v); break;
+    case EG_VOILE: vo_prep(v); break;
+    case EG_GINGHAM: gh_prep(v); break;
     default: dis_prep(v); break;
     }
 }
@@ -1262,6 +1289,9 @@ static void eng_run(voice_t *v, float *xl, float *xr, int m)
     case EG_SAMPLE: smp_run(v, xl, xr, m); break;
     case EG_SLICE: slc_run(v, xl, xr, m); break;
     case EG_BROCADE: br_run(v, xl, xr, m); break;
+    case EG_CANE: cn_run(v, xl, xr, m); break;
+    case EG_VOILE: vo_run(v, xl, xr, m); break;
+    case EG_GINGHAM: gh_run(v, xl, xr, m); break;
     default: dis_run(v, xl, xr, m); break;
     }
 }
@@ -1278,6 +1308,7 @@ static void voice_start(synth_t *s, voice_t *v, int note, int vel, int glide_ms,
     int eng = P(s, v->trk, TP_ENGINE);
     if (!eg_synth(eng))
         eng = EG_WEFT;
+    v->tws = v->tws_pend;                        /* cane: the slot voice_take kept for this note */
     if (eng != v->engine || !v_sounding(v)) {
         v->engine = (uint8_t)eng;
         eng_init(v);
@@ -1303,6 +1334,12 @@ static void voice_start(synth_t *s, voice_t *v, int note, int vel, int glide_ms,
         v->o[3] = v->o[4] = 0.0f;
         v->o[6] = v->o[7] = 0.0f;
     }
+    if (v->engine == EG_CANE)                    /* the Braids engines: a strike (Braids' trigger) */
+        cn_strike(v, 1);
+    else if (v->engine == EG_VOILE)
+        vo_strike(v);
+    else if (v->engine == EG_GINGHAM)
+        gh_strike(v);
     if (!in_render)
         t->last_pitch = v->pitch;
     v->fresh = 1;
@@ -1369,15 +1406,88 @@ static int br_find(const synth_t *s, int trk)   /* the brocade voice to take whe
     return best;
 }
 
+/* cane's cap: its waveguides play from CN_SLOTS line slots (dsp/braids.h cn_mem), so at most CN_SLOTS of its
+ * voices: one that plays cane (sounding) or will (a steal's pending note that voice_take kept a slot for) */
+static int cn_voice(const voice_t *v)
+{
+    return (v->engine == EG_CANE && v_sounding(v)) || (v->steal_phase == 1 && v->tws_pend != CN_NONE);
+}
+static int cn_holds(const voice_t *v, int j)     /* the voice plays from slot j, or will */
+{
+    return (v->engine == EG_CANE && v_sounding(v) && v->tws == j) || (v->steal_phase == 1 && v->tws_pend == j);
+}
+static int cn_find(const synth_t *s, int trk)    /* the cane voice to take when the cap is reached; -1 */
+{
+    int i, n = 0, best = -1, own = 0;
+    float quiet = 1e9f;
+    uint32_t oldest = 0xFFFFFFFFu;
+    for (i = 0; i < NVOICE; i++)
+        n += cn_voice(&s->v[i]);
+    if (n < CN_SLOTS)
+        return -1;
+    for (i = 0; i < NVOICE; i++) {               /* releasing first (the quietest), then the track's own oldest */
+        const voice_t *v = &s->v[i];
+        if (!cn_voice(v) || v->steal_phase == 1)
+            continue;
+        if (v->amp.stage == ENV_RELEASE && v->amp.level < quiet) {
+            quiet = v->amp.level;
+            best = i;
+        }
+    }
+    if (best >= 0)
+        return best;
+    for (i = 0; i < NVOICE; i++) {
+        const voice_t *v = &s->v[i];
+        int mine = v->trk == trk;
+        if (!cn_voice(v) || v->steal_phase == 1 || (own && !mine))
+            continue;
+        if ((mine && !own) || v->age < oldest) {
+            oldest = v->age;
+            best = i;
+            own = mine;
+        }
+    }
+    if (best < 0)                                /* all of them fading for a note already: the newest waits */
+        for (i = 0; i < NVOICE; i++)
+            if (cn_voice(&s->v[i]) && (best < 0 || s->v[i].age > s->v[best].age))
+                best = i;
+    return best;
+}
+/* the slot for a cane note on voice vi: its own when it plays cane now (the note follows on its lines), else
+ * one no other voice holds (cn_find made sure there is one); CN_NONE when the track is not cane */
+static void cn_reserve(synth_t *s, int vi, int trk)
+{
+    voice_t *v = &s->v[vi];
+    int j, i;
+    v->tws_pend = CN_NONE;
+    if (P(s, trk, TP_ENGINE) != EG_CANE)
+        return;
+    if (v->engine == EG_CANE && v_sounding(v) && v->tws < CN_SLOTS) {
+        v->tws_pend = v->tws;
+        return;
+    }
+    for (j = 0; j < CN_SLOTS; j++) {
+        int used = 0;
+        for (i = 0; i < NVOICE && !used; i++)
+            used = i != vi && cn_holds(&s->v[i], j);
+        if (!used) {
+            v->tws_pend = (uint8_t)j;
+            return;
+        }
+    }
+}
+
 /* a voice for a new note: a free one; else the track's oldest if it holds NVOICE_TRK already; else
- * the quietest releasing; else the oldest of all. A stolen voice fades 15 ms first. brocade first keeps
- * to its own cap (br_find). */
+ * the quietest releasing; else the oldest of all. A stolen voice fades 15 ms first. brocade and cane first
+ * keep to their own caps (br_find, cn_find). */
 static int find_voice(synth_t *s, int trk)
 {
     int i, best = -1;
     float quiet = 1e9f;
     uint32_t oldest = 0xFFFFFFFFu;
     if (P(s, trk, TP_ENGINE) == EG_BROCADE && (best = br_find(s, trk)) >= 0)
+        return best;
+    if (P(s, trk, TP_ENGINE) == EG_CANE && (best = cn_find(s, trk)) >= 0)
         return best;
     if (track_voices(s, trk) >= NVOICE_TRK) {
         for (i = 0; i < s->max_voices; i++)
@@ -1424,6 +1534,7 @@ static void voice_config_now(synth_t *s, voice_t *v)   /* a voice started mid-ch
 static void voice_take(synth_t *s, int vi, int trk, int note, int vel, int glide_ms, uint32_t tag)
 {
     voice_t *v = &s->v[vi];
+    cn_reserve(s, vi, trk);
     if (!v_sounding(v)) {
         int i;
         v->trk = (uint8_t)trk;
@@ -1516,6 +1627,12 @@ void synth_note_on(synth_t *s, int trk, int note, int vel, int glide_ms, uint32_
                     v->o[3] = v->o[4] = 0.0f;
                 if (v->engine == EG_SLICE)
                     slc_retrigger(v);
+                if (v->engine == EG_CANE)        /* the lines as they are, the exciter again */
+                    cn_strike(v, 0);
+                else if (v->engine == EG_VOILE)
+                    vo_strike(v);
+                else if (v->engine == EG_GINGHAM)
+                    gh_strike(v);
             }
             return;
         }
@@ -1627,6 +1744,11 @@ int synth_voice_cost(const synth_t *s, int vi)
     const voice_t *v = &s->v[vi];
     if (!v_sounding(v))
         return 0;
+    if (v->engine == EG_CANE || v->engine == EG_VOILE || v->engine == EG_GINGHAM) {   /* by the model (braids.h) */
+        int md = v->c.ex[19] > 0.0f ? (int)v->c.ex[19] : 0;
+        return v->engine == EG_CANE ? CN_COST[md < NCANE ? md : 0] : v->engine == EG_VOILE ? VO_COST[md < NVOILE ? md : 0]
+                                                                                          : GH_COST[md < NGINGHAM ? md : 0];
+    }
     if (v->engine != EG_BROCADE)
         return 4;
     /* tests/host/brocade_test's cost: 3 + half a unit a saw (stereo, lp24), so (7 + saws) / 2 */
@@ -1668,6 +1790,7 @@ void synth_init(synth_t *s, uint8_t (*par)[NTP])
         v->rng = 0x2545F491u * (uint32_t)(i + 1) + 1u;
         v->steal_gain = 1.0f;
         v->engine = EG_WEFT;
+        v->tws = v->tws_pend = CN_NONE;
         for (j = 0; j < 8; j++)
             v->env_in[j] = -1.0f;                /* the caches: nothing made yet */
         v->pan_in = v->pitch_in = -1.0f;
@@ -2542,6 +2665,16 @@ static void eknob_init(void)
                 i->hi = BR_MAX;
                 i->kind = PK_NUM;
             }
+            if ((e == EG_CANE || e == EG_VOILE || e == EG_GINGHAM) && k == 0) {   /* the Braids models */
+                i->hi = (uint8_t)(e == EG_CANE ? NCANE - 1 : e == EG_VOILE ? NVOILE - 1 : NGINGHAM - 1);
+                i->kind = PK_NAMES;
+                i->names = e == EG_CANE ? CANE_N : e == EG_VOILE ? VOILE_N : GING_N;
+            }
+            if (e == EG_GINGHAM && k == 3) {   /* the arp's chords */
+                i->hi = NARP - 1;
+                i->kind = PK_NAMES;
+                i->names = ARP_N;
+            }
             if (e == EG_SAMPLE) {              /* sample, start, length, mode */
                 i->kind = k == 0 ? PK_SAMPLE : k == 3 ? PK_NAMES : PK_PCT;
                 i->hi = (uint8_t)(k == 0 ? smp_slots() - 1 : k == 3 ? NSM - 1 : 127);
@@ -2834,7 +2967,8 @@ void sound_default(uint8_t *par, int engine)
  * Times: 32 is about 10 ms, 64 100 ms, 80 330 ms, 96 1.1 s, 110 3 s. Cutoff: 59 is 800 Hz, 80 2.2 kHz,
  * 100 5.6 kHz. Each engine is a material of the loom: weft cotton, stack ply, wavetable silk, orbit linen,
  * tines felt, organ reed, sync wire, swarm fleece, sample jute, slice the loom itself, brocade the rich cloth
- * of many threads. Each engine's eight span it: a bass, a lead, a pad, something
+ * of many threads, cane the rattan and bamboo (strings, pipes, bells), voile the sheer cloth (voices), gingham
+ * the checked cotton of picnics (toys). Each engine's eight span it: a bass, a lead, a pad, something
  * struck, a bright one and a dark one, one that moves; the volumes put each preset's phrase (tools/render_presets.sh)
  * near -19.5 dBFS RMS dry, its peak under -1.5 dBFS. */
 #define LFO_(lt, ls, la, ld, lx, lx2) lt, ls, la, ld, lx, lx2
@@ -2951,6 +3085,35 @@ const preset_t PRESETS[] = {
     PR("velvet", EG_BROCADE, 9, 34, 90, 70, VM_POLY, 0, 69, 40, 90, 100, 85, 30, 80, 60, 80, 50, 5, 70, 64, FT_LP24, 5, 70, NOLFO, (CT_TILT, 60, 40, 127)),
     PR("shot silk", EG_BROCADE, 9, 70, 110, 100, VM_POLY, 0, 65, 60, 90, 100, 90, 40, 80, 60, 80, 90, 10, 70, 64, FT_LP12, 10, 75, (LT_WAVE, 22, 88, LD_SYNTH + LD_FREE, 1, 1), NOCH),
     PR("organza", EG_BROCADE, 9, 56, 127, 110, VM_POLY, 0, 81, 10, 80, 90, 80, 0, 60, 0, 60, 45, 5, 64, 64, FT_HP12, 15, 60, NOLFO, (CT_TILT, 64, 100, 127)),
+    /* cane: rattan, reed and bamboo, the woven and the blown; Braids' physical models. model (pluck, bow, reed,
+     * flute, bell, drum), timbre, color, damp */
+    PR("wicker harp", EG_CANE, 0, 72, 50, 10, VM_POLY, 0, 115, 0, 100, 100, 70, 0, 60, 0, 60, 110, 0, 64, 64, FT_LP12, 20, 40, NOLFO, NOCH),
+    PR("rattan bass", EG_CANE, 0, 95, 90, 40, VM_MONO, 0, 127, 0, 90, 100, 40, 0, 60, 20, 40, 100, 10, 76, 30, FT_LADDER, 0, 5, NOLFO, (CT_DRIVE, 60, 70, 127)),
+    PR("cane cello", EG_CANE, 1, 60, 40, 20, VM_LEGATO, 20, 100, 40, 90, 110, 70, 0, 60, 0, 60, 95, 10, 64, 64, FT_LP24, 15, 35, VIB(40), NOCH),
+    PR("basket reed", EG_CANE, 2, 80, 60, 20, VM_LEGATO, 15, 127, 30, 80, 110, 50, 0, 60, 0, 60, 100, 0, 64, 64, FT_LP12, 10, 30, VIB(50), NOCH),
+    PR("bamboo", EG_CANE, 3, 50, 64, 0, VM_MONO, 0, 100, 36, 80, 110, 60, 0, 60, 0, 60, 110, 0, 64, 64, FT_LP12, 25, 50, VIB(60), NOCH),
+    PR("temple bell", EG_CANE, 4, 100, 30, 30, VM_POLY, 0, 115, 0, 100, 127, 100, 0, 60, 0, 60, 120, 0, 64, 64, FT_LP12, 10, 60, NOLFO, NOCH),
+    PR("hand drum", EG_CANE, 5, 70, 40, 40, VM_POLY, 0, 127, 0, 95, 0, 60, 0, 60, 0, 60, 85, 0, 64, 64, FT_LP24, 0, 25, NOLFO, (CT_DRIVE, 20, 80, 127)),
+    PR("cane field", EG_CANE, 1, 50, 90, 50, VM_POLY, 0, 92, 90, 100, 120, 95, 0, 60, 0, 60, 85, 10, 64, 64, FT_LP12, 20, 70, (LT_WAVE, 25, 84, LD_SYNTH + LD_FREE, 2, 1), NOCH),
+    /* voile: the sheer cloth; Braids' voices. model (vosim, vowel, choir, whisper), timbre, color, breath */
+    PR("voile choir", EG_VOILE, 2, 0, 70, 20, VM_POLY, 0, 92, 80, 100, 120, 90, 0, 60, 0, 60, 100, 0, 64, 64, FT_LP12, 15, 70, (LT_DRIFT, 30, 30, LD_SYNTH + LD_FREE, 1, 64), NOCH),
+    PR("basso", EG_VOILE, 2, 100, 0, 10, VM_MONO, 0, 127, 40, 90, 110, 70, 0, 60, 0, 60, 95, 0, 64, 64, FT_LP24, 10, 50, VIB(60), NOCH),
+    PR("sheer lead", EG_VOILE, 0, 70, 95, 0, VM_LEGATO, 25, 100, 10, 90, 100, 50, 0, 60, 0, 60, 100, 10, 64, 64, FT_LP24, 20, 30, VIB(30), (CT_DRIVE, 30, 100, 127)),
+    PR("tulle", EG_VOILE, 0, 90, 110, 0, VM_POLY, 0, 98, 2, 70, 60, 60, 0, 60, 0, 60, 115, 0, 64, 64, FT_LP12, 25, 40, NOLFO, NOCH),
+    PR("chatter", EG_VOILE, 1, 64, 40, 64, VM_POLY, 0, 110, 0, 80, 90, 50, 0, 60, 0, 60, 110, 0, 64, 64, FT_LP12, 20, 30, (LT_WAVE, 3, 100, LD_SYNTH, 1, 1), NOCH),
+    PR("doo wop", EG_VOILE, 1, 100, 30, 80, VM_POLY, 0, 127, 0, 90, 40, 50, 0, 60, 0, 60, 100, 0, 64, 64, FT_LP12, 15, 35, NOLFO, NOCH),
+    PR("veil", EG_VOILE, 3, 90, 70, 127, VM_POLY, 0, 110, 70, 100, 110, 90, 0, 60, 0, 60, 90, 0, 64, 64, FT_LP12, 10, 70, (LT_WAVE, 20, 80, LD_SYNTH + LD_FREE, 2, 1), NOCH),
+    PR("net curtain", EG_VOILE, 3, 60, 80, 80, VM_POLY, 0, 115, 85, 100, 120, 100, 0, 60, 0, 60, 95, 0, 64, 64, FT_LP12, 20, 80, NOLFO, NOCH),
+    /* gingham: the checked cotton of picnics and pinafores; Braids' toys and chips. model (toy, chord, ring,
+     * peak, band, noise), timbre, color, arp (off, oct, fifth, power, major, minor, maj7, min7, sus4) */
+    PR("picnic", EG_GINGHAM, 0, 110, 30, 0, VM_MONO, 0, 105, 0, 80, 100, 40, 0, 60, 0, 60, 110, 0, 64, 64, FT_LP12, 20, 25, VIB(30), NOCH),
+    PR("check bass", EG_GINGHAM, 0, 90, 0, 0, VM_MONO, 0, 127, 0, 70, 80, 30, 0, 60, 20, 40, 100, 20, 90, 30, FT_LADDER, 0, 5, NOLFO, (CT_DRIVE, 50, 80, 127)),
+    PR("arcade", EG_GINGHAM, 1, 96, 116, 4, VM_POLY, 0, 92, 0, 70, 90, 40, 0, 60, 0, 60, 105, 0, 64, 64, FT_LP12, 25, 20, NOLFO, NOCH),
+    PR("pinafore", EG_GINGHAM, 2, 90, 100, 0, VM_POLY, 0, 127, 0, 85, 0, 70, 0, 60, 0, 60, 115, 0, 64, 64, FT_LP12, 25, 45, NOLFO, NOCH),
+    PR("plaid pad", EG_GINGHAM, 1, 78, 84, 0, VM_POLY, 0, 83, 85, 100, 120, 95, 0, 60, 0, 60, 75, 10, 70, 64, FT_LP24, 15, 70, (LT_WAVE, 25, 84, LD_FILTER + LD_FREE, 0, 1), NOCH),
+    PR("pixel", EG_GINGHAM, 3, 50, 30, 1, VM_MONO, 0, 120, 0, 80, 90, 40, 0, 60, 0, 60, 110, 0, 64, 64, FT_LP12, 20, 20, (LT_WAVE, 4, 90, LD_SYNTH, 1, 2), NOCH),
+    PR("tea towel", EG_GINGHAM, 5, 100, 0, 0, VM_POLY, 0, 127, 0, 80, 30, 50, 0, 60, 0, 60, 45, 0, 64, 64, FT_HP12, 10, 25, NOLFO, NOCH),
+    PR("apron", EG_GINGHAM, 4, 30, 60, 0, VM_POLY, 0, 110, 10, 90, 90, 60, 0, 60, 0, 60, 70, 10, 64, 64, FT_LP24, 10, 40, NOLFO, NOCH),
 };
 const int NPRESETS = (int)(sizeof PRESETS / sizeof PRESETS[0]);
 
