@@ -4,6 +4,8 @@
 # snare on 2 and 4, eighth hats). The guard sees no load here (load 0): the model alone.
 wait 300
 load 0
+# (measured when a new project's tape was at colour 24; a new project's is off now: set as measured)
+mst color 24
 # idle 21-22; the tape off 13
 meter 1500
 expect model_avg >16
