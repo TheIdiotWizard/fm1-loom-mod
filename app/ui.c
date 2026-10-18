@@ -1312,7 +1312,7 @@ static void song_knob(int k, int32_t e)
     if (k == 1)
         sg->slot[cur].scene = (uint8_t)clampi(sg->slot[cur].scene + e, 0, NSCENE - 1);
     else
-        sg->slot[cur].rep = (uint8_t)clampi(sg->slot[cur].rep + e, 1, 16);
+        sg->slot[cur].rep = (uint8_t)clampi(sg->slot[cur].rep + e, 1, SONG_BARS);
     mark_dirty();
 }
 static int cued_pat(int trk)                     /* the pattern cued to come next, or the one playing */

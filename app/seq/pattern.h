@@ -19,6 +19,7 @@ enum { AUX_BRAIN = NTRK, AUX_PUNCH, AUX_FX1, AUX_FX2, NALLTRK };
 #define SN 4                          /* notes a step may hold */
 #define NSCENE 16
 #define NSONG 64                      /* scene slots in the song */
+#define SONG_BARS 64                  /* the most bars a song slot plays */
 #define NLANE 96                      /* parameter lock lanes (the whole project) */
 #define NDRUM 11                      /* drumline keys: the black keys (a model instance each) */
 #define PPS 24                        /* ticks a step (a sixteenth at scale 1): nudge and lengths count in these */
@@ -102,7 +103,8 @@ typedef struct {
 
 typedef struct {
     uint8_t scene;                    /* 0..15 */
-    uint8_t rep;                      /* 1..16 passes */
+    uint8_t rep;                      /* 1..SONG_BARS bars (16 sixteenths each, whatever the patterns' lengths; a project
+                                       * saved before counted track 1's spans: its value now reads as bars) */
 } song_slot_t;
 
 typedef struct {

@@ -38,7 +38,8 @@
 /* throws (punch-in FX): twelve, the same in both octaves. White keys 1..7 of an octave: mute, stutter (a
  * two-sixteenth loop), repeat (a four-sixteenth loop), echo (a fading loop), build, floor, jumble (fills); its
  * black keys 1..5: warble (a vibrato; on drums a high-pass too), pan (an auto-pan), octave (drums up, melodic
- * down), chop (short notes), ring (long notes and tails). The bit order is stored in throw steps: keep it. Bits 0..11 = the lower octave (percussive tracks), 16..27 = the upper
+ * down), chop (short notes), ring (long notes and tails). The bit order is stored in throw steps: keep it. Bits 0..11 = the lower octave (percussive tracks: the kit and
+ * slice tracks), 16..27 = the upper
  * (melodic tracks). On the FM-1 the lower octave is keys F3..E4, the upper F4..E5 (F5, F#5, G5 idle). */
 #define NPUNCH_FX 32
 #define NPUNCH 12
@@ -60,8 +61,10 @@ int punch_key_of(int fx);
  *   floor     drums: a kick on every beat and hats in sixteenths; synths: the notes alternating low / high
  *   jumble    drums: a random one of sounds 1..3 on three sixteenths in four; synths: a random pattern note
  *             on three sixteenths in four. The fills replace the track's own steps while held, and
- *             play on the bar's sixteenths whatever the track's scale (an empty synth pattern is silent)
- *   octave    drums an octave up (pitch_semi 12 on the drum call), synths an octave down (the note)
+ *             play on the bar's sixteenths whatever the track's scale (an empty synth pattern is silent).
+ *             A slice track plays the drums' fills on its own slices: seq.c fill_slices
+ *   octave    drums an octave up (pitch_semi 12 on the drum call; a slice track: the engine's pitch), synths an
+ *             octave down (the note)
  *   chop      drums: short_gate on the drum call; synths: the gate is 25 % of the step
  *   ring      drums: long_tail on the drum call; synths: the gate is 200 % of the step
  * The PUNCH track's steps hold an effect as note[0] = 1 + its bit: 1..12 the percussive octave, 17..28 the
@@ -269,7 +272,7 @@ void seq_brain_key(seq_t *s, int note, int on);
  * while playing the key is recorded into the PUNCH track's pattern. The latch (PUNCH track E1) is the UI's:
  * it sends on / off as the latched state changes */
 void seq_punch_key(seq_t *s, int fx, int on, int target_trk);
-int punch_group_of(const seq_t *s, int trk);        /* 0 percussive (a drumline track), 1 melodic */
+int punch_group_of(const seq_t *s, int trk);        /* 0 percussive (a drumline or slice track), 1 melodic */
 uint32_t seq_punch_mask(const seq_t *s, int trk);   /* the 12 PX_* bits in force on track trk now (held keys aimed at
                                                      * it or its group, and the sequenced ones); the engine's per-track
                                                      * view, finer than the two masks the punch sink gets */

@@ -509,10 +509,10 @@ static void s_bend(void *x, int trk, int cents)
         bend_c[trk] = (int16_t)cents;
 }
 /* the live FX state: per track, its group's mask (drum tracks the drum FX, the rest the melodic) into
- * the track's performance state. Both masks arrive as bits PX_* (the sequencer shifts the melodic
- * octave down; eng_punch_mel is the same). Here: mute, wobble (drums: the high-pass and a wobble on what is long;
+ * the track's performance state (a slice track takes the drums': seq.c is_perc). Both masks arrive as bits PX_*
+ * (the sequencer shifts the melodic octave down; eng_punch_mel is the same). Here: mute, wobble (drums: the high-pass and a wobble on what is long;
  * melodic: a short vibrato), pan (the pan LFO), ring (the drums' tails). Stutter, repeat, echo, the fills,
- * octave and the note lengths are the sequencer's own. */
+ * octave and the note lengths are the sequencer's own (but a slice track's octave up, here: its pitch). */
 static uint32_t punch_d, punch_m;
 static void s_punch(void *x, uint32_t drum_mask, uint32_t mel_mask)
 {
@@ -570,11 +570,14 @@ static void perf_tick(uint32_t n)
     vib = fm_sin_turns(vib_ph);
     for (t = 0; t < NTRK; t++) {
         perf_t *p = synth_perf(SY, t);
-        int drum = eng_drum[t];
-        uint32_t m = drum ? punch_d : punch_m;
+        int drum = eng_drum[t], slice = epar[t][TP_ENGINE] == EG_SLICE, perc = drum || slice;
+        uint32_t m = perc ? punch_d : punch_m;
         int mute = (int)((m >> PX_MUTE) & 1u), pan_on = (int)((m >> PX_PAN) & 1u);
         int filt = (int)((m >> PX_WARBLE) & 1u), tail = (int)((m >> PX_RING) & 1u), pan;
-        p->pitch_c = (int16_t)(bend_c[t] + (filt ? (int)(vib * (drum ? PUNCH_VIB_DRUM : PUNCH_VIB_MEL)) : 0));
+        int up = slice && (seq_punch_mask(&seq, t) >> PX_OCTAVE & 1u);   /* a slice track's octave: up, as the
+                                                                         * drums (its note picks the slice) */
+        p->pitch_c = (int16_t)(bend_c[t] + (up ? 1200 : 0) +
+                               (filt ? (int)(vib * (perc ? PUNCH_VIB_DRUM : PUNCH_VIB_MEL)) : 0));
         p->cut = 0;
         p->hp = (uint8_t)(drum && filt ? PUNCH_HP : 0);
         pan = perf_pan_base[t] + (pan_on ? (int)(lfo * 60.0f) : 0);

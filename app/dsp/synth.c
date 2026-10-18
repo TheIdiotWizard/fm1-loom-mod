@@ -3081,7 +3081,10 @@ const preset_t PRESETS[] = {
     PR("basket reed", EG_CANE, 2, 80, 60, 20, VM_LEGATO, 15, 127, 30, 80, 110, 50, 0, 60, 0, 60, 100, 0, 64, 64, FT_LP12, 10, 30, VIB(50), NOCH),
     PR("bamboo", EG_CANE, 3, 50, 64, 0, VM_MONO, 0, 100, 36, 80, 110, 60, 0, 60, 0, 60, 110, 0, 64, 64, FT_LP12, 25, 50, VIB(60), NOCH),
     PR("temple bell", EG_CANE, 4, 100, 30, 30, VM_POLY, 0, 115, 0, 100, 127, 100, 0, 60, 0, 60, 120, 0, 64, 64, FT_LP12, 10, 60, NOLFO, NOCH),
-    PR("hand drum", EG_CANE, 5, 70, 40, 40, VM_POLY, 0, 127, 0, 95, 0, 60, 0, 60, 0, 60, 85, 0, 64, 64, FT_LP24, 0, 25, NOLFO, (CT_DRIVE, 20, 80, 127)),
+    /* hand drum: a conga's slap and its pitched body. Color 100 brings the head's noise up (the slap), the filter
+     * opens at the hit and closes on the body (fenv, fd), the fold makes the loud start bright and leaves the
+     * tail its tone (it follows the level); keytrack 32: an octave up is not a hiss */
+    PR("hand drum", EG_CANE, 5, 70, 100, 20, VM_POLY, 0, 107, 0, 95, 0, 60, 0, 50, 0, 60, 92, 0, 110, 32, FT_LP24, 0, 25, NOLFO, (CT_FOLD, 95, 64, 127)),
     PR("cane field", EG_CANE, 1, 50, 90, 50, VM_POLY, 0, 92, 90, 100, 120, 95, 0, 60, 0, 60, 85, 10, 64, 64, FT_LP12, 20, 70, (LT_WAVE, 25, 84, LD_SYNTH + LD_FREE, 2, 1), NOCH),
     /* voile: the sheer cloth; Braids' voices. model (vosim, vowel, choir, whisper), timbre, color, breath */
     PR("voile choir", EG_VOILE, 2, 0, 70, 20, VM_POLY, 0, 92, 80, 100, 120, 90, 0, 60, 0, 60, 100, 0, 64, 64, FT_LP12, 15, 70, (LT_DRIFT, 30, 30, LD_SYNTH + LD_FREE, 1, 64), NOCH),
@@ -3089,7 +3092,9 @@ const preset_t PRESETS[] = {
     PR("sheer lead", EG_VOILE, 0, 70, 95, 0, VM_LEGATO, 25, 100, 10, 90, 100, 50, 0, 60, 0, 60, 100, 10, 64, 64, FT_LP24, 20, 30, VIB(30), (CT_DRIVE, 30, 100, 127)),
     PR("tulle", EG_VOILE, 0, 90, 110, 0, VM_POLY, 0, 98, 2, 70, 60, 60, 0, 60, 0, 60, 115, 0, 64, 64, FT_LP12, 25, 40, NOLFO, NOCH),
     PR("chatter", EG_VOILE, 1, 64, 40, 64, VM_POLY, 0, 110, 0, 80, 90, 50, 0, 60, 0, 60, 110, 0, 64, 64, FT_LP12, 20, 30, (LT_WAVE, 3, 100, LD_SYNTH, 1, 1), NOCH),
-    PR("doo wop", EG_VOILE, 1, 100, 30, 80, VM_POLY, 0, 127, 0, 90, 40, 50, 0, 60, 0, 60, 100, 0, 64, 64, FT_LP12, 15, 35, NOLFO, NOCH),
+    /* doo wop: the "oo" vowel's low first formant kept, what lies under the note out (a high-pass an octave and a
+     * half under it, keytracked); the drive gives it its level and some grit */
+    PR("doo wop", EG_VOILE, 1, 100, 30, 80, VM_POLY, 0, 127, 0, 90, 40, 50, 0, 60, 0, 60, 14, 0, 64, 127, FT_HP12, 15, 35, NOLFO, (CT_DRIVE, 76, 100, 127)),
     PR("veil", EG_VOILE, 3, 90, 70, 127, VM_POLY, 0, 110, 70, 100, 110, 90, 0, 60, 0, 60, 90, 0, 64, 64, FT_LP12, 10, 70, (LT_WAVE, 20, 80, LD_SYNTH + LD_FREE, 2, 1), NOCH),
     PR("net curtain", EG_VOILE, 3, 60, 80, 80, VM_POLY, 0, 115, 85, 100, 120, 100, 0, 60, 0, 60, 95, 0, 64, 64, FT_LP12, 20, 80, NOLFO, NOCH),
     /* gingham: the checked cotton of picnics and pinafores; Braids' toys and chips. model (toy, chord, ring,
