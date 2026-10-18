@@ -854,12 +854,20 @@ static void dis_run(voice_t *v, float *xl, float *xr, int m)
  * 0.667, the sum kept at one saw's power); spread: the pairs across the field, the outer ones furthest. Then
  * NuSaw's keytracked high-pass (12 dB at a third of the note, the JP-8000's), which keeps the beating out of
  * the bass. The filter, the envelopes and the LFO are the voice's own, not NuSaw's.
- * o[0..8] the phases, o[9] the saws sounding (fractional while one fades; -1: the note's first sub-block),
- * o[10..13] the high-pass (low and band, L then R). ex[0] the increment, ex[1] the detune's, ex[2] the knob's
- * count, ex[3] the offsets' row, ex[4] the side gain, ex[5..12] the pairs' L and R gains (x sqrt 2: the centre
- * at 1), ex[13] the high-pass's coefficient, ex[14] the count to sound (the knob's). */
-#define BR_MAX 9                                 /* (the offsets' table and the phases still hold nine) */
+ * o[0..6] the phases, o[7] and o[8] the spread and pairs the pans were made from (o[8] -1: none yet), o[9] the
+ * saws sounding (fractional while one fades; -1: the note's first sub-block), o[10..13] the high-pass (low and
+ * band, L then R). ex[0] the increment, ex[1] the detune's, ex[2] the knob's count, ex[3] the offsets' row,
+ * ex[4] the side gain, ex[5..10] the pairs' L and R gains (x sqrt 2: the centre at 1), ex[11] the high-pass's coefficient, ex[12], ex[13], ex[15..19] the seven saws' 1 / increment (BR_IDT:
+ * the PolyBLEP's, a division a saw once a prepare, not once a sub-block), ex[14] the count to sound (the knob's).
+ *
+ * The saws' sample loop: a sample whose phase is at most 1 - increment needs no wrap and no PolyBLEP (the wrap
+ * leaves the phase under the increment, and no phase without a wrap is), so one compare takes it, and the
+ * wrap and the two corrections share the rare branch. The centre saw's pass writes the buffers (no clearing
+ * pass), the pairs add theirs. The same samples as before. */
+#define BR_MAX 9                                 /* (the offsets' table still holds nine; br_init draws nine phases) */
 #define BR_SAWS 7                                /* the knob's top */
+#define BR_PAIRS (BR_SAWS / 2)
+#define BR_IDT(s) (12 + (s) + ((s) >= 2))        /* saw s's 1 / increment: around voice_chunk's ex[14] */
 #define BR_FADE (1.0f / (0.012f * SY_SR))        /* a saw in or out over 12 ms */
 static const float BR_COEF[5][BR_MAX] = {        /* the saws' detune offsets, by pairs (count / 2) */
     {0.0f},
@@ -876,77 +884,97 @@ static inline float br_detune(float x)           /* NuSaw's detune curve: fine a
         return 0.02f + (x - 0.1f) * 0.575f;
     return 0.25f + (x - 0.5f) * 1.5f;
 }
+static inline const float *br_coef(const cfg_t *c) { return BR_COEF[(int)c->ex[3] > 4 ? 4 : (int)c->ex[3]]; }
+static inline float br_dt(const cfg_t *c, const float *co, int s)   /* saw s's increment */
+{
+    return fm_clampf(c->ex[0] + co[s] * c->ex[1], 1e-6f, 0.45f);
+}
 static void br_prep(voice_t *v)
 {
     cfg_t *c = &v->c;
-    int n = knob9(c->ek[0]), M = n / 2, k;
+    int n = knob9(c->ek[0]), M = n / 2, k, top;
     float f = c->freq * INV_SR, mx = c->e[2], w = c->e[3];
+    const float *co;
     c->ex[0] = fm_minf(f, 0.45f);
     c->ex[1] = f * 0.1102f * br_detune(c->e[1]);
     c->ex[2] = (float)n;
     c->ex[3] = (float)M;
     c->ex[4] = fm_maxf(mx * fm_sqrtf(mx) * 0.667f, 0.015f);
-    for (k = 1; k <= 4; k++) {                   /* pair k: its upper saw towards the right, its lower the left */
-        float a = (1.0f + (M ? (float)(k < M ? k : M) / (float)M * w : 0.0f)) * 0.78539816f;
-        c->ex[3 + 2 * k] = fm_cosf(a) * 1.41421356f;
-        c->ex[4 + 2 * k] = fm_sinf(a) * 1.41421356f;
+    if (w != v->o[7] || (float)M != v->o[8]) {   /* the pans: when the spread or the pairs moved */
+        v->o[7] = w;
+        v->o[8] = (float)M;
+        for (k = 1; k <= BR_PAIRS; k++) {        /* pair k: its upper saw towards the right, its lower the left */
+            float a = (1.0f + (M ? (float)(k < M ? k : M) / (float)M * w : 0.0f)) * 0.78539816f;
+            c->ex[3 + 2 * k] = fm_cosf(a) * 1.41421356f;
+            c->ex[4 + 2 * k] = fm_sinf(a) * 1.41421356f;
+        }
     }
-    c->ex[13] = fm_minf(2.07345f * f, 0.9f);    /* 2 sin(pi fc / sr), fc = f / 3 */
+    c->ex[11] = fm_minf(2.07345f * f, 0.9f);    /* 2 sin(pi fc / sr), fc = f / 3 */
+    co = br_coef(c);
+    top = n;                                     /* the saws br_run may sound before the next prepare: the knob's */
+    if (v->o[9] > (float)top)                    /* count, or more while the ones above it fade out */
+        top = v->o[9] < (float)BR_SAWS ? (int)v->o[9] + ((float)(int)v->o[9] < v->o[9]) : BR_SAWS;
+    for (k = 0; k < top; k++)
+        c->ex[BR_IDT(k)] = 1.0f / br_dt(c, co, k);
     c->stereo = w > 0.001f && n > 1;
 }
-SY_INLINE void br_saw(float *ph, float dt, float gl, float gr, float *xl, float *xr, int m, const int stereo)
+/* a PolyBLEP saw's next sample; hi = 1 - dt */
+SY_INLINE float br_one(float *p, float dt, float idt, float hi)
 {
-    float p = *ph, idt = 1.0f / dt;
-    int i;
-    for (i = 0; i < m; i++) {
-        float x;
-        p += dt;
-        if (p >= 1.0f)
-            p -= 1.0f;
-        x = 2.0f * p - 1.0f;
-        if (p < dt) {
-            float t = p * idt;
-            x -= t + t - t * t - 1.0f;
-        } else if (p > 1.0f - dt) {
-            float t = (p - 1.0f) * idt;
+    float q = *p + dt, x, t;
+    if (q > hi) {                                /* the rare branch: around the wrap */
+        if (q >= 1.0f) {
+            q -= 1.0f;
+            x = 2.0f * q - 1.0f;
+            if (q < dt) {
+                t = q * idt;
+                x -= t + t - t * t - 1.0f;
+            }
+        } else {
+            x = 2.0f * q - 1.0f;
+            t = (q - 1.0f) * idt;
             x -= t * t + t + t + 1.0f;
         }
-        xl[i] += x * gl;
-        if (stereo)
-            xr[i] += x * gr;
+    } else {
+        x = 2.0f * q - 1.0f;
     }
-    *ph = p;
-}
-SY_INLINE float br_one(float *p, float dt, float idt)   /* a PolyBLEP saw's next sample */
-{
-    float q = *p + dt, x;
-    if (q >= 1.0f)
-        q -= 1.0f;
     *p = q;
-    x = 2.0f * q - 1.0f;
-    if (q < dt) {
-        float t = q * idt;
-        x -= t + t - t * t - 1.0f;
-    } else if (q > 1.0f - dt) {
-        float t = (q - 1.0f) * idt;
-        x -= t * t + t + t + 1.0f;
-    }
     return x;
 }
-/* a pair of saws in one pass over the buffers (half the loads and stores of one at a time) */
-SY_INLINE void br_saw2(float *pa, float *pb, float da, float db, const float *g, float *xl, float *xr, int m,
-                       const int stereo)
+/* one saw (K 1) or a pair (K 2) in one pass over the buffers; set: write them (the centre saw's pass, which
+ * starts the sub-block), else add: xl + x0, xl + (x0 + x1), the sums one saw at a time made. (Not three in a
+ * pass: faster on the host, but the FM-1's FPU works in its sixteen core registers, and three would spill.) */
+SY_INLINE void br_pass(float *ph, const float *dt, const float *idt, const float *g, float *xl, float *xr, int m,
+                       const int K, const int set, const int stereo)
 {
-    float a = *pa, b = *pb, ia = 1.0f / da, ib = 1.0f / db, gla = g[0], gra = g[1], glb = g[2], grb = g[3];
+    float a = ph[0], b = K > 1 ? ph[1] : 0.0f, da = dt[0], db = K > 1 ? dt[1] : 0.0f;
+    float ia = idt[0], ib = K > 1 ? idt[1] : 0.0f, ha = 1.0f - da, hb = 1.0f - db;
     int i;
     for (i = 0; i < m; i++) {
-        float x = br_one(&a, da, ia), y = br_one(&b, db, ib);
-        xl[i] += x * gla + y * glb;
-        if (stereo)
-            xr[i] += x * gra + y * grb;
+        float x = br_one(&a, da, ia, ha), sl, sr = 0.0f;
+        if (K == 1) {
+            sl = x * g[0];
+            if (stereo)
+                sr = x * g[1];
+        } else {
+            float y = br_one(&b, db, ib, hb);
+            sl = x * g[0] + y * g[2];
+            if (stereo)
+                sr = x * g[1] + y * g[3];
+        }
+        if (set) {
+            xl[i] = sl;
+            if (stereo)
+                xr[i] = sr;
+        } else {
+            xl[i] += sl;
+            if (stereo)
+                xr[i] += sr;
+        }
     }
-    *pa = a;
-    *pb = b;
+    ph[0] = a;
+    if (K > 1)
+        ph[1] = b;
 }
 SY_INLINE void br_hp(float *x, float *lo, float *bp, float f, int m)
 {
@@ -964,9 +992,10 @@ SY_INLINE void br_hp(float *x, float *lo, float *bp, float f, int m)
 SY_INLINE void br_loop(voice_t *v, float *xl, float *xr, int m, const int stereo)
 {
     const cfg_t *c = &v->c;
-    const float *co = BR_COEF[(int)c->ex[3] > 4 ? 4 : (int)c->ex[3]];
-    float nf = v->o[9], tg = c->ex[14], st = (float)m * BR_FADE, gs = c->ex[4], norm;
-    int i, j, na;
+    const float *co = br_coef(c);
+    float nf = v->o[9], tg = c->ex[14], st = (float)m * BR_FADE, gs = c->ex[4], norm, gn;
+    float g[2 * BR_SAWS], dt[BR_SAWS], idt[BR_SAWS];
+    int j, na;
     if (nf < 0.0f)
         nf = tg;
     else if (nf < tg)
@@ -977,33 +1006,38 @@ SY_INLINE void br_loop(voice_t *v, float *xl, float *xr, int m, const int stereo
     na = (int)nf;
     if ((float)na < nf)
         na++;
+    if (na > BR_SAWS)
+        na = BR_SAWS;
     norm = fm_rsqrtf(1.0f + (nf - 1.0f) * gs * gs);
-    for (i = 0; i < m; i++) {
-        xl[i] = 0.0f;
-        if (stereo)
-            xr[i] = 0.0f;
-    }
-    for (j = 0; j < na; j++) {                   /* the centre saw alone, then the pairs */
-        float g[4], dt[2];
-        int k, two = j > 0 && j + 1 < na;
-        for (k = 0; k <= two; k++) {
-            int s_ = j + k;
-            float gg = (s_ ? gs : 1.0f) * norm * fm_minf(nf - (float)s_, 1.0f);
-            float a = s_ ? c->ex[3 + 2 * ((s_ + 1) >> 1)] : 1.0f, b = s_ ? c->ex[4 + 2 * ((s_ + 1) >> 1)] : 1.0f;
-            dt[k] = fm_clampf(c->ex[0] + co[s_] * c->ex[1], 1e-6f, 0.45f);
-            g[2 * k] = stereo ? gg * (s_ & 1 ? a : b) : gg;   /* the upper saw (odd) right, the lower left */
-            g[2 * k + 1] = gg * (s_ & 1 ? b : a);
-        }
-        if (two) {
-            br_saw2(&v->o[j], &v->o[j + 1], dt[0], dt[1], g, xl, xr, m, stereo);
-            j++;
-        } else {
-            br_saw(&v->o[j], dt[0], g[0], g[1], xl, xr, m, stereo);
+    gn = gs * norm;
+    for (j = 0; j < na; j++) {                   /* the saws' increments and gains for the sub-block */
+        float gg = (j ? gn : norm) * fm_minf(nf - (float)j, 1.0f);
+        dt[j] = br_dt(c, co, j);
+        idt[j] = c->ex[BR_IDT(j)];
+        if (!j) {
+            g[0] = g[1] = gg;
+        } else {                                 /* the upper saw (odd) right, the lower left */
+            const float *pn = &c->ex[3 + 2 * ((j + 1) >> 1)];
+            g[2 * j] = stereo ? gg * pn[~j & 1] : gg;
+            g[2 * j + 1] = gg * pn[j & 1];
         }
     }
-    br_hp(xl, &v->o[10], &v->o[11], c->ex[13], m);
+    if (na < 1) {                                /* (none: not before the voice's first chunk) */
+        for (j = 0; j < m; j++) {
+            xl[j] = 0.0f;
+            if (stereo)
+                xr[j] = 0.0f;
+        }
+    } else {                                     /* the centre saw (writing), then the pairs */
+        br_pass(&v->o[0], dt, idt, g, xl, xr, m, 1, 1, stereo);
+        for (j = 1; j + 1 < na; j += 2)
+            br_pass(&v->o[j], &dt[j], &idt[j], &g[2 * j], xl, xr, m, 2, 0, stereo);
+        if (j < na)                              /* an even count's last */
+            br_pass(&v->o[j], &dt[j], &idt[j], &g[2 * j], xl, xr, m, 1, 0, stereo);
+    }
+    br_hp(xl, &v->o[10], &v->o[11], c->ex[11], m);
     if (stereo)
-        br_hp(xr, &v->o[12], &v->o[13], c->ex[13], m);
+        br_hp(xr, &v->o[12], &v->o[13], c->ex[11], m);
 }
 static void br_run(voice_t *v, float *xl, float *xr, int m)
 {
@@ -1017,6 +1051,7 @@ static void br_init(voice_t *v)                  /* the saws from random phases,
     int j;
     for (j = 0; j < BR_MAX; j++)
         v->o[j] = (float)(xs(&v->rng) >> 8) * (1.0f / 16777216.0f);
+    v->o[8] = -1.0f;                             /* (no pans made yet) */
     v->o[9] = -1.0f;
 }
 
