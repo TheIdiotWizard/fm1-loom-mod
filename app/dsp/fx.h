@@ -64,7 +64,8 @@ int fx_has(const fxslot_t *f, int pick);                    /* the slot can do t
 enum { MS_EQ_LO, MS_EQ_MID, MS_EQ_HI, MS_EQ_BLEND, MS_TP_DRIVE, MS_TP_COLOR, MS_TP_WOBBLE, MS_TP_NOISE,
        MS_PERC, MS_MEL, MS_COMP, MS_LEVEL, NMS };
 extern const char *const MS_NAME[NMS];
-#define MS_TP_COLOR_DEF 24            /* a new project's tape: a little colour (the saturation alone, trimmed to unity) */
+#define MS_TP_COLOR_DEF 0             /* a new project's tape: out of the path (it was 24: a little colour; the demos
+                                       * measured it taking 2-9 dB off the top octave and squashing the transients) */
 typedef struct master master_t;
 #define MASTER_BYTES 1280
 #define MST_TAPE_DLY 512              /* the tape's wow / flutter line, floats a side (5 ms + 4.2 ms of swing at 44.1 kHz) */
@@ -74,3 +75,6 @@ void master_set(master_t *m, int p, int v);                 /* 0..127 (EQ blend 
 void master_process(master_t *m, float *perc_l, float *perc_r, float *mel_l, float *mel_r, float *out_l, float *out_r,
                     uint32_t n);
 float master_gr_db(const master_t *m);                      /* the compressor's gain reduction (UI) */
+#ifdef PLAT_HOST
+extern int fx_host_stage;                                   /* the host's master taps (host.c LOOM_MST) */
+#endif

@@ -89,10 +89,11 @@ def midi(n):
     return float(k + 12 * (int(n[i:]) + 1))
 
 
-def sing(syl, bpm, steps=16, voice="alto", fshift=1.0, vib=True, glide_ms=35.0, breath=0.04, hard=False):
+def sing(syl, bpm, steps=16, voice="alto", fshift=1.0, vib=True, glide_ms=35.0, breath=0.04, hard=False, air=0.0):
     """a phrase on the sixteenth grid: syl = [(start16, len16, consonant, vowel, note), ...], `steps` sixteenths
     long at bpm. consonant: '' b d g k t p s sh h m n l w y; vowel a e i o u m (a hum) or a glide (ei ai ou ae ia).
-    hard: no glide, no vibrato (the tuned-hard sound)."""
+    hard: no glide, no vibrato (the tuned-hard sound). air: the breath above the formants (5-10 kHz) as a
+    microphone close to a singer hears it, its level against the voice (0 = none: the formants stop at 5 kHz)."""
     six = 60.0 / bpm / 4.0
     n = int(round(steps * six * SR))
     tab = VOW[voice]
@@ -199,6 +200,9 @@ def sing(syl, bpm, steps=16, voice="alto", fshift=1.0, vib=True, glide_ms=35.0, 
         out += y
     hp = ss.butter(4, 5000, "high", fs=SR, output="sos")
     out += ss.sosfilt(hp, noi_hp) * 0.6
+    if air > 0:                                         # the air: breath in a band above the formants, with the voice
+        band = ss.sosfilt(ss.butter(2, [5000, 10000], "band", fs=SR, output="sos"), RNG.standard_normal(n) * amp)
+        out += band * air * np.sqrt((out ** 2).mean()) / (np.sqrt((band ** 2).mean()) + 1e-12)
     out = ss.sosfilt(ss.butter(2, 90, "high", fs=SR, output="sos"), out)
     return np.tanh(out / (np.abs(out).max() + 1e-9) * 1.4)
 
@@ -249,7 +253,7 @@ def bank_garage(B, out):
     break (119 BPM) for a top loop"""
     v = sing([(0, 2, "", "ou", "Eb5"), (2, 1, "b", "ei", "C5"), (3, 2, "b", "i", "Bb4"), (6, 2, "", "ai", "G4"),
               (8, 1, "n", "i", "Bb4"), (9, 1, "d", "u", "C5"), (10, 3, "", "ou", "Eb5"), (13, 1, "y", "e", "F5"),
-              (14, 2, "", "a", "Eb5")], 132, voice="alto", fshift=1.05)
+              (14, 2, "", "a", "Eb5")], 132, voice="alto", fshift=1.05, air=0.12)
     write(out / "vox.wav", v)
     write(out / "sesame.wav", bar_of(B / "sesame.wav", 1))
     return ["babyvox=" + str(out / "vox.wav") + "@1", "sesame=" + str(out / "sesame.wav") + "@1"]
@@ -260,7 +264,7 @@ def bank_hyperpop(B, out):
     v = sing([(0, 1, "", "a", "A5"), (1, 1, "", "a", "C6"), (2, 2, "", "ai", "E6"), (4, 1, "w", "a", "D6"),
               (5, 1, "n", "a", "C6"), (6, 2, "", "ei", "A5"), (8, 1, "", "ou", "E6"), (9, 1, "", "ou", "D6"),
               (10, 1, "m", "i", "C6"), (11, 1, "", "i", "A5"), (12, 2, "y", "e", "G5"), (14, 2, "", "a", "A5")],
-             160, voice="soprano", fshift=1.22, hard=True, breath=0.02)
+             160, voice="soprano", fshift=1.22, hard=True, breath=0.02, air=0.14)
     write(out / "vox.wav", v)
     write(out / "808.wav", tr808(65.41, 1.0, 3.0))
     return ["hypervox=" + str(out / "vox.wav") + "@1", "808=" + str(out / "808.wav") + ":36"]
@@ -269,7 +273,7 @@ def bank_hyperpop(B, out):
 def bank_house(B, out):
     """the sesame break (119 BPM) to filter into a top loop, and a "hey" on A3"""
     write(out / "sesame.wav", bar_of(B / "sesame.wav", 1))
-    write(out / "hey.wav", sing([(0, 3, "h", "ei", "A3")], 122, steps=4, voice="alto", glide_ms=20))
+    write(out / "hey.wav", sing([(0, 3, "h", "ei", "A3")], 122, steps=4, voice="alto", glide_ms=20, air=0.06))
     return ["sesame=" + str(out / "sesame.wav") + "@1", "hey=" + str(out / "hey.wav") + ":57"]
 
 
@@ -277,9 +281,9 @@ def bank_pop(B, out):
     """the hook sung at 110 (sliced), and an "oh" on C5 for a pitched vocal-chop instrument"""
     v = sing([(0, 2, "", "ou", "E5"), (2, 1, "", "ou", "D5"), (3, 3, "", "ou", "C5"), (6, 1, "n", "a", "A4"),
               (7, 1, "n", "a", "C5"), (8, 2, "l", "ai", "D5"), (10, 2, "t", "u", "E5"), (12, 1, "n", "ai", "G5"),
-              (13, 3, "t", "ou", "E5")], 110, voice="soprano", fshift=1.0)
+              (13, 3, "t", "ou", "E5")], 110, voice="soprano", fshift=1.0, air=0.16)
     write(out / "hook.wav", v)
-    write(out / "oh.wav", sing([(0, 3, "", "ou", "C5")], 110, steps=3.4, voice="soprano", vib=False))
+    write(out / "oh.wav", sing([(0, 3, "", "ou", "C5")], 110, steps=3.4, voice="soprano", vib=False, air=0.12))
     return ["hook=" + str(out / "hook.wav") + "@1", "oh=" + str(out / "oh.wav") + ":72"]
 
 

@@ -188,6 +188,7 @@ struct synth {
 };
 _Static_assert(sizeof(struct synth) <= SYNTH_BYTES, "synth_t outgrew SYNTH_BYTES");
 #ifdef PLAT_HOST
+uint16_t synth_host_solo = 0xFFFFu;           /* the host's stems: bits 0-7 the tracks, 8 / 9 the FX returns */
 int synth_sizeof(void) { return (int)sizeof(struct synth); }
 #endif
 
@@ -2180,6 +2181,10 @@ static void voice_chunk(synth_t *s, voice_t *v)
     if (c->ftype >= NFT)
         c->ftype = FT_LP24;
     c->mute = t->perf.mute;
+#ifdef PLAT_HOST
+    if (!(synth_host_solo >> trk & 1u))          /* the host's stems (LOOM_SOLO): a track left out is muted */
+        c->mute = 1;
+#endif
     /* gains */
     vol = pf(s, trk, TP_VOLUME, dest, off) * (1.0f / 127.0f);
     lev = (float)P(s, trk, TP_LEVEL) * (1.0f / 127.0f);

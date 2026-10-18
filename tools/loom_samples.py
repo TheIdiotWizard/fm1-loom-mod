@@ -10,8 +10,9 @@
   loom_samples.py build OUT.bin [NAME=]file.wav[:ROOT][@BARS] ...   no device: the bank's image into OUT.bin
                                                 (the host simulator loads it: "samples OUT.bin")
 
-Each file becomes one sample: mixed to mono, resampled to 22050 Hz, its peak normalised, IMA ADPCM with a
-checkpoint every 64 samples (tools/sampleio.py, as the factory bank). NAME is what the screen shows (lower
+Each file becomes one sample: mixed to mono, resampled to 22050 Hz (a windowed-sinc anti-alias filter first),
+pre-emphasised for the playback's linear interpolation (flat to 9 kHz as it plays), its peak normalised, IMA
+ADPCM with a checkpoint every 64 samples (tools/sampleio.py, as the factory bank). NAME is what the screen shows (lower
 case, 11 characters; default: the file's name); ROOT the MIDI note it plays at its own pitch on a synth
 track (default: a note in the file's name, "piano_C4.wav", else 60 = C4). A loop in the WAV's 'smpl' chunk
 is kept (the sample engine's loop mode plays it). @BARS says the file is a loop of that many bars (1..16):
@@ -70,7 +71,7 @@ def parse(spec):
         raise ValueError(f"{path}: no audio")
     if loop:
         loop = (int(loop[0] * sio.RATE / sr), int((loop[1] + 1) * sio.RATE / sr))
-    x = sio.resample(x, sr, sio.RATE)
+    x = sio.emphasis(sio.resample(x, sr, sio.RATE))
     if root is None:
         root = LOOP_ROOT if bars else sio.note_from_name(path.stem)
     if bars:

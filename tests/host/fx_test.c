@@ -686,11 +686,10 @@ int main(void)
         MS_INIT();                                            /* the tape out (all four at 0) */
         master_run(g_sine01, SR);
         a0 = rms_of(m_out_l, SR / 2, SR);
-        master_set(ms, MS_TP_COLOR, MS_TP_COLOR_DEF);        /* a new project's */
+        master_set(ms, MS_TP_COLOR, 24);                      /* a little colour (a new project's until the demos' mix) */
         master_run(g_sine01, SR);
         a1 = rms_of(m_out_l, SR / 2, SR);
-        snprintf(name, sizeof name, "  a new project's tape (colour %d) on a -23 dB sine: %+.2f dB", MS_TP_COLOR_DEF,
-                 (double)db(a1 / a0));
+        snprintf(name, sizeof name, "  the tape at colour 24 on a -23 dB sine: %+.2f dB", (double)db(a1 / a0));
         check(name, a1 > a0 * 0.79f && a1 < a0 * 1.26f);
         MS_INIT();
         master_run(g_sine1k, SR);
@@ -859,15 +858,14 @@ int main(void)
             master_process(ms, p1, p2, m1, m2, a, c, 256);
         di = instr_now() - i0;
         printf("  master off  %5.0f  (levels and the limiter)\n", (double)di / (20.0 * 256.0));
-        master_set(ms, MS_TP_COLOR, MS_TP_COLOR_DEF);
+        master_set(ms, MS_TP_COLOR, 24);
         for (b = 0; b < 10; b++)
             master_process(ms, p1, p2, m1, m2, a, c, 256);
         i0 = instr_now();
         for (b = 0; b < 20; b++)
             master_process(ms, p1, p2, m1, m2, a, c, 256);
         di = instr_now() - i0;
-        printf("  master new  %5.0f  (the tape at a new project's: colour %d)\n", (double)di / (20.0 * 256.0),
-               MS_TP_COLOR_DEF);
+        printf("  master col  %5.0f  (the tape at colour 24)\n", (double)di / (20.0 * 256.0));
         master_set(ms, MS_TP_DRIVE, 64); master_set(ms, MS_TP_COLOR, 64);
         master_set(ms, MS_TP_WOBBLE, 64); master_set(ms, MS_TP_NOISE, 64);
         for (b = 0; b < 10; b++)

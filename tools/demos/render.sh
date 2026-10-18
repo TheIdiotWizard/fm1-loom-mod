@@ -8,6 +8,10 @@
 #
 #   tools/demos/render.sh [OUT] [SONG ...]     (OUT default build/demos/out; songs default all six)
 #
+# STEMS=1: also, per song, into build/demos/run_<song>/stems/: each track alone with its FX returns (T1.wav ..), the
+# tracks without the FX (dry.wav), and the mix taken before the master's stages (raw: the groups summed; eq; tape;
+# comp: no limiter) (app/host.c LOOM_SOLO, LOOM_MST), as the host writes them: 6 dB under the codec's full scale and
+# unlimited, so they add up to raw.wav.
 # BREAKS: the breakbeat samples' folder (default ../../schwung-breakbeat/samples from fm1-xy, as fm1-parent has
 # it). PYTHON: a Python with numpy and scipy (default /opt/homebrew/bin/python3.14, else python3). Builds the host
 # simulator first (./build.sh --host). Prints each song's stats (voices, the modelled load) and the levels check.
@@ -21,6 +25,7 @@ if [ -z "${PYTHON:-}" ]; then
     if [ -x /opt/homebrew/bin/python3.14 ]; then PYTHON=/opt/homebrew/bin/python3.14; else PYTHON=python3; fi
 fi
 export PYTHON
+export LOOM_LOAD="${LOOM_LOAD:-0}"   # the overload guard fed 0 %, not this computer's timing: the same render every time
 BREAKS="${BREAKS:-}"
 if [ -z "$BREAKS" ]; then
     for d in ../../schwung-breakbeat/samples ../schwung-breakbeat/samples "$HOME/github/fm1-parent/schwung-breakbeat/samples"; do
@@ -53,6 +58,20 @@ for s in $SONGS; do
     fi
     grep -E '^(stats|demo|LAYOUT)' "$d/log.txt" || true
     "$PYTHON" tools/demos/analyze.py --master "$d/loom_demo_$s.wav" "$d/mix_$s.wav"
+    if [ "${STEMS:-0}" = 1 ]; then
+        mkdir -p "$d/stems"
+        stem() {   # NAME VAR=VALUE ...
+            n=$1; shift
+            mkdir -p "$d/stems/.$n"
+            env "$@" app/build/host/loom_host "tools/demos/$s.xy" "$d/stems/.$n" > /dev/null 2>&1
+            mv "$d/stems/.$n/loom_demo_$s.wav" "$d/stems/$n.wav" && rm -rf "$d/stems/.$n"
+        }
+        for t in 1 2 3 4 5 6 7 8; do stem "T$t" LOOM_MST=raw LOOM_SOLO="$t,fx1,fx2" & done
+        stem dry LOOM_MST=raw LOOM_SOLO=1,2,3,4,5,6,7,8 &
+        for m in raw eq tape comp; do stem "$m" LOOM_MST=$m & done
+        wait
+        echo "   stems: $d/stems/"
+    fi
     "$PYTHON" tools/demos/analyze.py "$d/mix_$s.wav"
     if command -v afconvert >/dev/null 2>&1; then
         afconvert -f m4af -d aac -b 128000 "$d/mix_$s.wav" "$OUT/loom_demo_$s.m4a"

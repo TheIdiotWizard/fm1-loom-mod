@@ -1,7 +1,8 @@
 # LOOM-8 demo: modern pop, 110 BPM, C major (C G Am F). (tools/demos/render.sh renders it; its bank is
 # build/demos/pop.bin: the hook sung in a bar and an "oh" to play as an instrument, both made by
 # tools/demos/make_banks.py.)
-#   T1 kit: kick, the clap as a snap, eighth hats with rolls      T2 stack "ply bass": the bass, octave bounce in
+#   T1 kit: kick, the clap as a snap (a snare under it in the chorus), eighth hats with rolls
+#   T2 stack "ply bass": the bass, octave bounce in
 #   the chorus     T3 tines "felt piano": the chords (whole notes, then eighths)     T4 slice: the hook in 16
 #   T5 sample: "oh" (user 2, its root C5) played as a vocal-chop lead, the post-chorus drop
 #   T6 wavetable "lace keys" through the arp (1/8, bounce, two octaves, latched), the chord held by hand each bar
@@ -11,38 +12,64 @@ master 4096
 samples build/demos/pop.bin
 bpm 110
 
-# ---- the sounds
-knob 1 d1.k2 60
-knob 1 d1.k3 90
-knob 1 d5.volume 80
-knob 1 d5.k2 50
-knob 1 d3.volume 62
-knob 1 d4.volume 58
-knob 1 res 50
-knob 1 fenv 20
+# ---- the sounds (modern pop: clean and bright. A tight, tuned kick with a click, a snap of a clap with a snare
+# under it in the chorus, crisp hats; the bass round and in mono, the piano and the pad warm, the hook up front
+# with air on it; a short bright plate and a quarter-note echo, both kept low; the master loud and open)
+# T1 the kit: the kick tuned to the key (C: 65 Hz), short and punchy; the clap high and tight; hats shimmering
+knob 1 d1.k1 90
+knob 1 d1.k2 46
+knob 1 d1.k3 84
+knob 1 d1.k4 92
+knob 1 d2.k1 100
+knob 1 d2.k2 30
+knob 1 d2.k3 96
+knob 1 d2.volume 62
+knob 1 d5.k1 116
+knob 1 d5.k2 44
+knob 1 d5.k4 30
+knob 1 d5.volume 82
+knob 1 d3.k1 104
+knob 1 d3.k2 20
+knob 1 d3.k4 40
+knob 1 d3.volume 70
+knob 1 d4.k1 104
+knob 1 d4.k4 40
+knob 1 d4.k2 64
+knob 1 d4.volume 64
+knob 1 ftype dynamic
+knob 1 cut 8
+knob 1 res 66
+knob 1 fenv 24
 knob 1 level 90
-knob 1 send2 16
-
+knob 1 send2 10
+# T2 stack "ply bass": round, a little brighter than its preset, mono in the middle
 preset 2 ply_bass stack
 knob 2 brain no
-knob 2 level 96
-
+knob 2 cut 76
+knob 2 level 110
+# T3 tines "felt piano": the chords, opened up
 preset 3 felt_piano tines
 knob 3 brain no
-knob 3 level 62
-knob 3 send2 40
-
+knob 3 cut 104
+knob 3 level 64
+knob 3 send1 10
+knob 3 send2 24
+# T4 the hook in 16 slices: up front, into a short plate
 knob 4 engine slice
 preset 4 chop slice
 knob 4 e1 u1
 knob 4 e4 127
 knob 4 vmode poly
 knob 4 cut 127
+knob 4 ctype tilt
+knob 4 camt 76
+knob 4 ctone 100
+knob 4 cmix 127
 knob 4 brain no
-knob 4 level 100
-knob 4 send1 30
-knob 4 send2 50
-
+knob 4 level 106
+knob 4 send1 20
+knob 4 send2 26
+# T5 the "oh" (user 2, its root C5) as a vocal-chop lead: short, pitched, a little drive for presence
 knob 5 engine sample
 knob 5 e1 u2
 knob 5 e2 3
@@ -52,16 +79,16 @@ knob 5 a 0
 knob 5 d 84
 knob 5 s 50
 knob 5 r 50
-knob 5 cut 116
+knob 5 cut 122
 knob 5 ctype drive
-knob 5 camt 40
-knob 5 ctone 110
+knob 5 camt 34
+knob 5 ctone 120
 knob 5 cmix 127
 knob 5 brain no
-knob 5 level 127
-knob 5 send1 40
-knob 5 send2 40
-
+knob 5 level 124
+knob 5 send1 30
+knob 5 send2 24
+# T6 wavetable "lace keys" through the arp: the plucks
 preset 6 lace_keys wavetable
 knob 6 brain no
 knob 6 player arp
@@ -70,36 +97,44 @@ knob 6 p2 bounce
 knob 6 p3 2
 knob 6 p4 1
 knob 6 ap4 narrow
-knob 6 level 62
-knob 6 send1 50
-
+knob 6 cut 110
+knob 6 level 64
+knob 6 send1 34
+knob 6 send2 16
+# T7 brocade "damask": the chorus's supersaw bed, opened up, pumped
 preset 7 damask brocade
 knob 7 e1 5
 knob 7 r 62
+knob 7 cut 104
 knob 7 brain no
 knob 7 ltype pump
 knob 7 lspeed track_1
-knob 7 lamt 70
+knob 7 lamt 80
 knob 7 level 60
-knob 7 send2 50
-
+knob 7 send2 30
+# T8 voile "doo wop": the drop's riff with the chop lead
 preset 8 doo_wop voile
 knob 8 brain no
 knob 8 ftype hp12
 knob 8 cut 36
-knob 8 level 104
-knob 8 send1 40
-knob 8 send2 40
-
+knob 8 level 100
+knob 8 send1 30
+knob 8 send2 26
+# FX I a quarter-note echo, bright, few repeats; FX II a short bright plate
 knob 11 engine delay
-knob 11 e1 80
-knob 11 e3 60
+knob 11 e1 88
+knob 11 e3 44
+knob 11 e4 100
 knob 12 engine plate
-mst color 30
-mst comp 40
-mst level 78
+knob 12 e1 76
+knob 12 e3 70
+knob 12 e4 44
+# the master: no tape; air on top, the low end firm, the compressor gluing, loud
 mst blend 127
-mst hi 88
+mst hi 78
+mst lo 70
+mst comp 64
+mst level 110
 
 # ---- T1 the kit: kick 1, hat 3, open 4, clap 5, tom 6/7
 # P1 verse: light
@@ -113,6 +148,7 @@ hits 1 2 1 x......x..x..x..
 hits 1 2 5 ....X.......X...
 hits 1 2 3 x.xxx.x.x.xxx.x.
 hits 1 2 4 ......o.......o.
+hits 1 2 2 ....x.......x...
 trick 1 2 16 multiply 3
 hits 1 2 3 ...............x
 # P3 pre-chorus build, 2 bars: the clap in eighths then sixteenths, toms at the end

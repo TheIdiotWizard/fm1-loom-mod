@@ -98,7 +98,7 @@ volatile uint8_t drumline_hitv[DL_NSOUND];
 /* a model's length range, seconds to -60 dB at the length knob's ends, and its trim (the balanced gain) */
 typedef struct { float dec_lo, dec_hi, trim; } dm_spec_t;
 static const dm_spec_t SPEC[NDM] = {
-    [DM_KICK] = {0.05f, 1.5f, 0.7f},    [DM_SNARE] = {0.06f, 1.0f, 0.336f}, [DM_HIHAT] = {0.02f, 2.5f, 1.8f},
+    [DM_KICK] = {0.05f, 1.5f, 0.7f},    [DM_SNARE] = {0.06f, 1.0f, 0.37f}, [DM_HIHAT] = {0.02f, 2.5f, 1.8f},
     [DM_CLAP] = {0.05f, 1.2f, 0.6f},     [DM_SHAKER] = {0.02f, 0.6f, 0.67f},  [DM_TAMB] = {0.03f, 1.5f, 1.5f},
     [DM_RESO] = {0.05f, 2.5f, 0.585f},  [DM_CONGA] = {0.05f, 0.9f, 0.55f},  [DM_TOM] = {0.08f, 1.5f, 0.47f},
     [DM_FM] = {0.03f, 1.5f, 0.535f},     [DM_SAMPLE] = {0.05f, 1.5f, 0.5f},
@@ -406,16 +406,20 @@ static void start(drumline_t *d, dvoice_t *v, int sound, int vel, int pitch_semi
 
     switch (model) {
     case DM_KICK:                                     /* a sine falling from punch x its pitch over ~30 ms;
-                                                       * punch = the drop, the click and the drive; tone = a
-                                                       * low-pass on the whole */
+                                                       * punch = the drop, the click and the drive; tone = the
+                                                       * body's low-pass and the click's band (the beater: noise
+                                                       * band-passed after the low-pass, so a dark kick still
+                                                       * has its attack) */
         hz = 16.0f * fm_exp2f(k1 * 2.5f + semi * (1.0f / 12.0f));
         v->pda = 1.0f + 5.0f * k3;
         v->pd = 1.0f;
         v->pdk = dec_k(0.025f + 0.03f * k3);
-        v->k2 = dec_k(0.0025f);                       /* the click: a 2.5 ms noise burst */
+        v->k2 = dec_k(0.004f);                        /* the click: a 4 ms noise burst */
         v->a = 1.0f + 2.0f * k3;                      /* drive */
-        v->b = 0.6f * k3;                             /* click level */
+        v->b = 1.0f * k3;                             /* click level */
         v->c1 = lp_c(200.0f * fm_exp2f(6.0f * k4));
+        v->c2 = lp_c(800.0f + 1200.0f * k4);          /* the click: noise in a band (the beater: a high-pass, two */
+        v->c3 = lp_c(2500.0f + 5000.0f * k4);         /* low-passes, all with tone), after the body's low-pass */
         break;
     case DM_SNARE:                                    /* two sines (1 : 1.58) over band-passed noise: wires =
                                                        * the wires' share, punch = the drop and the drive */
@@ -427,7 +431,7 @@ static void start(drumline_t *d, dvoice_t *v, int sound, int vel, int pitch_semi
         v->k2 = dec_k(dec * 0.5f);                    /* the body falls faster than the wires */
         v->a = (1.0f - 0.6f * k3) * (1.0f + 1.5f * k4);   /* body drive */
         v->b = 0.15f + 1.1f * k3;                     /* the wires */
-        reso_set(v, 2000.0f, 2500.0f);
+        reso_set(v, 3400.0f, 5000.0f);                /* the wires: bright, wide (they sat at 2 kHz, 2.5 wide: dull) */
         break;
     case DM_HIHAT: {                                  /* metal: noise (left) to the six squares and their
                                                        * ring-mod (right); focus: the high-passed shimmer (left)
@@ -589,19 +593,27 @@ static void render_voice(dvoice_t *v, int16_t *line, smp_cache_t *sc, float *t, 
     switch (v->model) {
     case DM_KICK: {
         float pd = v->pd, pdk = v->pdk, pda = v->pda, drive = v->a, click = v->b, c = v->c1, f1 = v->f1;
+        float ch = v->c2, cl = v->c3, f2 = v->f2, f3 = v->f3, f4 = v->f4;
         for (i = 0; i < m; i++) {
-            float y;
+            float y, n;
             pd *= pdk;
             ph += inc * (1.0f + pda * pd);
             WRAP(ph);
-            y = clip3(sin_t(ph) * env * drive) + noise(&rng) * env2 * click;
-            f1 += c * (y - f1);
-            t[i] = f1 * g;
+            y = clip3(sin_t(ph) * env * drive);
+            f1 += c * (y - f1);                       /* tone: the body's low-pass */
+            n = noise(&rng) * env2 * click;
+            f3 += cl * (n - f3);                      /* the click, in its band */
+            f4 += cl * (f3 - f4);
+            f2 += ch * (f4 - f2);
+            t[i] = (f1 + f4 - f2) * g;
             env *= k;
             env2 *= k2;
         }
         v->pd = pd;
         v->f1 = f1;
+        v->f2 = fm_flush(f2);
+        v->f3 = fm_flush(f3);
+        v->f4 = fm_flush(f4);
         break;
     }
     case DM_SNARE: {
