@@ -20,6 +20,7 @@ The banks hold classic breaks (make_banks.py): private, never committed or publi
 Needs the host simulator built (./build.sh --host) and numpy + scipy (make_banks.py).
 """
 import json
+import os
 import re
 import subprocess
 import sys
@@ -31,6 +32,8 @@ sys.path.insert(0, str(HERE))
 import make_banks as MB  # noqa: E402
 
 GROUPS = {"A": ["jungle", "garage", "hyperpop"], "B": ["house", "pop", "hiphop"]}
+if os.environ.get("DEMO_GROUPS"):                    # e.g. DEMO_GROUPS="C:jungle,garage,house" (any three songs a group)
+    GROUPS = {g: songs.split(",") for g, songs in (x.split(":") for x in os.environ["DEMO_GROUPS"].split())}
 ORDER = ["jungle", "garage", "hyperpop", "house", "pop", "hiphop"]   # render.sh's: make_banks' noise in the same order
 NAMES = {"jungle": "jungle", "garage": "garage", "hyperpop": "hyperpop", "house": "deep_house", "pop": "pop",
          "hiphop": "boom_bap"}
