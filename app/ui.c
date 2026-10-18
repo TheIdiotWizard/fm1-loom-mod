@@ -5,7 +5,7 @@
  *
  *   HOME   Arrange (again: Song); held: HOME + key = punch-in fx, + step + white key = a component (black
  *          key = its value), + REC undo, + PLAY redo, + SELECT tempo, + K1 fine tempo, + PRESETS scene,
- *          + white key on Arrange = cue the scene at the bar, + black key on Mix = mute
+ *          + white key on Arrange = the scene at the end of track 1's pattern, + black key on Mix = mute
  *   SEQ    Steps (page 2 Bar)      EDIT Engine (Play; a drum key's pages)   ENV Envelope (filter envelope)
  *   FX     Filter (Sends)          LFO  LFO (LFO 2)        ARP  Players (its page 2, hold)
  *   GLO    Mix, Master, Setup, Status
@@ -806,7 +806,9 @@ static void punch_key(int k, int on)
     }
     engine_punch(fx, on, target);
 }
-static void scene_go(int n, int cued)
+/* a scene: stopped, at once; playing, cued (SCENE_BAR / SCENE_END; the scene playing while another waits:
+ * the cue is off) */
+static void scene_go(int n, int when)
 {
     int cur = cur_scene();
     char t[16];
@@ -817,8 +819,22 @@ static void scene_go(int n, int cued)
         num_s((uint32_t)n + 1u, s_cat(t, "S"));
         say("NEW", t);
     }
-    engine_scene(n, cued && playing());
+    engine_scene(n, playing() ? when : SCENE_NOW);
     proj.scene = (uint8_t)n;
+}
+static int scene_aim(void) { return seq.cue < NSCENE ? seq.cue : cur_scene(); }   /* the knob steps from the cue */
+static void scene_key(int k, int w, int when)    /* a white key on Arrange; again while its scene waits: now */
+{
+    char t[8];
+    ui.kmode[k] = KM_SCENE;
+    ui.knote[k] = (uint8_t)w;
+    if (playing() && seq.cue == w && w != cur_scene())
+        when = SCENE_NOW;
+    else if (playing() && w != cur_scene()) {
+        num_s((uint32_t)w + 1u, s_cat(t, "S"));
+        sp_msg(t, when == SCENE_END ? "at the end" : "next bar", 0);
+    }
+    scene_go(w, when);
 }
 static void track_select(int t)
 {
@@ -941,9 +957,7 @@ static void key_down(int k)
             return;
         }
         if (p == P_ARRANGE && w >= 0) {
-            ui.kmode[k] = KM_SCENE;
-            ui.knote[k] = (uint8_t)w;
-            scene_go(w, 1);
+            scene_key(k, w, SCENE_END);
             return;
         }
         if (p == P_MIX && b >= 0 && b < NSEQT) {
@@ -981,9 +995,7 @@ static void key_down(int k)
                 }
                 return;
             }
-            ui.kmode[k] = KM_SCENE;
-            ui.knote[k] = (uint8_t)w;
-            scene_go(w, 0);
+            scene_key(k, w, SCENE_BAR);
         } else if (b >= 0 && b < NSEQT) {
             ui.kmode[k] = KM_MUTE;
             set_mute(b, !(seq.mute >> b & 1u));
@@ -1488,7 +1500,7 @@ static void presets(int32_t e)
     }
     switch (ui.page) {
     case P_ARRANGE:
-        scene_go(((cur_scene() + d) % NSCENE + NSCENE) % NSCENE, 0);
+        scene_go(((scene_aim() + d) % NSCENE + NSCENE) % NSCENE, SCENE_BAR);
         break;
     case P_SONG:
         song_knob(0, d);
@@ -2210,7 +2222,7 @@ static void input(void)
     }
     if ((e = ev[EN_PRESET]) != 0) {
         if (home_held())
-            scene_go(((cur_scene() + (e > 0 ? 1 : -1)) % NSCENE + NSCENE) % NSCENE, 0);
+            scene_go(((scene_aim() + (e > 0 ? 1 : -1)) % NSCENE + NSCENE) % NSCENE, SCENE_BAR);
         else
             presets(e);
     }
@@ -2262,6 +2274,8 @@ static void leds(void)
                 if (pats.scene[i].used)
                     dim |= 1u << WHITE_K[i];
             k |= 1u << WHITE_K[cur_scene()];
+            if (playing() && seq.cue < NSCENE && seq.cue != cur_scene() && (seq.step_tick & 3u) < 2u)
+                k |= 1u << WHITE_K[seq.cue];             /* the scene cued blinks on the beat */
             for (i = 0; i < NSEQT; i++)
                 if (seq.mute >> i & 1u)
                     dim |= 1u << BLACK_K[i];

@@ -854,7 +854,7 @@ static void t_scene(void)
     P.scene[1].pat[0] = 1;
     start();
     run(L16);
-    seq_cue_scene(&S, 1);
+    seq_cue_scene(&S, 1, 0);
     run(20 * L16);
     CHECK(count(E_SCENE, -1) == 1 && nth(E_SCENE, -1, 0)->a == 1 && near(nth(E_SCENE, -1, 0)->t, 16 * L16 + 8, 1));
     CHECK(on_n(1)->a == 72 && near(on_n(1)->t, 16 * L16 + 8, 1) && S.scene == 1 && S.ppat[0] == 1);
@@ -2013,11 +2013,53 @@ static void t_cue_bar(void)
     printf("ok %s\n", cur);
 }
 
+/* a scene cued while playing starts at the next bar line, or (cued to the end) when track 1's pattern ends; the
+ * scene playing cued takes the cue off; seq_cue_left counts the sixteenths before it */
+static void t_cue_scene(void)
+{
+    cur = "cue-scene";
+    reset();
+    P.pat[0][0].len = 32;                        /* track 1: two bars, in both scenes */
+    P.pat[0][1].len = 32;
+    note(0, 0, 60, 100);
+    P.pat[0][1].st[0].note[0] = 72, P.pat[0][1].st[0].vel = 100;
+    P.scene[1].used = 1;
+    P.scene[1].pat[0] = 1;
+    P.scene[2].used = 1;
+    P.scene[2].pat[0] = 1;
+    start();
+    run_to(T16(5) + 100);
+    CHECK(seq_cue_left(&S) == -1);
+    seq_cue_scene(&S, 1, 0);                     /* at the bar */
+    CHECK(seq_cue_left(&S) == 10);               /* sixteenths 6..15 before the bar line's */
+    run_to(T16(15) + 100);
+    CHECK(S.scene == 0 && S.cue == 1 && seq_cue_left(&S) == 0);
+    run_to(T16(16) + 100);
+    CHECK(S.scene == 1 && S.cue == 0xFF && S.ppat[0] == 1 && seq_cue_left(&S) == -1);
+    CHECK(near(on_n(1)->t, T16(16), 3) && on_n(1)->a == 72);    /* track 1 from step 1, on the bar line */
+    /* to the end: track 1's pattern, 32 steps from the bar line */
+    seq_cue_scene(&S, 0, 1);
+    run_to(T16(20) + 100);
+    CHECK(S.cue == 0 && seq_cue_left(&S) == 27);
+    run_to(T16(32) + 100);
+    CHECK(S.scene == 1 && S.cue == 0);           /* the bar line passes: still waiting */
+    run_to(T16(48) + 100);
+    CHECK(S.scene == 0 && S.cue == 0xFF);        /* track 1's end */
+    /* the scene playing: the cue is off */
+    seq_cue_scene(&S, 2, 0);
+    seq_cue_scene(&S, 0, 0);
+    CHECK(S.cue == 0xFF);
+    run_to(T16(64) + 100);
+    CHECK(S.scene == 0);
+    printf("ok %s\n", cur);
+}
+
 int main(void)
 {
     t_pattern_helpers();
     t_phase();
     t_cue_bar();
+    t_cue_scene();
     t_weave();
     t_timing();
     t_scale();

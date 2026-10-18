@@ -1,4 +1,5 @@
-# scenes on the Arrange page: a second scene cloned, a mute, a cue with HOME while playing, the song
+# scenes on the Arrange page: a second scene cloned, a mute; while playing a white key waits for the bar (again: now),
+# HOME + white key for track 1's end; the song
 wait 200
 tap HOME
 expect page Arrange
@@ -12,10 +13,23 @@ wait 40
 shot scene2_mute.png
 tap PLAY
 wait 300
+tapkey w0
+wait 40
+expect scene 2
+shot scene_cue_bar.png
+wait 2500
+expect scene 1
+tapkey w1
+wait 40
+expect scene 1
+tapkey w1
+wait 40
+expect scene 2
 press HOME
 tapkey w0
 release HOME
 wait 40
+expect scene 2
 shot scene_cue.png
 wait 2500
 expect scene 1

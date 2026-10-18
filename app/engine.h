@@ -52,7 +52,9 @@ void engine_transport(int what);                         /* 0 stop, 1 start, 2 c
 void engine_metronome(int mode);
 void engine_tempo(int bpm_x10);                          /* the tempo in tenths of a BPM (400..3000) */
 void engine_groove(int type);                            /* the project's groove type (pattern.h GR_*) */
-void engine_scene(int scene, int cued);                  /* a scene: now (seq_set_scene) or at the bar (seq_cue_scene) */
+enum { SCENE_NOW, SCENE_BAR, SCENE_END };
+void engine_scene(int scene, int when);                  /* a scene: now (seq_set_scene), at the next bar line or at
+                                                          * the end of track 1's pattern (seq_cue_scene) */
 
 /* drum tracks (engine drumline): the Filter page's five values reach drumline_filter(). With TP_FTYPE
  * FT_DYNAMIC the knobs mean low cut = TP_CUT, compression = TP_RES, drive = TP_FENV, hi cut = TP_KTRK; any

@@ -2160,8 +2160,10 @@ static void six_tick(seq_t *s, const seq_sink_t *o)
         if (song_plays(s) ? line && !s->bar_fresh : top)      /* the bar: cues, the song (its slots count bars
                                                                * of 16 sixteenths, whatever track 1's length) */
             ch = bar_end(s, 0, o);
-        else if (line)                /* a bar line inside a longer pattern: the patterns cued per track switch
-                                       * here, not later */
+        else if (line && s->cue < NSCENE && !s->cue_end)   /* a bar line inside a longer pattern: a scene cued
+                                                            * to the bar starts here */
+            ch = bar_end(s, 0, o);
+        else if (line)                /* the patterns cued per track switch here, not later */
             for (int t = 0; t < NSEQT; t++)
                 if (s->pcue[t] < NPATT) {
                     if (s->pcue[t] != s->ppat[t]) {
@@ -2471,14 +2473,24 @@ void seq_stop(seq_t *s) { s->req_stop = 1; }
 void seq_continue(seq_t *s) { s->req_cont = 1; }
 void seq_ext_clock(seq_t *s) { s->ext_pending++; }
 
-void seq_cue_scene(seq_t *s, int scene)
+void seq_cue_scene(seq_t *s, int scene, int at_end)
 {
     if (scene < 0 || scene >= NSCENE)
         return;
-    if (s->playing)
-        s->cue = (uint8_t)scene;
-    else
+    if (s->playing) {
+        s->cue_end = (uint8_t)(at_end != 0);
+        s->cue = scene == s->scene ? 0xFF : (uint8_t)scene;   /* the scene playing: no cue */
+    } else
         s->req_scene = (uint8_t)scene;
+}
+
+int seq_cue_left(const seq_t *s)
+{
+    if (!s->playing || s->cue >= NSCENE || s->cue == s->scene || song_plays(s))
+        return -1;
+    if (!s->cue_end)                                  /* the sixteenths fired before the next bar line's */
+        return (int)((16u - (s->step_tick & 15u)) & 15u);
+    return s->bar_six >= s->bar_len ? 0 : (int)(s->bar_len - s->bar_six);
 }
 
 void seq_set_scene(seq_t *s, int scene)

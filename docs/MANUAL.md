@@ -67,8 +67,8 @@ to 16 from the left, black keys 1 to 11.
    <img src="img/screen-throws.png" width="240" alt="The throws&#x27; page: the two octaves of the keyboard, drums below and melodic above, with the effect held lit" title="Throws">
 7. **A scene.** Press **HOME**. White key 1 is the scene playing. Press white key 2: a copy. Now change
    something: mute the drums with black key 1 on Arrange, or go to T2's Steps and turn **KNOB 1** to
-   P2 for a new pattern. Press white key 1 and 2 in turn to switch between them at once, or hold **HOME** and
-   press one to switch at the bar.
+   P2 for a new pattern. Press white key 1 and 2 in turn: while it plays, each waits for the next bar
+   (press it again to switch at once), or hold **HOME** and press one to wait for the end of T1's pattern.
 
    <img src="img/screen-arrange.png" width="240" alt="Arrange: each track&#x27;s pattern with its playhead, scene 2 playing; knobs tempo, groove, amount, click" title="Arrange">
 8. **Save.** Press **SAVE**.
@@ -143,7 +143,7 @@ press…" means keep **HOME** down while you press the next thing.
 | set the tempo | Press **HOME** and turn **KNOB 1**. Hold **HOME** and turn it for tenths. On any page, hold **HOME** and turn **SELECT**. |
 | use a throw | Hold **HOME** and press a key. The lower octave works on the track you are on, the upper octave on its whole group. |
 | make a new scene | Press **HOME** and press an empty white key. It becomes a copy of the scene playing. |
-| cue a scene at the bar | On Arrange, hold **HOME** and press the scene's white key. |
+| switch scenes while playing | On Arrange, press the scene's white key: it starts at the next bar. Press it again to switch at once. Hold **HOME** and press it to wait for the end of T1's pattern. |
 | mute a track | On Arrange, press its black key. On Mix, hold **HOME** and press its black key. |
 | make the whole mix pump with the kick | Press **GLO**, turn **SELECT** to Master out and turn **KNOB 4** (pump). **SEL** picks what drives it and how fast it swells back. |
 | solo a track | On Mix, hold its black key. Let go, and the mutes come back. |
@@ -665,8 +665,12 @@ Press **ARP**. **KNOB 1** picks the player: off, arp, strum or hold.
 ## Arrange, scenes and the song
 
 Press **HOME**. Each row is a track with its pattern and a playhead; muted tracks are dimmed. The scene's
-number is at the right, with the next one when a scene is cued. The 16 white keys are the 16 scenes:
-press one to switch at once. Hold **HOME** and press one to cue it for the next bar. An empty scene
+number is at the right, with the next one when a scene is cued, the beats until it starts and its key
+blinking. The 16 white keys are the 16 scenes. Stopped, a press switches at once. Playing, the scene
+starts at the next bar line; press its key again to switch at once, or press the scene playing to take
+the cue back. Hold **HOME** and press one to wait for the end of T1's pattern instead: the tracks can
+have different lengths and drift apart, so T1's pattern is the scene's length (on a 64-step T1, up to
+four bars). Turning **PRESETS** cues the next scene for the bar the same way. An empty scene
 becomes a copy of the scene playing. Hold a white key for a second to clear that scene. The black keys
 mute: 1 to 8 the tracks, 9 and 10 the conductor and the throws. Hold **HOME** and turn **PRESETS** to change scenes
 from any page.

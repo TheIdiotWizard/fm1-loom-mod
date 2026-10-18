@@ -264,10 +264,10 @@ void engine_groove(int type)
     if (type >= 0 && type < NGROOVE)
         cq_put(C_GROOVE, (uint32_t)type, 0, 0);
 }
-void engine_scene(int scene, int cued)
+void engine_scene(int scene, int when)
 {
     if (scene >= 0 && scene < NSCENE)
-        cq_put(C_SCENE, (uint32_t)scene, (uint32_t)(cued != 0), 0);
+        cq_put(C_SCENE, (uint32_t)scene, (uint32_t)(when == SCENE_END ? 2 : when == SCENE_BAR), 0);
 }
 void engine_transport(int what)                 /* the sequencer's flags: written from any context */
 {
@@ -691,7 +691,7 @@ static void drain(void)
         case C_GROOVE: seq.groove_type = (uint8_t)a; break;
         case C_SCENE:
             if (b)
-                seq_cue_scene(&seq, (int)a);
+                seq_cue_scene(&seq, (int)a, b == 2);
             else
                 seq_set_scene(&seq, (int)a);
             break;

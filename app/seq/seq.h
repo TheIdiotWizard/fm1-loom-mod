@@ -9,8 +9,9 @@
  *     }
  *
  * Ten sequenced tracks (1-8, brain, punch), each on its own pattern (the scene's), with its
- * own step counter, length and scale. Track 1's pattern defines the bar for scene changes and the
- * song: when it wraps (or every 16 steps if it is shorter), cued scenes start. Time is counted in
+ * own step counter, length and scale. A cued scene starts at the next bar line (16 sixteenths of the
+ * transport) or, cued to the end, when track 1's pattern wraps (or every 16 steps if it is shorter): with the
+ * tracks phasing there is no common end, so track 1's pattern is the scene's length. The song counts bars. Time is counted in
  * ticks (PPS a sixteenth) at the tempo, swung and grooved per track.
  *
  * Step components run here: pulse and hold stall the counter, multiply ratchets, velocity fixes,
@@ -193,7 +194,8 @@ typedef struct {
     uint8_t (*par)[NTP_ALL];          /* each track's parameters (NALLTRK of them): TP_PLAYER.., TP_BRAIN, mutes */
     volatile uint8_t playing;
     volatile uint8_t scene;           /* the scene playing */
-    volatile uint8_t cue;             /* the scene cued at the bar, 0xFF none */
+    volatile uint8_t cue;             /* the scene cued, 0xFF none */
+    volatile uint8_t cue_end;         /* it waits for track 1's pattern to end, not the next bar line */
     volatile uint8_t song_on;         /* the song decides the scenes */
     volatile uint8_t song_pos, song_rep;
     volatile uint8_t ppat[NSEQT];     /* each track's pattern (the scene's, or cued per track) */
@@ -259,7 +261,9 @@ void seq_start(seq_t *s, int from_start);
 void seq_stop(seq_t *s);
 void seq_continue(seq_t *s);
 void seq_ext_clock(seq_t *s);                  /* one 24-ppqn tick */
-void seq_cue_scene(seq_t *s, int scene);       /* at the bar (now, if stopped) */
+void seq_cue_scene(seq_t *s, int scene, int at_end);   /* at the next bar line, or at the end of track 1's
+                                                          * pattern (now, if stopped) */
+int seq_cue_left(const seq_t *s);              /* sixteenths before the cued scene's (0: the next), -1 none */
 void seq_set_scene(seq_t *s, int scene);       /* now: the scene's patterns, mutes, brain */
 void seq_cue_pattern(seq_t *s, int trk, int pat);   /* one track's pattern at its wrap */
 float seq_tempo(const seq_t *s);
