@@ -313,6 +313,8 @@ static int expect_more(const char *what, const char *a, const char *b, const cha
  *   trick T PAT S NAME VAL[:MODE]  a trick (pulse hold multiply velocity rampup rampdown random porta bend tonality
  *                                jump skiplock skiptrick skip) at its value 1..9 (10 random), the black keys';
  *                                skips' MODE 0 last pass, 1 not the last, 2 only the first. A third replaces the second
+ *   weave T DST A B RULE         pattern DST of track T = A woven with B (bars steps rhythm notes: SEL's WEAVE WITH
+ *                                COPIED, A the pattern, B the copy)
  *   chance T PAT S PCT|A:B       the step's condition
  *   nudge T PAT S TICKS          -12..12 (24 a step)
  *   lock T PAT S PARAM VALUE     a parameter lock on the step (PARAM / VALUE as knob)
@@ -738,6 +740,18 @@ static int song_cmd(const char *cmd)
             st->comp2 = (uint8_t)k;
             st->cval2 = (uint8_t)v;
         }
+    } else if (!strcmp(cmd, "weave")) {             /* weave T DST A B RULE: pattern DST = A woven with B */
+        static const char *const RN[NWV] = {"bars", "steps", "rhythm", "notes"};
+        static tpat_t out;
+        tpat_t *d = pat_or_die(w[1], w[2]), *a = pat_or_die(w[1], w[3]), *b = pat_or_die(w[1], w[4]);
+        int r = -1;
+        for (k = 0; k < NWV; k++)
+            if (n > 5 && ieq(w[5], RN[k]))
+                r = k;
+        if (r < 0)
+            host_die("weave T DST A B bars|steps|rhythm|notes", "");
+        pattern_weave(&out, a, b, r);
+        *d = out;
     } else if (!strcmp(cmd, "chance")) {            /* chance T PAT S PCT|A:B */
         step_t *st = step_or_die(pat_or_die(w[1], w[2]), w[3]);
         if (n < 5)
