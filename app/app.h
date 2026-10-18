@@ -167,4 +167,5 @@ void ui_init(void);
 void ui_frame(void);
 void ui_input_only(void);
 int ui_dirty(void);
+int ui_asking(void);                             /* a question is up (the host's expect ask) */
 void ui_say(const char *a, const char *b);

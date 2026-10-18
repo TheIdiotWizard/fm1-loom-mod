@@ -1214,7 +1214,7 @@ static void page_footer(char *t)
         else if (ui.page == P_STEPS || ui.page == P_BAR)
             s_cat(t, "HOME+WHITE step: trick|REC undo|PLAY redo");
         else if (ui.page == P_ARRANGE)
-            s_cat(t, "HOME+WHITE cue scene|REC undo|PLAY redo");
+            s_cat(t, "HOME+WHITE scene at the end|REC undo|PLAY redo");
         else if (ui.page == P_MIX)
             s_cat(t, "HOME+BLACK mute|REC undo|PLAY redo");
         else
@@ -1223,7 +1223,7 @@ static void page_footer(char *t)
     }
     switch (ui.page) {
     case P_ARRANGE:
-        s_cat(t, "WHITE scene|BLACK mute|HOME+WHITE at the bar");
+        s_cat(t, "WHITE scene at the bar, again: now|BLACK mute");
         break;
     case P_SONG:
         s_cat(t, "WHITE add scene|PLAY song");
@@ -1856,9 +1856,10 @@ static uint32_t hash_pat(uint32_t h, const tpat_t *p)
 /* Arrange: eleven rows (the tracks), each its pattern and a playhead, mutes dimmed; the scene big at the right */
 static void draw_arrange(void)
 {
-    int sc = cur_scene(), cue = seq.cue;
+    int sc = cur_scene(), cue = seq.cue, left = seq_cue_left(&seq);
     uint32_t h = hash_u(hash_u(2166136261u, 0xA0u), (uint32_t)sc | (uint32_t)cue << 8 | (uint32_t)playing() << 16 |
-                                          (uint32_t)sel_trk() << 20);
+                                          (uint32_t)sel_trk() << 20 | (uint32_t)seq.cue_end << 24);
+    h = hash_u(h, (uint32_t)(left + 1));
     char t[16];
     for (int tr = 0; tr < NSEQT; tr++)
         h = hash_u(h, (uint32_t)seq.ppat[tr] | (uint32_t)eng_step[tr] << 8 | (uint32_t)(seq.mute >> tr & 1u) << 16 |
@@ -1888,12 +1889,19 @@ static void draw_arrange(void)
             cv_text(152, y - 3, &FONT_XS, "mute", K_DIM);
     }
     cv_rect(168, 4, 1, 112, K_LINE);
-    text_c(204, 8, &FONT_XS, cue != 0xFF && cue != sc ? "scene, next" : "scene", K_DIM);
+    text_c(204, 8, &FONT_XS, cue == 0xFF || cue == sc ? "scene" : seq.cue_end ? "at the end" : "next bar", K_DIM);
     num_s((uint32_t)sc + 1u, t);
     text_c(204, 24, &FONT_L, t, playing() ? K_NOW : K_TEXT);
     if (cue != 0xFF && cue != sc) {
         num_s((uint32_t)cue + 1u, t);
         text_c(204, 62, &FONT_B, t, K_TEXT);
+        if (left >= 0) {                         /* when it comes: the beats left, a bar counting down */
+            int span = seq.cue_end ? (int)seq.bar_len : 16, beats = (left + 4) / 4;
+            s_cat(num_s((uint32_t)beats, s_cat(t, "in ")), beats == 1 ? " beat" : " beats");
+            text_c(204, 74, &FONT_XS, t, K_DIM);
+            cv_rect(180, 87, 48, 2, K_PANEL2);
+            cv_rect(180, 87, 48 * (left + 1) / (span > 0 ? span : 16), 2, K_NOW);
+        }
     }
     for (int i = 0; i < NSCENE; i++) {
         int32_t x = 176 + (i % 8) * 7, y = 92 + (i / 8) * 9;
