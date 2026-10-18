@@ -68,6 +68,7 @@ tap SEL
 wait 40
 shot song_list.png
 tap HOME
+turn K1 -5
 tap PLAY
 wait 1500
 shot song_playing.png

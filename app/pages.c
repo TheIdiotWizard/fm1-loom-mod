@@ -168,7 +168,10 @@ static struct {
     uint8_t solo;                                    /* a black key held on Mix: track + 1 soloed */
     uint16_t solo_mute;                              /* the mutes before the solo */
     uint16_t preset_i, pick_preset;               /* (more than 255 presets and user slots) */
-    uint8_t pick_engine, pick_slot, pick_fx, pick_weave;
+    uint8_t pick_engine, pick_slot, pick_fx, pick_weave, pick_save;   /* (pick_save: SAVE TO's slot) */
+    uint8_t naming;                                  /* RENAME: the keys type the project's name (name_*) */
+    char nm_buf[NAME_LEN];
+    uint8_t nm_len;
     uint8_t name_slot;
     uint8_t playing;
     uint8_t scene_seen;
@@ -181,13 +184,13 @@ enum { A_CLEAR_NOTES, A_CLEAR_LOCKS, A_CLEAR_BOTH, A_COPY_PAT, A_PASTE_PAT, A_RO
        A_ENGINE, A_PRESET, A_SCRAMBLE, A_SAVE_PRESET, A_INIT, A_FOLLOW, A_INSERT_SLOT, A_DELETE_SLOT, A_CLEAR_SONG,
        A_PLAY_SONG, A_LOAD_PROJ, A_NEW_PROJ, A_USB_AUDIO, A_CLEAR_SCENE, A_PANIC, A_EFFECT, A_REMOVE_NOTE,
        A_COUNT_IN, A_PLAYMODE, A_FTYPE, A_FX_HP, A_FX_LP, A_FX_SEND, A_WEAVE, A_THEME, A_PUMP_BY, A_PUMP_REL,
-       A_PUMP_ACC, A_LEVEL, A_SCENE_AT, NACTIONS };
+       A_PUMP_ACC, A_LEVEL, A_SCENE_AT, A_SAVE_TO, A_RENAME, NACTIONS };
 static const char *const ACTION_NAME[NACTIONS] = {
     "CLEAR NOTES", "CLEAR LOCKS", "CLEAR NOTES AND LOCKS", "COPY PATTERN", "PASTE PATTERN", "ROTATE FORWARD",
     "ROTATE BACK", "DUPLICATE BAR", "ENGINE", "PRESET", "SCRAMBLE", "SAVE AS PRESET", "RESET SOUND", "FOLLOWS CONDUCTOR",
     "INSERT SCENE", "DELETE SLOT", "CLEAR SONG", "PLAY SONG", "LOAD PROJECT", "NEW PROJECT", "USB AUDIO", "CLEAR SCENE",
     "ALL NOTES OFF", "EFFECT", "REMOVE", "COUNT-IN", "PLAY MODE", "FILTER TYPE", "HIGH-PASS", "LOW-PASS",
-    "TO FX II", "WEAVE WITH COPIED", "THEME", "PUMP BY", "RELEASE", "ACCENT", "LEVEL", "SCENES SWITCH"};
+    "TO FX II", "WEAVE WITH COPIED", "THEME", "PUMP BY", "RELEASE", "ACCENT", "LEVEL", "SCENES SWITCH", "SAVE TO", "RENAME"};
 /* the weave's ways (pattern.h WV_*): what this pattern keeps of itself */
 static const char *const WEAVE_NAME[NWV] = {"bars", "steps", "rhythm", "notes"};
 #define LIST_ROWS 28
@@ -1225,6 +1228,10 @@ static void page_footer(char *t)
         s_cat(t, "let go: nothing changes");
         return;
     }
+    if (ui.naming) {
+        s_cat(t, "KEYS type|SEL done|HOME cancel");
+        return;
+    }
     if (lst.open && lst.n) {
         int k = lst.row[lst.sel].kind;
         s_cat(t, k == LK_ACTION ? "SELECT move|SEL do it|HOME back"
@@ -1570,13 +1577,13 @@ static const struct { uint8_t btn; uint32_t pages; const char *title, *l1, *l2; 
     {B_SEL, PG_ANY, "Lists", "The page's knobs, then its actions. SEL runs the one picked.",
      "SELECT moves, ALGORITHM changes, HOME goes back."},
     {B_SAVE, PG(P_STEPS), "Save", "Tap to save the project. With a step held, clears its locks.",
-     "Hold SAVE and press white key 1 to 4 to save to that slot."},
+     "Hold SAVE and press white key 1 to 3 to save to that slot."},
     {B_SAVE, PG_SOUND, "Save", "Tap to save the project.",
      "Hold SAVE and press a white key: the sound as that user preset."},
-    {B_SAVE, PG_ANY, "Save", "Tap to save the project.", "Hold SAVE and press white key 1 to 4 to save to that slot."},
+    {B_SAVE, PG_ANY, "Save", "Saves now (LOOM-8 saves by itself when stopped and quiet).", "Hold SAVE and press white key 1 to 3 to save to that slot."},
     {B_REC, PG_ANY, "Recording", "Stopped: a tap, then each key writes a step. + PLAY: live.",
      "Playing: hold it and play. Held, the knobs set click, count-in, mode."},
-    {B_PLAY, PG(P_SONG), "Play", "Plays the song from slot 1. PLAY again stops.", "HOME + PLAY redoes."},
+    {B_PLAY, PG(P_SONG), "Play", "Plays the song from the slot picked. PLAY again stops.", "SEL's PLAY SONG: from the top."},
     {B_PLAY, PG_ANY, "Play", "Starts and stops. Twice quickly: from the top.", "HOME + PLAY redoes."},
     {B_OCTDN, PG_STEPS, "Bar", "Shows the bar before. A step held: nudges it earlier.",
      "Step record: the cursor back. Hold both for 5 seconds for update mode."},
@@ -1711,8 +1718,15 @@ static void list_build(void)
             list_add(ACTION_NAME[A_DUP_BAR], 0, LK_ACTION, A_DUP_BAR);
         }
     } else if (keep == P_ARRANGE || keep == P_SONG) {   /* HOME's one list: the projects, the song, the scenes */
+        static char save_t[24], nm_t[NAME_LEN + 1];
         proj_slot_text(ui.pick_slot % NPROJ, slot_t);
         list_add(ACTION_NAME[A_LOAD_PROJ], slot_t, LK_PICK, A_LOAD_PROJ);
+        proj_slot_text(ui.pick_save % NPROJ, save_t);
+        list_add(ACTION_NAME[A_SAVE_TO], save_t, LK_PICK, A_SAVE_TO);
+        for (int i = 0; i < NAME_LEN; i++)
+            nm_t[i] = proj.name[i];
+        nm_t[NAME_LEN] = 0;
+        list_add(ACTION_NAME[A_RENAME], nm_t, LK_ACTION, A_RENAME);
         list_add(ACTION_NAME[A_NEW_PROJ], 0, LK_ACTION, A_NEW_PROJ);
         list_add(ACTION_NAME[A_PLAY_SONG], 0, LK_ACTION, A_PLAY_SONG);
         list_add(ACTION_NAME[A_INSERT_SLOT], 0, LK_ACTION, A_INSERT_SLOT);
@@ -3702,11 +3716,82 @@ static void ink_follow(void)                         /* another track: its ink, 
     for (uint32_t i = 0; i < sizeof ui.sig / sizeof ui.sig[0]; i++)
         ui.sig[i] ^= 0x5A5A5A5Au;
 }
+/* RENAME's keys (fm1-radio's password keys): F3 .. E5 type a .. z, G5 deletes; OCT- held: capitals, OCT+ held:
+ * digits on F3 .. D4 and a space and symbols above */
+static const char NM_SYM[] = " !&-_.,'+/()#@:?";
+static int name_layer(void) { return (ui.btn >> B_OCTUP & 1u) ? 2 : (ui.btn >> B_OCTDN & 1u) ? 1 : 0; }
+static char name_char(int k, int layer)
+{
+    if (k < 0 || k >= 26)
+        return 0;                                    /* (G5: delete) */
+    if (layer == 2)
+        return k < 10 ? (char)('0' + k) : NM_SYM[k - 10];
+    return (char)((layer == 1 ? 'A' : 'a') + k);
+}
+static void naming_paint(int32_t oy)                  /* (the band at LIST_Y, painted in two: the canvas is MAIN_H high) */
+{
+    static const uint8_t BLACK[12] = {0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0};   /* from F */
+    int layer = name_layer();
+    const int32_t kw = 14, x0 = 8, y0 = 98 - oy, wh = 96, bh = 56;
+    char t[NAME_LEN + 2];
+    int wi = 0;
+    cv_text(12, 6 - oy, &FONT_S, "the project's name", K_DIM);
+    cv_round(8, 26 - oy, 224, 32, 6, K_PANEL);
+    for (int i = 0; i < ui.nm_len; i++)
+        t[i] = ui.nm_buf[i];
+    t[ui.nm_len] = '_';
+    t[ui.nm_len + 1] = 0;
+    cv_text(16, cap_y(26 - oy, 32, &FONT_B), &FONT_B, t, K_TEXT);
+    cv_text(12, 70 - oy, &FONT_S, layer == 1 ? "CAPITALS" : layer == 2 ? "digits and symbols" : "letters",
+            layer ? K_NOW : K_DIM);
+    text_r(228, 72 - oy, &FONT_XS, "OCT- caps  OCT+ 123", K_DIM);
+    for (int k = 0; k < 27; k++)                     /* the keys as a little piano, each with what it types now */
+        if (!BLACK[k % 12]) {
+            char c[2] = {name_char(k, layer), 0};
+            int32_t x = x0 + wi++ * kw;
+            if (!c[0])
+                c[0] = '<';
+            cv_rect(x, y0, kw - 1, wh, (ui.keys >> k & 1u) ? K_NOW : K_TEXT);
+            text_c(x + (kw - 1) / 2, y0 + wh - 18, &FONT_XS, c, K_BG);
+        }
+    wi = 0;
+    for (int k = 0; k < 27; k++) {
+        char c[2] = {name_char(k, layer), 0};
+        int32_t x;
+        if (!BLACK[k % 12]) {
+            wi++;
+            continue;
+        }
+        x = x0 + wi * kw - 6;
+        cv_rect(x, y0, 12, bh, (ui.keys >> k & 1u) ? K_NOW : K_PANEL2);
+        text_c(x + 6, y0 + bh - 18, &FONT_XS, c, K_TEXT);
+    }
+}
+static void draw_naming(void)
+{
+    uint32_t h = hash_u(hash_u(2166136261u, 0x4Eu), (uint32_t)name_layer() | ui.keys << 2 | (uint32_t)ui.nm_len << 29);
+    for (int i = 0; i < ui.nm_len; i++)
+        h = hash_u(h, (uint8_t)ui.nm_buf[i]);
+    ui.sig[2] = ui.sig[3] = ui.sig[5] = 0;
+    if (h == ui.sig[1])
+        return;
+    ui.sig[1] = h;
+    cv_begin(240, MAIN_H, K_BG);
+    naming_paint(0);
+    cv_blit(0, LIST_Y);
+    cv_begin(240, LIST_H - MAIN_H, K_BG);
+    naming_paint(MAIN_H);
+    cv_blit(0, LIST_Y + MAIN_H);
+}
 static void draw_page(void)
 {
     int trk = sel_trk();
     if (ui.card) {
         draw_card();
+        return;
+    }
+    if (ui.naming) {
+        draw_naming();
         return;
     }
     if (lst.open) {

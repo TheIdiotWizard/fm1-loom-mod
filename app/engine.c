@@ -43,6 +43,7 @@ volatile float eng_pump_db;
 volatile uint8_t eng_scene_now, eng_scene_cue = 0xFF;
 int16_t eng_scope[SCOPE_N];
 volatile uint32_t eng_scope_w;
+volatile uint16_t eng_quiet;
 
 /* the units, in the pool (their structs are opaque: a byte array each, 8-aligned for their floats) */
 static uint8_t synth_mem[SYNTH_BYTES] POOL __attribute__((aligned(8)));
@@ -1068,6 +1069,12 @@ void engine_render(int32_t *out_lr, uint32_t n, uint32_t gain_q12)
     eng_scene_cue = seq.cue;
     eng_pump_db = master_pump_db(MST);
     PROF_T(po);
+    {   /* quiet (the autosave waits for it: a flash write cuts the audio): every sample under -60 dB */
+        float pk = 0.0f;
+        for (i = 0; i < n; i++)
+            pk = fm_maxf(pk, fm_maxf(fm_fabsf(mix_l[i]), fm_fabsf(mix_r[i])));
+        eng_quiet = pk > 0.001f ? 0 : (uint16_t)(eng_quiet < 65535u ? eng_quiet + 1u : 65535u);
+    }
     for (i = 0; i < n; i++) {                            /* Felucca's -6 dBFS ceiling of the 24-bit codec (2^22) */
         float l = mix_l[i] * vol, r = mix_r[i] * vol;
         l = l > 2.0f ? 2.0f : l < -2.0f ? -2.0f : l;

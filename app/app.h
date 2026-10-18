@@ -31,6 +31,7 @@
  * what a development build saved in slots 1 to 3 and the presets carry over (the sample bank moved: upload it
  * again) */
 #define NPROJ 3                         /* project slots in flash */
+#define PROJ_NOSLOT 0xFFu                /* proj_slot of a new project when every slot is taken: SAVE TO gives it one */
 #define PROJ_NOBJ 7
 enum { OBJ_PANEL, OBJ_PRESETS, OBJ_PROJ0, OBJ_NOBJ = OBJ_PROJ0 + NPROJ * PROJ_NOBJ };
 #define OBJ_PROJ(slot, k) (OBJ_PROJ0 + (slot) * PROJ_NOBJ + (k))

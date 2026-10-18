@@ -150,15 +150,16 @@ press…" means keep **HOME** down while you press the next thing.
 | make the whole mix pump with the kick | Press **GLO**, turn **SELECT** to Master out and turn **KNOB 4** (pump). **SEL** picks what drives it and how fast it swells back. |
 | solo a track | On Mix, hold its black key. Let go, and the mutes come back. |
 | play a progression | Turn **ALGORITHM** to COND (the conductor). Press **EDIT** and play a chord: it moves the tracks that follow. Press **SEQ** and press a step: the chord goes on it. Set the scale to 4 on the Bar page so a step is a beat. |
-| save | Press **SAVE**. Hold **SAVE** and press white key 1 to 3 to save to that slot. |
+| save | LOOM-8 saves by itself when stopped and quiet. **SAVE** saves at once; hold **SAVE** and press white key 1 to 3 to save to that slot. |
+| name a project | Press **HOME**, press **SEL**, pick RENAME and type on the keys (**OCT−** capitals, **OCT+** digits). **SEL** keeps it. |
 | keep a sound | On a sound page, hold **SAVE** and press a white key. The sound becomes that user preset. |
-| load a project | Press **HOME**, press **SEL**, turn **ALGORITHM** on LOAD PROJECT to the slot, and press **SEL**. NEW PROJECT starts an empty one. |
+| load a project | Press **HOME**, press **SEL**, turn **ALGORITHM** on LOAD PROJECT to the slot, and press **SEL**. NEW PROJECT starts an empty one in a free slot. |
 
 ### The buttons
 
 | Control | What it does |
 | --- | --- |
-| **PLAY** | Starts (every track from step 1) and stops. A track whose scale or length you change stays in phase with the rest. On the Song page, it plays the song. With **REC** held, it starts live recording. |
+| **PLAY** | Starts (every track from step 1) and stops. A track whose scale or length you change stays in phase with the rest. On the Song page, it plays the song from the slot picked. With **REC** held, it starts live recording. |
 | **REC** | Held while playing: records while held. Stopped: a tap arms step record. Held, the knobs are the record settings (click, count-in, quantise, mode). |
 | **SEL** | Opens a list of this page's settings and actions. With a step held, its notes. When LOOM-8 asks a question, **SEL** means yes. |
 | **HOME** | Opens Arrange. On Arrange, it opens the Song page. Held, it is the shift key for buttons and knobs: undo and redo, the fine tempo, the scenes on **PRESETS**. When LOOM-8 asks a question, **HOME** means no. |
@@ -692,11 +693,13 @@ from any page.
 stretch, drunk, jitter, accent, lazy, push pull, sway, swell), **KNOB 3** the
 selected track's groove amount from −99 to 99, and **KNOB 4** the click: off, while recording, or on.
 
-Turn **SELECT** for the Song page. Press a white key to add that scene at the cursor. **KNOB 1** moves the
-cursor, **KNOB 2** changes the slot's scene, **KNOB 3** how many bars it plays (1 to 64; a bar is 16
-sixteenths, whatever the patterns' lengths, so a 64-step pattern takes four), and **KNOB 4** whether the
-song loops or stops at the end. **PLAY** on the Song page plays the song from slot 1. **SEL** inserts the
-scene playing, deletes a slot or clears the song.
+Turn **SELECT** for the Song page. Press a white key to add that scene after the slot picked; the knobs move
+to the new slot, which plays as many bars as the one before it (the first: four). **KNOB 1** picks the slot,
+**KNOB 2** changes its scene, **KNOB 3** how many bars it plays (1 to 64; a bar is 16 sixteenths, whatever the
+patterns' lengths, so a 64-step pattern takes four), and **KNOB 4** whether the song loops or stops at the end.
+**PLAY** on the Song page plays the song from the slot picked; **SEL**'s PLAY SONG plays it from the top. As it
+plays, a bar along the playing slot's foot fills over its bars. **SEL** also inserts the scene playing, deletes
+a slot or clears the song.
 
 ## The aux tracks
 
@@ -789,9 +792,15 @@ out of the kick's way while the rest plays on.
 
 ## Saving
 
-Press **SAVE** to save the project to its slot. Hold **SAVE** and press white key 1 to 3 to save it to that
-slot; LOOM-8 asks first if the slot holds another project. The header says "unsaved" and **SAVE** lights
-while there are changes to save. LOOM-8 does not save by itself.
+LOOM-8 saves by itself: three seconds after your last change, once it is stopped and silent (writing to the
+flash would cut the sound). The header says "unsaved" and **SAVE** lights until then. Press **SAVE** to save at
+once. To save to another slot, hold **SAVE** and press white key 1 to 3, or use **HOME**'s **SEL** list: SAVE TO
+(turn **ALGORITHM** to the slot); LOOM-8 asks first if the slot holds another project. NEW PROJECT starts in the
+first empty slot; when all three are taken it has none, and waits for SAVE TO before it saves.
+
+**A project's name.** **HOME**'s **SEL** list has RENAME. The keys type: F3 to E5 are a to z and G5 deletes;
+hold **OCT−** for capitals and **OCT+** for digits, a space and symbols. The keys on the screen show what each
+one types. **SEL** keeps the name, **HOME** leaves it as it was. The name shows in LOAD PROJECT and SAVE TO.
 
 **Backup.** To keep the three projects and the user presets on a computer, and put them back later, open
 <https://charlesvestal.github.io/fm1-loom/backup/> in Chrome or Edge with the FM-1 connected by USB (or run

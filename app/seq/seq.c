@@ -981,9 +981,9 @@ static uint32_t bar_end(seq_t *s, int start, const seq_sink_t *o)
         next[t] = s->ppat[t];
     if (song_plays(s)) {
         const song_t *sg = &s->P->song;
-        int k = start ? 0 : s->song_pos;
+        int k = s->song_pos < sg->len ? s->song_pos : 0;   /* (a start: the slot song_pos names, the UI's pick) */
         if (start) {
-            s->song_rep = sg->slot[0].rep ? sg->slot[0].rep : 1;
+            s->song_rep = sg->slot[k].rep ? sg->slot[k].rep : 1;
         } else if (s->song_rep > 1) {
             s->song_rep--;
         } else {

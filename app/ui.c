@@ -73,6 +73,7 @@ static void say_no(const char *a, const char *b)
 void ui_say(const char *a, const char *b) { say(a, b); }
 const char *ui_page_name(void) { return PAGE_NAME[ui.page % NPAGES]; }
 
+#define SONG_REP_DEF 4                           /* a song's first slot: four bars */
 static void mark_dirty(void)
 {
     ui.dirty = 1;
@@ -386,10 +387,11 @@ static void play_press(void)
             say_no("NO SONG", "white keys add scenes");
             return;
         }
+        int from = ui.name_slot < pats.song.len ? ui.name_slot : 0;   /* from the slot picked (SLOT), else the first */
         seq.song_on = 1;
-        seq.song_pos = 0;
+        seq.song_pos = (uint8_t)from;
         seq.song_rep = 0;
-        engine_scene(pats.song.slot[0].scene % NSCENE, 0);
+        engine_scene(pats.song.slot[from].scene % NSCENE, 0);
     } else if (!twice)
         seq.song_on = 0;
     if (rec_down) {                              /* REC + PLAY stopped: live recording from step 1, at once */
@@ -922,6 +924,16 @@ static void key_down(int k)
         ui.knote[k] = (uint8_t)(w < 0 ? 255 : w);
         return;
     }
+    if (ui.naming) {                             /* RENAME: the key types (or deletes) */
+        char c = name_char(k, name_layer());   /* (k: the key from F3) */
+        ui.kmode[k] = KM_IDLE;
+        if (!c) {
+            if (ui.nm_len)
+                ui.nm_len--;
+        } else if (ui.nm_len < NAME_LEN - 1)
+            ui.nm_buf[ui.nm_len++] = c;
+        return;
+    }
     if (lst.open)
         return;
     if (home_held())                             /* (HOME shifts the knobs and buttons, not the keys) */
@@ -930,7 +942,7 @@ static void key_down(int k)
         if (w >= 0) {
             if (p == P_SONG) {
                 song_t *sg = &pats.song;
-                int at = ui.name_slot <= sg->len ? ui.name_slot : sg->len;
+                int at = ui.name_slot < sg->len ? ui.name_slot + 1 : sg->len;   /* after the slot picked (or at the end) */
                 if (sg->len >= NSONG) {
                     say_no("SONG FULL", "64 slots");
                     return;
@@ -938,9 +950,9 @@ static void key_down(int k)
                 for (int i = sg->len; i > at; i--)
                     sg->slot[i] = sg->slot[i - 1];
                 sg->slot[at].scene = (uint8_t)w;
-                sg->slot[at].rep = 1;
+                sg->slot[at].rep = at ? sg->slot[at - 1].rep : SONG_REP_DEF;   /* the slot before's bars (the first: 4) */
                 sg->len++;
-                ui.name_slot = (uint8_t)(at + 1);
+                ui.name_slot = (uint8_t)at;              /* the knobs on the slot just added: its bars next */
                 mark_dirty();
                 {
                     char t[16];
@@ -1131,8 +1143,30 @@ static void button_down(int b)
     if (b == B_PLAY)
         play_press();
 }
+static void name_end(int keep)                   /* RENAME done (SEL) or cancelled (HOME) */
+{
+    ui.naming = 0;
+    ui.sig[1] = 0;
+    if (!keep)
+        return;
+    for (int i = 0; i < NAME_LEN; i++)
+        proj.name[i] = i < ui.nm_len ? ui.nm_buf[i] : 0;
+    mark_dirty();
+    {
+        char t[NAME_LEN + 1];
+        for (int i = 0; i < NAME_LEN; i++)
+            t[i] = proj.name[i];
+        t[NAME_LEN] = 0;
+        say("NAMED", t[0] ? t : "-");
+    }
+}
 static void button_up(int b)
 {
+    if (ui.naming) {                             /* (OCT- and OCT+ are the keys' layers meanwhile) */
+        if (b == B_SEL || b == B_HOME)
+            name_end(b == B_SEL);
+        return;
+    }
     if (lst.open && b == PAGE_BTN[page_group(ui.page)].btn && b != B_HOME) {
         ui.ask = 0;
         lst.open = 0;
@@ -1165,7 +1199,9 @@ static void button_up(int b)
             page_button(B_HOME);
         break;
     case B_SAVE:
-        if (save_project(proj_slot) == 0)
+        if (proj_slot >= NPROJ)
+            say_no("NO SLOT YET", "HOME, SEL: SAVE TO");
+        else if (save_project(proj_slot) == 0)
             say("SAVED", 0);
         break;
     case B_OCTDN: case B_OCTUP: {
@@ -1204,7 +1240,8 @@ static void holds(void)
 {
     uint32_t now = plat_ms();
     for (int b = 0; b < NB; b++)
-        if (ui.btn == 1u << b && !ui.keys && b != B_HOME && !(ui.btn_used >> b & 1u) && now - ui.btn_t[b] >= CARD_MS) {
+        if (ui.btn == 1u << b && !ui.keys && b != B_HOME && !ui.naming && !(ui.btn_used >> b & 1u) &&
+            now - ui.btn_t[b] >= CARD_MS) {
             ui.card = (uint8_t)(b + 1);
             ui.btn_used |= 1u << b;
         }
@@ -1615,6 +1652,7 @@ static void list_change(int32_t e)
         case A_PRESET: ui.pick_preset = (uint16_t)((ui.pick_preset + d + NPRESETS) % (NPRESETS ? NPRESETS : 1)); break;
         case A_SAVE_PRESET: ui.pick_slot = (uint8_t)((ui.pick_slot + d + NUSER_PRESETS) % NUSER_PRESETS); break;
         case A_LOAD_PROJ: ui.pick_slot = (uint8_t)((ui.pick_slot + d + NPROJ) % NPROJ); break;
+        case A_SAVE_TO: ui.pick_save = (uint8_t)((ui.pick_save + d + NPROJ) % NPROJ); break;
         case A_USB_AUDIO:
             if (proj.usb_full != (uint8_t)(d > 0)) {
                 proj.usb_full = (uint8_t)(d > 0);
@@ -1922,7 +1960,16 @@ static void do_new_proj(void)
     project_defaults();
     after_load();
     ui.dirty = 1;
-    say("NEW PROJECT", "unsaved");
+    proj_slot = PROJ_NOSLOT;                     /* its slot: the first free one; none free, SAVE TO picks one */
+    for (int s = NPROJ - 1; s >= 0; s--)
+        if (!project_exists(s))
+            proj_slot = (uint8_t)s;
+    if (proj_slot < NPROJ) {
+        char t[16];
+        num_s((uint32_t)proj_slot + 1u, s_cat(t, "slot "));
+        say("NEW PROJECT", t);
+    } else
+        say("NEW PROJECT", "no free slot: SAVE TO");
 }
 static void act_remove_note(int row)             /* a step held: the row's note off the step */
 {
@@ -2009,8 +2056,9 @@ static void action_run(int a)
         for (int i = sg->len; i > cur; i--)
             sg->slot[i] = sg->slot[i - 1];
         sg->slot[cur].scene = (uint8_t)cur_scene();
-        sg->slot[cur].rep = 1;
+        sg->slot[cur].rep = cur ? sg->slot[cur - 1].rep : SONG_REP_DEF;
         sg->len++;
+        ui.name_slot = (uint8_t)cur;
         mark_dirty();
         say("INSERTED", "this scene");
         break;
@@ -2026,8 +2074,9 @@ static void action_run(int a)
         say("DELETED", "slot");
         break;
     case A_CLEAR_SONG: ask("CLEAR THE SONG?", do_clear_song); return;
-    case A_PLAY_SONG:
+    case A_PLAY_SONG:                            /* (from the top: slot 1) */
         ui.page = P_SONG;
+        ui.name_slot = 0;
         if (playing())
             engine_transport(0);
         play_press();
@@ -2042,6 +2091,16 @@ static void action_run(int a)
         }
         return;
     case A_NEW_PROJ: ask("NEW PROJECT?", do_new_proj); return;
+    case A_SAVE_TO: act_save_slot(ui.pick_save % NPROJ); break;
+    case A_RENAME:                               /* (a new project's NEW: typed over, from empty) */
+        ui.nm_len = 0;
+        while (ui.nm_len < NAME_LEN - 1 && proj.name[ui.nm_len])
+            ui.nm_buf[ui.nm_len] = proj.name[ui.nm_len], ui.nm_len++;
+        if (ui.nm_len == 3 && ui.nm_buf[0] == 'N' && ui.nm_buf[1] == 'E' && ui.nm_buf[2] == 'W')
+            ui.nm_len = 0;
+        ui.naming = 1;
+        ui.sig[1] = 0;
+        break;
     case A_CLEAR_SCENE: act_clear_scene_ask(); return;
     case A_PANIC: engine_panic(); say("ALL NOTES OFF", 0); break;
     default: break;
@@ -2857,6 +2916,21 @@ void ui_init(void)
     lcd_fill(0, 0, 240, 240, K_BG);
 }
 
+/* autosave: a change is saved AUTOSAVE_MS after the last touch, when stopped and silent (a flash write cuts the
+ * audio: no voice sounding, the output under -60 dB for about half a second, tails and echoes gone), not recording,
+ * nothing asked or typed, and the project has a slot; quietly ("unsaved" goes) */
+#define AUTOSAVE_MS 3000u
+#define AUTOSAVE_QUIET 90u                       /* blocks of quiet (256 samples: about 0.5 s) */
+static void autosave(void)
+{
+    if (!ui.dirty || proj_slot >= NPROJ || playing() || seq.rec || seq.rec_wait || ui.ask || ui.naming || lst.open ||
+        ui.btn || ui.keys || plat_ms() - ui.act_t < AUTOSAVE_MS || eng_voices || eng_quiet < AUTOSAVE_QUIET)
+        return;
+    if (project_save(proj_slot) == 0)
+        ui.dirty = 0;
+    else
+        ui.act_t = plat_ms();                    /* (a failed or held write: try again later) */
+}
 void ui_frame(void)
 {
     input();
@@ -2875,10 +2949,11 @@ void ui_frame(void)
     seq.rec_target = (uint8_t)(sel_trk() == AUX_BRAIN ? AUX_BRAIN : inst_trk());   /* where live recording writes */
     seq.rec_replace = (uint8_t)(proj.rsv[2] & 1u);
     ink_follow();
+    autosave();
     draw_header();
     draw_page();
     draw_rec_strip();
-    if (!(lst.open && !ui.card)) {
+    if (!(lst.open && !ui.card) && !ui.naming) {
         draw_tag();
         draw_knobs();
     }
