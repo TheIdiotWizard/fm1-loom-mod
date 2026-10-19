@@ -10,7 +10,7 @@
  *
  * The compressor writes through a sink (a run of bytes at a time), so its output can go to the
  * flash objects one chunk at a time, and reads its input in place. It remembers the last position
- * of each 3-byte hash (lz_head, 8 KB) and tries the byte before too (runs). The decompressor reads
+ * of each 3-byte hash (lz_head, 4 KB: its low 16 bits, the rest from where it is now) and tries the byte before too (runs). The decompressor reads
  * a byte at a time from a source and writes into place. No allocation; inputs up to 16 MB (a match
  * reaches at most 64 KB back: the distance is a u16; a farther candidate is passed over). */
 #include <stdint.h>
@@ -32,7 +32,16 @@ typedef struct {
     void *ctx;
 } lz_src_t;
 
-static uint32_t lz_head[1u << LZ_HBITS];
+static uint16_t lz_head[1u << LZ_HBITS];   /* a position's low 16 bits: a match reaches 64 KB back at most */
+
+static uint32_t lz_cand(uint32_t i, uint32_t h)   /* the last position of hash h before i, LZ_NONE none (a stale one
+                                                   * is only a poorer candidate: lz_match_len compares the bytes) */
+{
+    uint32_t c = (i & ~(LZ_MAXDIST - 1u)) | lz_head[h];
+    if (c < i)
+        return c;
+    return i >= LZ_MAXDIST ? c - LZ_MAXDIST : LZ_NONE;
+}
 
 static uint32_t lz_hash(const uint8_t *p)
 {
@@ -67,12 +76,12 @@ static int lz_compress(const uint8_t *in, uint32_t n, lz_sink_t *o)
     if (n >= 0x1000000u)
         return -1;
     for (k = 0; k < (1u << LZ_HBITS); k++)
-        lz_head[k] = LZ_NONE;
+        lz_head[k] = 0xFFFFu;                 /* (before 64 KB: none; after, a candidate the bytes check) */
     while (i < n) {
         uint32_t best = 0, dist = 0;
         if (i + LZ_MIN <= n) {
-            uint32_t h = lz_hash(in + i), c = lz_head[h], len;
-            lz_head[h] = i;
+            uint32_t h = lz_hash(in + i), c = lz_cand(i, h), len;
+            lz_head[h] = (uint16_t)i;
             if (c != LZ_NONE && i - c <= LZ_MAXDIST && (len = lz_match_len(in, n, c, i)) > best) {
                 best = len;
                 dist = i - c;
@@ -94,7 +103,7 @@ static int lz_compress(const uint8_t *in, uint32_t n, lz_sink_t *o)
                 return -1;
         }
         for (k = 1; k < best && i + k + LZ_MIN <= n; k++)       /* the positions inside the match */
-            lz_head[lz_hash(in + i + k)] = i + k;
+            lz_head[lz_hash(in + i + k)] = (uint16_t)(i + k);
         i += best;
         lit = i;
     }

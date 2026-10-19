@@ -726,7 +726,7 @@ static int song_cmd(const char *cmd)
             nn[m++] = (uint8_t)note_of(w[i]);
         step_set_notes(st, nn, m, atoi(w[5]));
         k = (int)(atof(w[4]) * 4.0 + 0.5);
-        st->len = (uint8_t)(k > 255 ? 255 : k);
+        st->len = (uint8_t)(k > 0 ? step_len_code(k) : 0);
     } else if (!strcmp(cmd, "trick")) {             /* trick T PAT S NAME VAL[:MODE] */
         static const char *const TN[NSC] = {"none", "pulse", "hold", "multiply", "velocity", "rampup", "rampdown",
                                             "random", "porta", "bend", "tonality", "jump", "skiplock", "skiptrick",
@@ -760,6 +760,33 @@ static int song_cmd(const char *cmd)
         if (n < 5 || t < 0 || t >= NSEQT || r < 0)
             host_die("weaveset T FROM PAT bars|steps|rhythm|notes", "");
         weave_set(t, atoi(w[2]), atoi(w[3]) - 1, r);
+    } else if (!strcmp(cmd, "wvpat")) {             /* wvpat PAT LEN: the WEAVE track's pattern, emptied, LEN sixteenths */
+        int p = atoi(w[1]) - 1, l = n > 2 ? atoi(w[2]) : 16;
+        if (p < 0 || p >= NPATT || (l != 16 && l != 32 && l != 48 && l != 64))
+            host_die("wvpat PAT 16|32|48|64", "");
+        memset(&pats.weave[p], 0, sizeof pats.weave[p]);
+        pats.weave[p].len = (uint8_t)l;
+    } else if (!strcmp(cmd, "wvstep")) {            /* wvstep PAT S TRACKS LEN: a WEAVE step, as REC writes it (TRACKS
+                                                     * 1-8, c = COND, t = THROW, by commas; LEN sixteenths) */
+        int p = atoi(w[1]) - 1, s = atoi(w[2]) - 1;
+        uint32_t m = 0;
+        char b[32], *q;
+        if (n < 5 || p < 0 || p >= NPATT || s < 0 || s >= NSTEP || atoi(w[4]) < 1 || atoi(w[4]) > NSTEP)
+            host_die("wvstep PAT S TRACKS LEN", "");
+        snprintf(b, sizeof b, "%s", w[3]);
+        for (q = strtok(b, ","); q; q = strtok(0, ","))
+            m |= *q == 'c' ? 1u << AUX_BRAIN : *q == 't' ? 1u << AUX_PUNCH
+                 : atoi(q) >= 1 && atoi(q) <= NTRK ? 1u << (atoi(q) - 1) : 0u;
+        if (!m)
+            host_die("no track to weave", w[3]);
+        pats.weave[p].st[s].m0 = (uint8_t)m;
+        pats.weave[p].st[s].m1 = (uint8_t)(m >> 8);
+        pats.weave[p].st[s].len = (uint8_t)atoi(w[4]);
+    } else if (!strcmp(cmd, "sceneweave")) {        /* sceneweave N PAT: scene N plays the WEAVE track's PAT */
+        int sc = atoi(w[1]) - 1;
+        if (sc < 0 || sc >= NSCENE || n < 3 || atoi(w[2]) < 1 || atoi(w[2]) > NPATT)
+            host_die("sceneweave N PAT", "");
+        pats.scene[sc].weave = (uint8_t)(atoi(w[2]) - 1);
     } else if (!strcmp(cmd, "weave")) {             /* weave T DST A B RULE: pattern DST = A woven with B */
         static const char *const RN[NWV] = {"bars", "steps", "rhythm", "notes"};
         static tpat_t out;

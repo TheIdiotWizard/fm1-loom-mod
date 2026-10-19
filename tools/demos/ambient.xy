@@ -1,0 +1,185 @@
+# LOOM-8 demo: ambient, 64 BPM, D major. The synth engines and the kit's models only (no samples: publishable).
+# (Rendered by loom_host directly: it has no bank.)
+#   T1 kit: barely there (a low kick on the one, a shaker breathing, the string model now and then)
+#   T2 organ "chapel": the chords, a soft pipe, dark   T3 voile "ninon": the choir above them, a bar a note
+#   T4 swarm "angora": a theremin, four notes in four bars   T5 tines "lullaby": a music box, sparse
+#   T6 organ "pedal bass": the 16' under it all
+# Chords, a bar each: Dmaj9 | Bm11 | Gmaj7#11 | Asus. The music box and the theremin keep to D major's pentatonic,
+# so a weave's notes fit any bar. Everything dark (low-passed, the master's top down) and into a long hall.
+# Weaves (set up on each track's ARP, played on the WEAVE track, here written onto its steps as REC writes them):
+#   T5 with its P2 by notes: P2's rhythm, P1's notes; T1 with its P2 by steps (a step of each in turn).
+# Song: intro 4 (organ, choir), rise 4 (+ bells, pedal), full 4 (+ pulse, theremin; the bells woven, the pulse
+# the last two bars), outro 4 (organ, choir, bells woven; an echo throw on the bells, the organ closing).
+master 4096
+bpm 64
+
+# ---- the sounds
+# T1 the kit, soft: the kick low and long, the shaker quiet, the string model plucked on A, all low-passed
+knob 1 d1.k1 66
+knob 1 d1.k2 80
+knob 1 d1.k3 20
+knob 1 d1.k4 20
+knob 1 d1.volume 62
+knob 1 d9.k2 70
+knob 1 d9.volume 44
+knob 1 d10.k1 46
+knob 1 d10.k2 110
+knob 1 d10.volume 56
+knob 1 ftype lp12
+knob 1 cut 70
+knob 1 level 80
+knob 1 send1 24
+knob 1 send2 70
+# T2 organ "chapel": the chords, a soft pipe, dark, into the hall
+preset 2 chapel organ
+knob 2 brain no
+knob 2 cut 66
+knob 2 level 88
+knob 2 send2 96
+# T3 voile "ninon": the soprano choir, dark, back and wet
+preset 3 ninon voile
+knob 3 brain no
+knob 3 cut 62
+knob 3 level 78
+knob 3 send2 110
+# T4 swarm "angora": the theremin, dark, the echo and the hall
+preset 4 angora swarm
+knob 4 brain no
+knob 4 cut 60
+knob 4 level 84
+knob 4 send1 60
+knob 4 send2 90
+# T5 tines "lullaby": the music box, softened, far away
+preset 5 lullaby tines
+knob 5 brain no
+knob 5 cut 58
+knob 5 level 82
+knob 5 send1 56
+knob 5 send2 100
+# T6 organ "pedal bass": the 16'
+preset 6 pedal_bass organ
+knob 6 brain no
+knob 6 level 90
+knob 6 send2 30
+# FX I a dotted-eighth echo, long and dark; FX II the hall: the largest, a long decay, its top damped
+knob 11 engine delay
+knob 11 e1 85
+knob 11 e3 88
+knob 11 e4 36
+knob 12 engine hall
+knob 12 e1 127
+knob 12 e2 122
+knob 12 e3 44
+knob 12 e4 80
+# the master: the top down, the compressor gentle
+mst hi 46
+mst comp 36
+mst level 90
+
+# ---- T1 the pulse: kick 1, shaker 9, string 10
+# P1 the kick on the one, the shaker on beat 3, the string once
+pat 1 1 16
+hits 1 1 1 o...............
+hits 1 1 9 ........g.......
+hits 1 1 10 ......g.........
+# P2 woven step by step with P1: the kick again late, the string twice
+pat 1 2 16
+hits 1 2 1 ..........g.....
+hits 1 2 9 ....g...........
+hits 1 2 10 .......g......g.
+
+# ---- T2 the organ: Dmaj9 | Bm11 | Gmaj7#11 | Asus
+pat 2 1 64
+notes 2 1 1 16 84 D3 F#3 A3 E4
+notes 2 1 17 16 84 B2 D3 A3 E4
+notes 2 1 33 16 84 G2 B2 F#3 C#4
+notes 2 1 49 16 84 A2 D3 E3 B3
+
+# ---- T3 the choir: one note a bar, its top
+pat 3 1 64
+notes 3 1 1 15 80 A4
+notes 3 1 17 15 76 F#4
+notes 3 1 33 15 80 B4
+notes 3 1 49 15 76 E4
+
+# ---- T4 the theremin: four notes in four bars
+pat 4 1 64
+notes 4 1 5 10 92 A4
+notes 4 1 21 8 88 F#4
+notes 4 1 37 10 92 E5
+notes 4 1 53 9 88 B4
+
+# ---- T5 the music box. P1 a note on beats 1 and 3, now and then a pickup
+pat 5 1 64
+notes 5 1 1 2 80 D5
+notes 5 1 9 2 66 A4
+notes 5 1 17 2 78 B4
+notes 5 1 25 2 64 F#4
+notes 5 1 31 1 54 A4
+notes 5 1 33 2 80 B4
+notes 5 1 41 2 66 F#5
+notes 5 1 49 2 78 A4
+notes 5 1 57 2 64 E5
+# P2 a slow rhythm across the bar (every sixth sixteenth): woven by notes it plays this rhythm with P1's notes
+pat 5 2 16
+notes 5 2 1 2 80 A5
+notes 5 2 7 2 66 E5
+notes 5 2 13 2 72 B5
+
+# ---- T6 the pedal: the roots, long
+pat 6 1 64
+notes 6 1 1 15 90 D2
+notes 6 1 17 15 90 B1
+notes 6 1 33 15 90 G1
+notes 6 1 49 15 90 A1
+
+# ---- the weaves, set up (each track's ARP, Weave page): T5 with T5's P2 by notes, T1 with T1's P2 by steps
+weaveset 5 5 2 notes
+weaveset 1 1 2 steps
+# the WEAVE track, as recorded: P1 empty; P2 the bells woven the four bars, the pulse the last two; P3 the bells,
+# the outro's first two bars
+wvpat 1 16
+wvpat 2 64
+wvstep 2 1 5 64
+wvstep 2 33 1 32
+wvpat 3 64
+wvstep 3 1 5 32
+
+# ---- scenes and the song (the mask: T1..T8, COND, THROW; x = muted)
+scenedef 1 1 1 1 1 1 1 1 1
+scenemute 1 x..xxxxx
+sceneweave 1 1
+scenedef 2 1 1 1 1 1 1 1 1
+scenemute 2 x..x..xx
+sceneweave 2 1
+scenedef 3 1 1 1 1 1 1 1 1
+scenemute 3 ......xx
+sceneweave 3 2
+scenedef 4 1 1 1 1 1 1 1 1
+scenemute 4 x..x.xxx
+sceneweave 4 3
+song 1:4 2:4 3:4 4:4
+songloop 0
+
+# ---- play the song (HOME, SELECT to the Song page, PLAY), and perform
+tap HOME
+turn SELECT 1
+stats reset
+wav loom_demo_ambient.wav
+tap PLAY
+# intro, rise, full: as written
+bars 12
+# outro: the organ's cutoff closing over four bars; the bells thrown into the echo for the last two
+knob 2 cut 58
+bars 1
+knob 2 cut 50
+bars 1
+knob 2 cut 42
+throw echo on mel 5
+bars 1
+knob 2 cut 34
+bars 1
+throw echo off mel 5
+wait 12000
+wavstop
+stats

@@ -117,6 +117,7 @@ void app_frame(void)
 }
 void app_input_only(void) { ui_input_only(); }
 void app_say(const char *a, const char *b) { ui_say(a, b); }
+void app_redraw(void) { ui_redraw(); }
 int app_sysex(const uint8_t *p, uint32_t n) { return smp_frame(p, n); }
 
 /* the name over the eight tracks' inks woven as threads, in the default theme (pages.c THEMES[0]) */

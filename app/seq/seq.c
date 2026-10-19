@@ -275,7 +275,7 @@ static const step_t *weave_at(seq_t *s, int t, const tpat_t *tp, int p)
     seq_trk_t *tr = &s->t[t];
     int f = s->wv_from[t] - 1, wp = s->wv_pat[t] % NPATT;
     tr->wv_on = 0;
-    if (!((s->wv_live | s->wv_rec) >> t & 1u) || f < 0 || f >= NSEQT || (f == t && wp == s->ppat[t]))
+    if (!((s->wv_live | s->wv_rec | s->wv_always) >> t & 1u) || f < 0 || f >= NSEQT || (f == t && wp == s->ppat[t]))
         return &tp->st[p];
     tr->wv_on = 1;
     weave_step(tp, step_kind(s, t), &s->P->pat[f][wp], step_kind(s, f), s->wv_rule[t] % NWV,
@@ -601,13 +601,21 @@ static int echo_vel(const seq_t *s, int t, int vel)
 }
 
 /* ------------------------------------------------------------ the step --- */
+static uint32_t len_of(uint32_t L, int len)   /* a step's len in samples Q8 (stopping short of overflowing) */
+{
+    uint32_t q = (uint32_t)step_len_q(len), l4 = L / 4u;
+    return l4 && q > 0xF0000000u / l4 ? 0xF0000000u : l4 * q;
+}
+static void step_arp(seq_t *s, int t, const uint8_t *nt, int n, int vel, uint32_t len_q8);
+static void step_strum(seq_t *s, int t, const uint8_t *nt, int n, int vel, uint32_t len_q8, uint32_t tag,
+                       const seq_sink_t *o);
 /* the step's notes (synth) or hits (drums), with the components in tr->act; ratchet = the hit's index */
 static void fire_notes(seq_t *s, int t, const step_t *st, int p, uint32_t L, int ratchet, const seq_sink_t *o)
 {
     seq_trk_t *tr = &s->t[t];
     const tpat_t *tp = tpat(s, t);
     const uint8_t *act = tr->act;
-    int vel = groove_vel(s, t, p, st->vel ? st->vel : 100), i, glide = 0, n = 0, tv = (int)act[SC_TONALITY] - 1;
+    int vel = groove_vel(s, t, p, st->vel ? st->vel : 100), i, glide = 0, n = 0, tv = (int)act[SC_TONALITY] - 1, pl;
     uint32_t len_q8;
     if (act[SC_VELOCITY]) {
         int k = act[SC_VELOCITY] - 1;
@@ -619,7 +627,7 @@ static void fire_notes(seq_t *s, int t, const step_t *st, int p, uint32_t L, int
     }
     vel = echo_vel(s, t, vel);
     if (st->len)
-        len_q8 = L / 4u * st->len;
+        len_q8 = len_of(L, st->len);
     else
         len_q8 = L / 100u * (tp->nlen > 100 ? 100u : tp->nlen);
     if (is_drum(s, t)) {
@@ -668,9 +676,16 @@ static void fire_notes(seq_t *s, int t, const step_t *st, int p, uint32_t L, int
             note -= 12;
         note = clamp_note(note);
         tag = TAG_STEP | (uint32_t)(p * 16 + i + ratchet * 1024);
-        emit_note(s, t, note, vel, glide, tag, len_q8, o);
+        pl = s->par[t][TP_PLAYER];
+        if (pl != PL_ARP && pl != PL_STRUM)   /* (the arp and the strum play the step's notes: below) */
+            emit_note(s, t, note, vel, glide, tag, len_q8, o);
         tr->last_note[n++] = (uint8_t)note;
     }
+    pl = s->par[t][TP_PLAYER];
+    if (n && pl == PL_ARP)
+        step_arp(s, t, tr->last_note, n, vel, len_q8);
+    else if (n && pl == PL_STRUM)
+        step_strum(s, t, tr->last_note, n, vel, len_q8, TAG_STEP | (uint32_t)(p * 16 + ratchet * 1024), o);
     tr->nlast = (uint8_t)n;
     tr->last_step = (uint8_t)p;
     tr->last_vel = (uint8_t)vel;
@@ -695,7 +710,7 @@ static void ghost_notes(seq_t *s, int t, const step_t *st, const seq_sink_t *o)
 static void fire_aux(seq_t *s, int t, const step_t *st, int p, uint32_t L, const seq_sink_t *o)
 {
     const tpat_t *tp = tpat(s, t);
-    uint32_t len_q8 = st->len ? L / 4u * st->len : L / 100u * (tp->nlen > 100 ? 100u : tp->nlen);
+    uint32_t len_q8 = st->len ? len_of(L, st->len) : L / 100u * (tp->nlen > 100 ? 100u : tp->nlen);
     int i;
     (void)p;
     if (t == AUX_BRAIN) {             /* the chord's lowest note is its root */
@@ -1522,6 +1537,8 @@ static void arp_stop(seq_t *s, int t, const seq_sink_t *o)
     pl->arp_side = 0;
     pl->nheld = 0;
     pl->latched = 0;
+    pl->nsq = 0;
+    pl->sq_to_off = NEVER;
     arp_pan(s, t, 0, o);
 }
 
@@ -1618,18 +1635,24 @@ static void arp_fire(seq_t *s, int t, const seq_sink_t *o)
 {
     player_t *pl = &s->player[t];
     uint32_t P = arp_period(s, t), carry = pl->arp_to_next < SEQ_DUE ? pl->arp_to_next : 0, gate;
-    uint8_t list[16];
-    int n = pl->nheld, i, j, oct = s->par[t][TP_P3], range, pat = s->par[t][TP_P2], idx, note, total, cyc, style,
+    uint8_t list[16 + SN];
+    int n = 0, i, j, oct = s->par[t][TP_P3], range, pat = s->par[t][TP_P2], idx, note, total, cyc, style,
         len = s->par[t][TP_AP1], glide = s->par[t][TP_AP3], stereo = s->par[t][TP_AP4];
     arp_off(s, t, o);
+    for (i = 0; i < pl->nheld; i++)   /* the keys through the brain, then the step's notes (through it already) */
+        list[n++] = (uint8_t)clamp_note(brain_note(s, t, pl->held[i]));
+    for (i = 0; i < pl->nsq; i++) {
+        for (j = 0; j < n && list[j] != pl->sq[i]; j++)
+            ;
+        if (j == n)
+            list[n++] = pl->sq[i];
+    }
     if (!n) {
         pl->arp_to_next = NEVER;
         return;
     }
     range = oct < 1 ? 1 : oct > 4 ? 4 : oct;
-    for (i = 0; i < n; i++)           /* sorted, unless as played */
-        list[i] = pl->held[i];
-    if (pat != 4)
+    if (pat != 4)                     /* sorted, unless as played */
         for (i = 1; i < n; i++) {
             uint8_t v = list[i];
             for (j = i; j > 0 && list[j - 1] > v; j--)
@@ -1645,8 +1668,7 @@ static void arp_fire(seq_t *s, int t, const seq_sink_t *o)
         idx = arp_base(pat, arp_style_pos(style, pl->arp_i, cyc), total);
         pl->arp_i++;
     }
-    note = list[idx % n] + 12 * (idx / n);
-    note = clamp_note(brain_note(s, t, note));
+    note = clamp_note(list[idx % n] + 12 * (idx / n));
     if (stereo) {                     /* ping-pong: narrow +-20, wide +-60 */
         arp_pan(s, t, (pl->arp_side ? -1 : 1) * (stereo >= 2 ? 60 : 20), o);
         pl->arp_side ^= 1;
@@ -1744,6 +1766,135 @@ static void roll_fire(seq_t *s, int t, const seq_sink_t *o)
         pl->roll_to_next = carry + seq_step_q8(s, t) / 63u * (uint32_t)roll;
 }
 
+/* a step on an arp track: its notes join the keys held, for the step's length (the next step's replace them) */
+static void step_arp(seq_t *s, int t, const uint8_t *nt, int n, int vel, uint32_t len_q8)
+{
+    player_t *pl = &s->player[t];
+    int i;
+    for (i = 0; i < n && i < SN; i++)
+        pl->sq[i] = nt[i];
+    pl->nsq = (uint8_t)i;
+    pl->sq_to_off = len_q8 < SEQ_DUE ? SEQ_DUE : len_q8;
+    if (!pl->nheld)
+        pl->arp_vel = (uint8_t)vel;
+    if (pl->arp_to_next == NEVER) {   /* the arp starts on the step */
+        pl->arp_i = 0;
+        pl->arp_to_next = 0;
+    }
+}
+
+static void step_arp_end(seq_t *s, int t, const seq_sink_t *o)
+{
+    player_t *pl = &s->player[t];
+    pl->nsq = 0;
+    pl->sq_to_off = NEVER;
+    if (!pl->nheld) {
+        arp_off(s, t, o);
+        pl->arp_to_next = NEVER;
+        pl->arp_i = 0;
+    }
+}
+
+/* a step on a strum track: its chord strummed (one note: the strum's chord from it, as a key plays it), in the
+ * strum's direction, rolled by its roll; every note ends with the step's length */
+static void step_strum(seq_t *s, int t, const uint8_t *nt, int n, int vel, uint32_t len_q8, uint32_t tag,
+                       const seq_sink_t *o)
+{
+    player_t *pl = &s->player[t];
+    int i, j, m = 0, lo = 128, pat = s->par[t][TP_P2], roll = s->par[t][TP_P1], down;
+    uint8_t list[SN * 2];
+    if (n == 1 && pl->nchord) {
+        for (i = 0; i < pl->nchord; i++)
+            if (pl->chord[i] < lo)
+                lo = pl->chord[i];
+        for (i = 0; i < pl->nchord; i++)
+            list[m++] = (uint8_t)clamp_note(pl->chord[i] - lo + nt[0]);
+    } else
+        for (i = 0; i < n && m < SN * 2; i++)
+            list[m++] = nt[i];
+    for (i = 1; i < m; i++) {         /* sorted up */
+        uint8_t v = list[i];
+        for (j = i; j > 0 && list[j - 1] > v; j--)
+            list[j] = list[j - 1];
+        list[j] = v;
+    }
+    down = pat == 1 || (pat == 2 && !(pl->arp_dir ^= 1)) || (pat == 3 && (rng_next(&s->rng) & 1u));
+    if (down)
+        for (i = 0; i < m / 2; i++) {
+            uint8_t v = list[i];
+            list[i] = list[m - 1 - i];
+            list[m - 1 - i] = v;
+        }
+    if (roll <= 0) {
+        for (i = 0; i < m; i++)
+            emit_note(s, t, list[i], vel, 0, tag + (uint32_t)i, len_q8, o);
+        pl->nsroll = 0;
+        pl->sroll_to_next = NEVER;
+        return;
+    }
+    for (i = 0; i < m; i++)
+        pl->sroll[i] = list[i];
+    pl->nsroll = (uint8_t)m;
+    pl->sroll_i = 0;
+    pl->sroll_vel = (uint8_t)vel;
+    pl->sroll_left = len_q8;
+    pl->sroll_tag = tag;
+    pl->sroll_to_next = 0;            /* the first note now (the players run right after the steps) */
+}
+
+static void step_roll_fire(seq_t *s, int t, const seq_sink_t *o)
+{
+    player_t *pl = &s->player[t];
+    uint32_t carry = pl->sroll_to_next < SEQ_DUE ? pl->sroll_to_next : 0, L = seq_step_q8(s, t), left;
+    int roll = s->par[t][TP_P1] > 63 ? 63 : s->par[t][TP_P1];
+    if (pl->sroll_i >= pl->nsroll) {
+        pl->sroll_to_next = NEVER;
+        pl->nsroll = 0;
+        return;
+    }
+    left = pl->sroll_left > L / 4u ? pl->sroll_left : L / 4u;   /* (a note rolled past the chord's end: short) */
+    emit_note(s, t, pl->sroll[pl->sroll_i], pl->sroll_vel, 0, pl->sroll_tag + pl->sroll_i, left, o);
+    if (++pl->sroll_i >= pl->nsroll) {
+        pl->sroll_to_next = NEVER;
+        pl->nsroll = 0;
+    } else
+        pl->sroll_to_next = carry + L / 63u * (uint32_t)roll;
+}
+
+/* a track's player changed (or its latch turned off, no key down) while its notes sound: they go */
+static void players_follow_par(seq_t *s, const seq_sink_t *o)
+{
+    int t, w, i;
+    for (t = 0; t < NTRK; t++) {
+        player_t *pl = &s->player[t];
+        int ty = s->par[t][TP_PLAYER], la = s->par[t][TP_P4] != 0;
+        if (ty != pl->type_seen) {
+            if (pl->type_seen == PL_OFF)  /* direct keys: their notes */
+                for (w = 0; w < 4; w++)
+                    for (i = 0; i < 32; i++)
+                        if (pl->phys[w] >> i & 1u)
+                            player_note_off(s, t, w * 32 + i, TAG_KEY | (uint32_t)(w * 32 + i), o);
+            sounding_off(s, t, o);
+            arp_stop(s, t, o);
+            pl->nsroll = 0;
+            pl->sroll_to_next = NEVER;
+            pl->type_seen = (uint8_t)ty;
+            pl->latch_seen = (uint8_t)la;
+        } else if (la != pl->latch_seen) {
+            pl->latch_seen = (uint8_t)la;
+            if (la || pl->nphys)
+                continue;
+            if (ty == PL_ARP && pl->latched) {
+                pl->latched = 0;
+                pl->nheld = 0;
+                if (!pl->nsq)
+                    arp_stop(s, t, o);
+            } else if (ty == PL_STRUM)
+                sounding_off(s, t, o);
+        }
+    }
+}
+
 static void phys_set(uint32_t *phys, uint8_t *nphys, int note, int on)
 {
     uint32_t b = 1u << (note & 31);
@@ -1827,8 +1978,8 @@ static void rec_key_off(seq_t *s, int t, int note)
             tpat_t *tp = tpat(s, t);
             step_t *st = &tp->st[s->rec_step[i]];
             uint32_t L = s->t[t].step_q8 ? s->t[t].step_q8 : seq_step_q8(s, t);
-            int len = (int)((s->rec_age[i] + L / 8u) / (L / 4u));   /* quarter steps, rounded */
-            len = len < 1 ? 1 : len > 16 ? 16 : len;
+            int len = (int)((s->rec_age[i] + L / 8u) / (L / 4u)), most = pat_len(tp) * 4;   /* quarter steps, rounded */
+            len = step_len_code(len > most ? most : len);   /* (as long as the pattern at most) */
             if (is_drum(s, t)) {
                 if (kit_has(st, note))
                     st->len = (uint8_t)len;
@@ -1952,7 +2103,7 @@ static void key_in(seq_t *s, int t, int note, int on, int vel, int raw, const se
                 pl->latched = 1;
             else {
                 held_remove(pl, note);
-                if (!pl->nheld)
+                if (!pl->nheld && !pl->nsq)   /* (a step's notes keep it going) */
                     arp_stop(s, t, o);
             }
         }
@@ -2002,6 +2153,8 @@ static void keys_all_off(seq_t *s, int t, const seq_sink_t *o)
     pl->nphys = 0;
     sounding_off(s, t, o);
     arp_stop(s, t, o);
+    pl->nsroll = 0;
+    pl->sroll_to_next = NEVER;
 }
 
 /* a key on the BRAIN track: the lowest key held is the chord's root; the link track plays the key as pressed */
@@ -2361,6 +2514,8 @@ void seq_init(seq_t *s, patterns_t *P, uint8_t (*par)[NTP_ALL])
         s->player[t].arp_to_next = NEVER;
         s->player[t].arp_to_off = NEVER;
         s->player[t].roll_to_next = NEVER;
+        s->player[t].sroll_to_next = NEVER;
+        s->player[t].sq_to_off = NEVER;
         s->player[t].chord[0] = 60;   /* strum's chord until keys held together set one: a major triad */
         s->player[t].chord[1] = 64;
         s->player[t].chord[2] = 67;
@@ -2390,6 +2545,10 @@ uint32_t seq_until_event(seq_t *s, uint32_t n)
             mo = e;
         if (pl->roll_to_next != NEVER && (e = pl->roll_to_next >> 8) < m)
             m = e;
+        if (pl->sroll_to_next != NEVER && (e = pl->sroll_to_next >> 8) < m)
+            m = e;
+        if (pl->sq_to_off != NEVER && (e = pl->sq_to_off >> 8) < mo)
+            mo = e;
     }
     for (t = 0; t < NSEQT; t++) {
         const seq_trk_t *tr = &s->t[t];
@@ -2482,6 +2641,7 @@ void seq_advance(seq_t *s, uint32_t k, const seq_sink_t *o)
     if (s->ext_pending)
         ext_ticks(s);
     punch_update(s, o);
+    players_follow_par(s, o);
     keys_play(s, o);
     punch_update(s, o);               /* the keys just played may have started a loop or a fill */
     if (s->playing)                   /* a scale or length changed: back in phase */
@@ -2501,6 +2661,9 @@ void seq_advance(seq_t *s, uint32_t k, const seq_sink_t *o)
         dec(&s->player[t].arp_to_next, dq);
         dec(&s->player[t].arp_to_off, dq);
         dec(&s->player[t].roll_to_next, dq);
+        dec(&s->player[t].sroll_to_next, dq);
+        dec(&s->player[t].sq_to_off, dq);
+        s->player[t].sroll_left = s->player[t].sroll_left > dq ? s->player[t].sroll_left - dq : 0;
     }
     for (i = 0; i < 8; i++)
         if (s->rec_note[i])
@@ -2549,12 +2712,20 @@ void seq_advance(seq_t *s, uint32_t k, const seq_sink_t *o)
                 arp_off(s, t, o);
                 fired = 1;
             }
+            if (pl->sq_to_off < SEQ_DUE) {     /* a step's notes end (before the arp's next note) */
+                step_arp_end(s, t, o);
+                fired = 1;
+            }
             if (pl->arp_to_next < SEQ_DUE) {
                 arp_fire(s, t, o);
                 fired = 1;
             }
             if (pl->roll_to_next < SEQ_DUE) {
                 roll_fire(s, t, o);
+                fired = 1;
+            }
+            if (pl->sroll_to_next < SEQ_DUE) {
+                step_roll_fire(s, t, o);
                 fired = 1;
             }
         }

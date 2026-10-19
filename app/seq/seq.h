@@ -189,6 +189,13 @@ typedef struct {                      /* a player (per track; the arp's clock ru
     uint8_t roll_vel;
     uint8_t arp_wait;                 /* the first arp note waits for the grid */
     uint16_t drums_down;              /* a drum track: bit sound = its key is down (released through drum_off) */
+    uint8_t type_seen, latch_seen;    /* TP_PLAYER and TP_P4 last seen: a change lets the old player's notes go */
+    uint8_t sq[SN], nsq;              /* arp: the step's notes, held with the keys for the step's length */
+    uint32_t sq_to_off;               /* Q8, NEVER none */
+    uint8_t sroll[SN * 2], nsroll;    /* strum: a step's chord in its order, rolled */
+    uint8_t sroll_i, sroll_vel;
+    uint32_t sroll_to_next, sroll_left;   /* Q8: to the next note; to the chord's end (each note's off) */
+    uint32_t sroll_tag;               /* TAG_STEP | the step's: a note's tag adds its index */
 } player_t;
 
 typedef struct {
@@ -258,6 +265,7 @@ typedef struct {
      * track's steps playing). wv_from 0 = no weave set up, else the track + 1. Set by the UI, read here */
     volatile uint8_t wv_from[NSEQT], wv_pat[NSEQT], wv_rule[NSEQT];
     volatile uint16_t wv_live, wv_rec;
+    volatile uint16_t wv_always;      /* the tracks whose weave plays always (PLAYS always: set up = on) */
     uint8_t wv_ppat;                  /* the WEAVE track's pattern playing (the scene's) */
     uint8_t wv_left[NSEQT];           /* sixteenths each track's recorded weave still lasts */
     uint8_t wv_rec_at[NSEQT];         /* recording: the step a held weave started on (0xFF none) */

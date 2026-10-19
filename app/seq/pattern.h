@@ -57,7 +57,8 @@ extern const uint8_t SC_DEFAULT[NSC];      /* pulse 3 (= 4), hold 3, multiply 1,
 typedef struct {
     uint8_t note[SN];                 /* MIDI notes, 0 = none (a kit track: its sounds as bits, seq.h kit_*) */
     uint8_t vel;                      /* 1..127 */
-    uint8_t len;                      /* quarter steps, 0 = the pattern's note length */
+    uint8_t len;                      /* 0 = the pattern's note length; 1..64 quarter steps; 65..112 = 17..64 whole
+                                       * steps (a note as long as the pattern: step_len_q) */
     int8_t nudge;                     /* ticks, -12..12 */
     uint8_t comp;                     /* SC_* */
     uint8_t cval;                     /* the component's value 0..9 (skips: SK_VAL) */
@@ -67,6 +68,12 @@ typedef struct {
 /* a kit track's step: any of its NDRUM sounds (1..11), a bit each (bit k: sound k + 1) in note[0] (sounds 1-8) and
  * note[1] (9-11); note[2] and note[3] stay 0, so step_empty holds */
 #define KIT_ALL ((1u << NDRUM) - 1u)
+#define LEN_MAX (NSTEP + 48)          /* a step's longest len: 64 steps */
+static inline int step_len_q(int len) { return len <= 64 ? len : (len > LEN_MAX ? NSTEP : len - 48) * 4; }   /* quarter steps */
+static inline int step_len_code(int q)   /* quarter steps (1..NSTEP * 4) to a len: past 16 steps, whole steps up */
+{
+    return q <= 64 ? (q < 1 ? 1 : q) : (q + 3) / 4 + 48 > LEN_MAX ? LEN_MAX : (q + 3) / 4 + 48;
+}
 static inline uint32_t kit_mask(const step_t *st) { return ((uint32_t)st->note[0] | (uint32_t)st->note[1] << 8) & KIT_ALL; }
 static inline int kit_has(const step_t *st, int sound) { return sound >= 1 && sound <= NDRUM && (kit_mask(st) >> (sound - 1) & 1u); }
 void kit_set(step_t *st, uint32_t mask);

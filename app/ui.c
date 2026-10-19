@@ -521,7 +521,7 @@ static void step_length_to(int j)
     if (e <= s)
         return;
     undo_keep();
-    st->len = (uint8_t)clampi((e - s + 1) * 4, 1, 64);
+    st->len = (uint8_t)step_len_code((e - s + 1) * 4);
     ui.held_used = 1;
     num_s((uint32_t)(e - s + 1), s_cat(t, "to step "));
     say("LENGTH", t + 3);
@@ -600,7 +600,8 @@ static void step_knob(int k, int32_t e)          /* k 4: the nudge (OCT-/OCT+) *
             if (k == 0)
                 st->vel = (uint8_t)clampi(st->vel + e, 1, 127);
             else if (k == 1)
-                st->len = (uint8_t)clampi(st->len + e, 0, 64);
+                st->len = (uint8_t)clampi(st->len + e, 0, step_len_code(tpat(trk)->len * 4));   /* (the pattern's
+                                                                                                * length at most) */
             else if (k == 2) {
                 int c = st->cond;
                 c = c < COND_AB ? c + (int)e : COND_AB + clampi(c - COND_AB + (int)e, -1, COND_NAB);
@@ -1209,12 +1210,14 @@ static void page_button(int b)
 {
     if (b != B_GLO && is_fx(sel_trk()))          /* (FX I and FX II are Mix's strips: elsewhere the instrument again) */
         track_select(ui.last_inst);
+    if (is_aux(sel_trk()) && (b == B_ENV || b == B_LFO || (b == B_ARP && (is_fx(sel_trk()) || sel_trk() == AUX_WEAVE)))) {
+        /* (no such page here: EDIT's instead, saying where it is) */
+        say(TRACK_NAME[sel_trk()], sel_trk() == AUX_WEAVE && b == B_ARP ? "each track's weave: on its ARP"
+                                                                         : "its knobs are on EDIT");
+        b = B_EDIT;
+    }
     for (uint32_t i = 0; i < NPAGE_BTN; i++)
         if (PAGE_BTN[i].btn == b) {
-            if (is_aux(sel_trk()) && (b == B_ENV || b == B_LFO || (b == B_ARP && (is_fx(sel_trk()) || sel_trk() == AUX_WEAVE)))) {
-                say_no(TRACK_NAME[sel_trk()], "EDIT has its page");
-                return;
-            }
             ui.page = (uint8_t)(b == B_HOME && ui.page == P_ARRANGE ? P_SONG : grp_page((int)i, 0));
             ui.touched = -1;
             ui.held = 0;
@@ -1557,6 +1560,10 @@ static void knob(int k, int32_t e)
         weave_set(trk, k == 0 ? clampi(wv_from(trk) + (e > 0 ? 1 : -1), 0, NSEQT) : -1,
                   k == 1 ? clampi(wv_pat(trk) + (e > 0 ? 1 : -1), 0, NPATT - 1) : -1,
                   k == 2 ? clampi(wv_rule(trk) + (e > 0 ? 1 : -1), 0, NWV - 1) : -1);
+        if (k == 3 && wv_from(trk)) {            /* PLAYS: always, or only on the WEAVE track */
+            proj.trk[trk].rsv[3] = e > 0 ? 1 : 0;
+            weave_set(trk, -1, -1, -1);          /* (applied, marked unsaved) */
+        }
         return;
     case P_ARRANGE: arrange_knob(k, e); return;
     case P_SONG: song_knob(k, e); return;
@@ -1889,6 +1896,10 @@ static void weave_apply(int t)
     seq.wv_pat[t] = (uint8_t)wv_pat(t);
     seq.wv_rule[t] = (uint8_t)wv_rule(t);
     seq.wv_from[t] = (uint8_t)wv_from(t);
+    if (wv_from(t) && !wv_cued(t))               /* PLAYS always: it weaves once set up */
+        seq.wv_always |= (uint16_t)(1u << t);
+    else
+        seq.wv_always &= (uint16_t)~(1u << t);
 }
 /* the WEAVE track's keys: a white key 1-10 weaves its track while held, or (latch) on with a tap, off with the next */
 static void weave_key(int k, int on)
@@ -3158,3 +3169,8 @@ void ui_frame(void)
 }
 
 void ui_input_only(void) { input(); }
+void ui_redraw(void)                             /* every band drawn again at the next frame (their signatures forgotten) */
+{
+    for (uint32_t i = 0; i < sizeof ui.sig / sizeof ui.sig[0]; i++)
+        ui.sig[i] = 0;
+}

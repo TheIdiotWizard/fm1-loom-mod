@@ -334,6 +334,37 @@ static void t_length(void)
     printf("ok %s\n", cur);
 }
 
+static void t_long_page(void)          /* a note held past its page: step 16 to 20 of a 32-step pattern */
+{
+    ev_t *on;
+    cur = "long_page";
+    reset();
+    P.pat[0][0].len = 32;
+    note(0, 15, 60, 100);
+    st(0, 15)->len = 20;              /* five steps */
+    start();
+    run(24 * L16);
+    on = on_n(0);
+    CHECK(on && near(on->t, 15 * L16 + 7, 4));
+    CHECK(off_of(on) && near(off_of(on)->t, 20 * L16 + 10, 6));
+    /* longer than sixteen steps (whole steps past them), and round from the pattern's end to its start */
+    CHECK(step_len_q(step_len_code(20 * 4)) == 80 && step_len_code(64 * 4) == LEN_MAX && step_len_q(LEN_MAX) == 256);
+    stop();
+    reset();
+    P.pat[0][0].len = 32;
+    note(0, 0, 60, 100);
+    st(0, 0)->len = (uint8_t)step_len_code(20 * 4);
+    note(0, 28, 62, 100);
+    st(0, 28)->len = (uint8_t)step_len_code(8 * 4);
+    start();
+    run(40 * L16);
+    on = on_n(0);
+    CHECK(on && on->a == 60 && off_of(on) && near(off_of(on)->t, 20 * L16 + 10, 8));
+    on = on_n(1);
+    CHECK(on && on->a == 62 && off_of(on) && near(off_of(on)->t, 36 * L16 + 18, 10));
+    printf("ok %s\n", cur);
+}
+
 static void t_chord(void)
 {
     cur = "chord";
@@ -1261,6 +1292,96 @@ static void t_maestro(void)
     printf("ok %s\n", cur);
 }
 
+static void t_player_switch(void)     /* the player changed while its notes sound: they go */
+{
+    cur = "player_switch";
+    reset();
+    par[0][TP_PLAYER] = PL_STRUM;
+    seq_key(&S, 0, 60, 1, 90);
+    run(10);
+    CHECK(count(E_ON, 0) == 3 && count(E_OFF, 0) == 0);
+    par[0][TP_PLAYER] = PL_OFF;
+    run(10);
+    CHECK(count(E_OFF, 0) == 3);
+    seq_key(&S, 0, 60, 0, 0);
+    run(10);
+    /* direct keys, then an arp: the key's note goes */
+    nev = 0;
+    seq_key(&S, 0, 62, 1, 90);
+    run(10);
+    CHECK(count(E_ON, 0) == 1);
+    par[0][TP_PLAYER] = PL_ARP;
+    run(10);
+    CHECK(count(E_OFF, 0) == 1);
+    seq_key(&S, 0, 62, 0, 0);
+    run(10);
+    /* a latched arp, latch turned off with no key down: it stops */
+    nev = 0;
+    par[0][TP_P1] = 4;
+    par[0][TP_P4] = 1;
+    seq_key(&S, 0, 64, 1, 90);
+    seq_key(&S, 0, 64, 0, 0);
+    run(3 * L16);
+    CHECK(count(E_ON, 0) >= 2);
+    par[0][TP_P4] = 0;
+    run(10);
+    nev = 0;
+    run(3 * L16);
+    CHECK(count(E_ON, 0) == 0);
+    printf("ok %s\n", cur);
+}
+
+static void t_step_players(void)      /* the arp and the strum play the steps' notes too */
+{
+    ev_t *a, *b, *c;
+    cur = "step_players";
+    reset();
+    par[0][TP_PLAYER] = PL_ARP;
+    par[0][TP_P1] = 4;                /* 1/16 */
+    par[0][TP_P3] = 1;
+    st(0, 0)->note[0] = 60;
+    st(0, 0)->note[1] = 64;
+    st(0, 0)->note[2] = 67;
+    st(0, 0)->vel = 100;
+    st(0, 0)->len = 16;               /* four steps */
+    start();
+    run(8 * L16);
+    CHECK(count(E_ON, 0) == 4 && on_n(0)->a == 60 && on_n(1)->a == 64 && on_n(2)->a == 67 && on_n(3)->a == 60);
+    CHECK(near(on_n(0)->t, 0, 2) && near(on_n(3)->t, 3 * L16 + 2, 4));
+    CHECK(count(E_OFF, 0) == 4);
+    stop();
+    /* a key held joins the step's notes */
+    nev = 0;
+    start();
+    seq_key(&S, 0, 72, 1, 100);
+    run(4 * L16 - L16 / 2);
+    CHECK(count(E_ON, 0) == 4 && on_n(3)->a == 72);
+    seq_key(&S, 0, 72, 0, 0);
+    stop();
+    /* strum: a step's chord rolled, all ending together; one note: the strum's chord from it */
+    reset();
+    par[0][TP_PLAYER] = PL_STRUM;
+    par[0][TP_P1] = 21;               /* a third of a step between the notes */
+    st(0, 0)->note[0] = 67;
+    st(0, 0)->note[1] = 60;
+    st(0, 0)->note[2] = 64;
+    st(0, 0)->vel = 100;
+    st(0, 0)->len = 8;                /* two steps */
+    st(0, 4)->note[0] = 62;
+    st(0, 4)->vel = 100;
+    start();
+    run(3 * L16);
+    CHECK(count(E_ON, 0) == 3);
+    a = on_n(0), b = on_n(1), c = on_n(2);
+    CHECK(a->a == 60 && b->a == 64 && c->a == 67);
+    CHECK(near(b->t - a->t, L16 / 3u, 4) && near(c->t - b->t, L16 / 3u, 4));
+    CHECK(off_of(a) && off_of(c) && near(off_of(a)->t, 2 * L16 + 2, 6) && near(off_of(c)->t, 2 * L16 + 2, 6));
+    nev = 0;
+    run(3 * L16);
+    CHECK(count(E_ON, 0) == 3 && on_n(0)->a == 62 && on_n(1)->a == 66 && on_n(2)->a == 69);
+    printf("ok %s\n", cur);
+}
+
 static void t_hold_player(void)
 {
     cur = "hold-player";
@@ -2175,6 +2296,7 @@ int main(void)
     t_scale();
     t_groove();
     t_length();
+    t_long_page();
     t_chord();
     t_pulse();
     t_hold();
@@ -2199,6 +2321,8 @@ int main(void)
     t_brain();
     t_arp();
     t_maestro();
+    t_player_switch();
+    t_step_players();
     t_hold_player();
     t_punch_keys();
     t_duck();

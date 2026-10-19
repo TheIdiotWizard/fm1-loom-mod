@@ -65,6 +65,8 @@ void app_input_only(void);
 void app_say(const char *a, const char *b);
 #define APP_SPLASH                      /* the name over the eight tracks' inks woven as threads */
 void app_splash(void);
+#define APP_REDRAW                      /* the screen mirror lost a part (or a viewer came): every band again */
+void app_redraw(void);
 #define APP_SYSEX                       /* the user sample bank over USB-MIDI (samples.c: F0 7D 46 4C) */
 int app_sysex(const uint8_t *p, uint32_t n);
 #ifndef PLAT_HOST
@@ -180,6 +182,7 @@ int presets_save(void);
 void ui_init(void);
 void ui_frame(void);
 void ui_input_only(void);
+void ui_redraw(void);
 int ui_dirty(void);
 int ui_asking(void);                             /* a question is up (the host's expect ask) */
 void ui_say(const char *a, const char *b);
