@@ -1,0 +1,2111 @@
+From a0bb6c9779c80b2c6b4a77d519c408e348d5ba32 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 22 Oct 2026 09:48:31 -0400
+Subject: [PATCH] Add a per-track modulation matrix (Mod page) and mod wheel,
+ expression and aftertouch sources
+
+CC 1 becomes the live mod wheel (default: MODW to VIB on every synth engine); the LFO amount moves to CC 12.
+The matrix is saved in the patterns stream (project format 14; older projects load with the default matrix).
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_013YjoTA4NbzPqTJ9LZYw5Ry
+---
+ app/app.h                    |   3 +-
+ app/dsp/modmx.h              |  71 ++++
+ app/dsp/synth.c              | 200 +++++++++-
+ app/dsp/synth.h              |   8 +-
+ app/engine.c                 |  26 ++
+ app/engine.h                 |   2 +
+ app/host.c                   |  48 +++
+ app/midicc.c                 |   5 +-
+ app/pages.c                  |  91 ++++-
+ app/project.c                |  24 +-
+ app/seq/pattern.c            |   2 +
+ app/seq/pattern.h            |   4 +
+ app/ui.c                     |  52 +++
+ docs/MANUAL.md               |  27 +-
+ tests/fixtures/make_v13.xy   |  14 +
+ tests/fixtures/store_v13.bin | Bin 0 -> 5680 bytes
+ tests/host/mod_test.c        | 734 +++++++++++++++++++++++++++++++++++
+ tests/host/mod_test.sh       |  16 +
+ tests/run_tests.sh           |   2 +-
+ tests/scenarios/midicc.xy    |  25 +-
+ tests/scenarios/migrate.xy   |  22 ++
+ tests/scenarios/modpage.xy   |  68 ++++
+ 22 files changed, 1418 insertions(+), 26 deletions(-)
+ create mode 100644 app/dsp/modmx.h
+ create mode 100644 tests/fixtures/make_v13.xy
+ create mode 100644 tests/fixtures/store_v13.bin
+ create mode 100644 tests/host/mod_test.c
+ create mode 100644 tests/host/mod_test.sh
+ create mode 100644 tests/scenarios/modpage.xy
+
+diff --git a/app/app.h b/app/app.h
+index d865ed9..94afb7d 100644
+--- a/app/app.h
++++ b/app/app.h
+@@ -118,7 +118,8 @@ void loom_lights(uint32_t buttons, uint32_t keys, int glow, uint32_t dim_keys, i
+ #define DEBUG_BUILD (APP_VERSION[0] == 'D' && APP_VERSION[1] == 'E' && APP_VERSION[2] == 'V' && \
+                      (!APP_VERSION[3] || APP_VERSION[3] == 'T'))   /* DEV, or the load test's DEVTEST */
+ #define PROJ_MAGIC 0x384D4F4Cu          /* "LOM8" (was "XXY1": XY-1's projects start fresh) */
+-#define PROJ_FORMAT 13u                 /* (10, 0.5-beta's, to 12 load too: project.c migrate_old; older ones do not)
++#define PROJ_FORMAT 14u                 /* (10, 0.5-beta's, to 13 load too: project.c migrate_old; older ones do not)
++                                         * 14: the modulation matrices (patterns_t mod, the packed stream's tail);
+                                          * 13: the shared LFO (the conductor's LFO slots: glfo_defaults on an older one);
+                                          * 12: a scene's kit sound mutes per kit track (scene_t kmute[NKITM]);
+                                          * 11: 32 scenes, a scene's kit sound mutes (one mask);
+diff --git a/app/dsp/modmx.h b/app/dsp/modmx.h
+new file mode 100644
+index 0000000..f9eaa3f
+--- /dev/null
++++ b/app/dsp/modmx.h
+@@ -0,0 +1,71 @@
++/* SPDX-License-Identifier: GPL-3.0-only */
++/* LOOM-8's modulation matrix: per instrument track four slots, each a source sent to a destination by an amount.
++ * The idea, the sources and the way the destinations scale come from Melodee's mod.c (Kerem Kilic, Ellic Studio,
++ * GPL-3.0); the code is LOOM-8's own, on its voices (dsp/synth.c, "the matrix").
++ *
++ * Sources: unipolar (0..1) ENV the voice's amp envelope, VEL the note's velocity, MODW the mod wheel (MIDI CC 1),
++ * AT channel aftertouch, EXPR expression (MIDI CC 11; 1 until a controller arrives); bipolar (-1..1) LFO the
++ * track's LFO (its shape, before its amount; only while the LFO's type is wave, drift or wobble), KEY the note
++ * about middle C (+-64 semitones = +-1), RAND a new random value per note, S/H a random value held for one cycle of
++ * the track LFO (whatever its type: the LFO's speed still runs), SLEW the same glided to the next one.
++ * Destinations: per voice PITCH (full source at amount 63: +-12 semitones), CUT and RES (knob units: 63 = +-63 of
++ * 127), AMP (a gain <= 1: a positive amount opens it with the source, a negative closes it; slots multiply), PAN
++ * (knob units), the engine's four knobs E1..E4 (the knob's whole range at amount 64); per track RATE (the LFO's
++ * rate: 63 = +-3 octaves), VIB (the depth of a vibrato, a sine at the LFO's rate, or 5.5 Hz while the LFO is off
++ * or a pump: 63 = +-1 semitone), DEPTH (a gain <= 1 on the track LFO, as AMP is on the voice: with RATE the matrix
++ * modulates the modulator, MODW to DEPTH is a mod-wheel LFO).
++ * Idle (no slot with a source, a destination and an amount, or every source at its zero) the sound is bit-identical
++ * to a build without the matrix.
++ * The stored values are LOOM-8's own: append to the lists, never reorder (they are saved by number). */
++#pragma once
++#include <stdint.h>
++
++#define MX_NSLOT 4
++enum { MXS_OFF, MXS_LFO, MXS_ENV, MXS_VEL, MXS_KEY, MXS_RAND, MXS_MODW, MXS_AT, MXS_EXPR, MXS_SH, MXS_SLEW, MXS_N };
++enum { MXD_OFF, MXD_PITCH, MXD_CUT, MXD_RES, MXD_AMP, MXD_PAN, MXD_RATE, MXD_VIB, MXD_DEPTH,
++       MXD_E1, MXD_E2, MXD_E3, MXD_E4, MXD_N };
++#define MX_AMT_LO (-64)
++#define MX_AMT_HI 63
++/* a new track: the mod wheel opens a vibrato about +-0.5 semitone (half the way) */
++#define MX_DEF_SRC MXS_MODW
++#define MX_DEF_DST MXD_VIB
++#define MX_DEF_AMT 32
++
++typedef struct {
++    uint8_t src, dst;                 /* MXS_*, MXD_* */
++    int8_t amt;                       /* MX_AMT_LO..MX_AMT_HI */
++} mxslot_t;
++typedef struct {
++    mxslot_t s[MX_NSLOT];
++} mx_t;                               /* 12 bytes a track */
++
++/* the live controllers of a track (written by the audio interrupt from MIDI in, read by the voices): the mod wheel
++ * and channel aftertouch 0..127 (0 until a controller arrives, and after CC 121), expression 0..127 (127 likewise) */
++enum { MXL_MODW, MXL_AT, MXL_EXPR, MXL_N };
++
++static inline void mx_clear(mx_t *m)
++{
++    for (int i = 0; i < MX_NSLOT; i++)
++        m->s[i] = (mxslot_t){0, 0, 0};
++}
++static inline void mx_default(mx_t *m)
++{
++    mx_clear(m);
++    m->s[0] = (mxslot_t){MX_DEF_SRC, MX_DEF_DST, MX_DEF_AMT};
++}
++/* a stored matrix made safe to index with (a stray byte, a build whose lists moved) */
++static inline void mx_clamp(mx_t *m)
++{
++    for (int i = 0; i < MX_NSLOT; i++) {
++        mxslot_t *s = &m->s[i];
++        if (s->src >= MXS_N || s->dst >= MXD_N)
++            s->src = s->dst = 0, s->amt = 0;
++        if (s->amt < MX_AMT_LO)
++            s->amt = MX_AMT_LO;
++        if (s->amt > MX_AMT_HI)
++            s->amt = MX_AMT_HI;
++    }
++}
++extern const char *const MXS_NAME[MXS_N];     /* "OFF", "LFO", ... (dsp/synth.c) */
++extern const char *const MXS_LONG[MXS_N];     /* "off", "LFO", "envelope", ... */
++extern const char *const MXD_NAME[MXD_N];     /* "OFF", "PITCH", ..., "E1".."E4" (the engine's knob names: MXD_KNOB) */
+diff --git a/app/dsp/synth.c b/app/dsp/synth.c
+index fb0ae08..d209bc4 100644
+--- a/app/dsp/synth.c
++++ b/app/dsp/synth.c
+@@ -61,6 +61,12 @@ const char *const RL_NAME[NRL] = {"bass", "lead", "pad", "keys", "pluck", "bell"
+                                   "chord", "fx", "drum", "loop"};
+ const char *const EG_NAME[NENGINE] = {"knit", "rayon", "jacquard", "bellows", "cane", "voile", "sample", "slice",
+                                       "kit"};
++/* the matrix's lists (modmx.h): short names for the page's cell, long ones for its list and the reader */
++const char *const MXS_NAME[MXS_N] = {"OFF", "LFO", "ENV", "VEL", "KEY", "RAND", "MODW", "AT", "EXPR", "S/H", "SLEW"};
++const char *const MXS_LONG[MXS_N] = {"off", "LFO", "envelope", "velocity", "key", "random", "mod wheel", "aftertouch",
++                                     "expression", "sample and hold", "slew"};
++const char *const MXD_NAME[MXD_N] = {"OFF", "PITCH", "CUT", "RES", "AMP", "PAN", "RATE", "VIB", "DEPTH",
++                                     "E1", "E2", "E3", "E4"};
+ const char *const EG_KNOB[NENGINE][4] = {
+     {"wave", "detune", "voices", "width"}, {"bright", "ratio", "edge", "tine"},     {"table", "scan", "bend", "ripple"},
+     {"stops", "pedal", "rotor", "rate"},   {"model", "timbre", "color", "damp"},   {"model", "timbre", "color", "breath"},
+@@ -143,6 +149,7 @@ typedef struct {
+     uint8_t trk, held, engine, steal_phase;   /* held: the key is down; steal: 1 fading out, 2 in */
+     uint8_t note, pend_note, pend_vel, pend_held;
+     uint32_t tag, pend_tag, age;
++    int8_t mrnd;                      /* the matrix's RAND: a value drawn when the note started (-127..127) */
+     float vel, pitch, pitch_cur, glide_k;     /* semitones; glide_k: the chunk's approach fraction */
+     int16_t pend_glide;
+     uint16_t pos;                     /* sample in the chunk */
+@@ -202,6 +209,12 @@ typedef struct {
+     int16_t ldest;                    /* the resolved destination: a TP_* index, LD_PITCH or LD_NONE */
+     uint32_t rng;
+     float loff[NCK], lpitch[NCK], lgain[NCK];   /* the chunk slots: offset (param units), cents, gain */
++    /* the modulation matrix (modmx.h): the track LFO's shape at each chunk (Q15, bipolar, before its amount; with the
++     * depth gain), the vibrato's phase at the block's start and its step a chunk (turns), the LFO source of the
++     * block before (RATE and DEPTH read it), the last cycle's random value (S/H's was lfo_sh), the engine knobs' ranges */
++    int16_t lsrc[NCK], lsrc_prev;
++    float vib_ph, vib_dph, vib_acc, lfo_prev;
++    uint8_t elo[4], ehi[4];
+ } trk_t;
+ 
+ struct synth {
+@@ -218,6 +231,8 @@ struct synth {
+     float g_ph, g_sh, g_now;          /* its phase, its random value, its value at the block's end (-1..1) */
+     uint32_t g_rng;                   /* (its random steps' generator)*/
+     volatile uint8_t g_reset;         /* restart at the next prepare (the transport started) */
++    const mx_t *mx;                   /* the tracks' modulation matrices and live controllers (synth_mod), or null */
++    const uint8_t (*mxl)[MXL_N];
+ };
+ uint32_t synth_load_steals;           /* new notes that took a sounding voice to stay inside LOAD_ADMIT (synth.h) */
+ _Static_assert(sizeof(struct synth) <= SYNTH_BYTES, "synth_t outgrew SYNTH_BYTES");
+@@ -245,6 +260,19 @@ static inline uint32_t xs(uint32_t *r)
+     return x;
+ }
+ static inline float frand(uint32_t *r) { return (float)(int32_t)xs(r) * (1.0f / 2147483648.0f); }   /* -1..1 */
++/* the matrix's RAND for a note: a hash of what is read-only in a render (the note count, the tag, the voice) so a
++ * stolen note's start (in a render, on either core) needs no shared state and no voice's own generator moves */
++static inline int8_t mx_draw(const synth_t *s, const voice_t *v, int note, int vel, uint32_t tag)
++{
++    uint32_t h = s->counter * 2654435761u ^ tag * 2246822519u ^ (uint32_t)note << 8 ^ (uint32_t)vel << 16 ^
++                 (uint32_t)v->vi * 3266489917u;
++    h ^= h >> 15;
++    h *= 2246822519u;
++    h ^= h >> 13;
++    h *= 3266489917u;
++    h ^= h >> 16;
++    return (int8_t)((int)((h >> 8) % 255u) - 127);
++}
+ static inline float blep(float t, float dt, float idt)      /* the PolyBLEP residual at phase t, step dt */
+ {
+     if (t < dt) {
+@@ -1185,6 +1213,7 @@ static void voice_start(synth_t *s, voice_t *v, int note, int vel, int glide_ms,
+     v->note = (uint8_t)note;
+     v->tag = tag;
+     v->vel = (float)vel * (1.0f / 127.0f);
++    v->mrnd = mx_draw(s, v, note, vel, tag);
+     v->held = (uint8_t)held;
+     v->pitch = (float)note;
+     v->pitch_cur = (ms > 0.5f && t->last_pitch > 0.0f) ? t->last_pitch : v->pitch;
+@@ -1505,6 +1534,7 @@ void synth_note_on(synth_t *s, int trk, int note, int vel, int glide_ms, uint32_
+             v->note = (uint8_t)note;
+             v->tag = tag;
+             v->vel = (float)vel * (1.0f / 127.0f);
++            v->mrnd = mx_draw(s, v, note, vel, tag);
+             v->held = 1;
+             v->pitch = (float)note;
+             v->glide_k = ms > 0.5f ? 1.0f - fm_expf(-(float)SY_CHUNK * 1000.0f / (ms * SY_SR)) : 1.0f;
+@@ -1680,6 +1710,12 @@ void synth_duck_trigger(synth_t *s, int src)
+         }
+ }
+ 
++void synth_mod(synth_t *s, const mx_t *m, const uint8_t (*live)[MXL_N])
++{
++    s->mx = m && live ? m : 0;
++    s->mxl = live;
++}
++
+ void synth_init(synth_t *s, uint8_t (*par)[NTP])
+ {
+     int i, j;
+@@ -1736,6 +1772,89 @@ static inline float lfo_wave_trem(int shape, float ph)    /* sine, saw, exponent
+     }
+ }
+ 
++/* ------------------------------------------------------------- the matrix --- */
++/* modmx.h says what the slots mean. The sources a voice has of its own (ENV, VEL, KEY, RAND, the LFO with this voice's
++ * fade) come in an mxv_t: a voice's, or, for the destinations that belong to the track (RATE, DEPTH), the track's
++ * newest sounding voice's (synth_prepare gathers them). Everything else is the track's: the live controllers, S/H,
++ * SLEW. Evaluated once a chunk for each voice (voice_chunk), once a block for the track (synth_prepare). */
++#define MX_Q (1.0f / 32768.0f)
++#define MX_BIPOLAR(s) ((s) == MXS_LFO || (s) == MXS_KEY || (s) == MXS_RAND || (s) >= MXS_SH)
++typedef struct { float lfo, env, vel, key, rnd; } mxv_t;
++typedef struct {
++    float e[4], cut, res, pan, pitch, vib, gain;
++    uint8_t emask;                                /* the engine knobs a slot moved (bit j: E(j+1)) */
++} mxr_t;
++static inline int mx_has(const mx_t *m)           /* a slot that does anything (a stray byte counts as none) */
++{
++    for (int i = 0; i < MX_NSLOT; i++)
++        if (m->s[i].src && m->s[i].src < MXS_N && m->s[i].dst && m->s[i].dst < MXD_N && m->s[i].amt)
++            return 1;
++    return 0;
++}
++static inline float mx_unit(float x)               /* a source as 0..1 (a bipolar one about the middle) */
++{
++    return x * 0.5f + 0.5f;
++}
++static float mx_source(const synth_t *s, const trk_t *t, int trk, int src, const mxv_t *x)
++{
++    switch (src) {
++    case MXS_LFO: return x->lfo;
++    case MXS_ENV: return x->env;
++    case MXS_VEL: return x->vel;
++    case MXS_KEY: return x->key;
++    case MXS_RAND: return x->rnd;
++    case MXS_MODW: return (float)s->mxl[trk][MXL_MODW] * (1.0f / 127.0f);
++    case MXS_AT: return (float)s->mxl[trk][MXL_AT] * (1.0f / 127.0f);
++    case MXS_EXPR: return (float)s->mxl[trk][MXL_EXPR] * (1.0f / 127.0f);
++    case MXS_SH: return t->lfo_sh;
++    default: return t->lfo_prev + (t->lfo_sh - t->lfo_prev) * t->lfo_ph;   /* SLEW: last cycle's value to this one's */
++    }
++}
++/* a gain <= 1 from a source at amount a (AMP, DEPTH): a > 0 the source opens it (a 64: shut at 0, open at 1), a < 0
++ * closes it */
++static float mx_gain(int src, float x, float a)
++{
++    float u = MX_BIPOLAR(src) ? mx_unit(x) : x, g = 1.0f - (a > 0.0f ? (1.0f - u) * a : u * -a) * (1.0f / 64.0f);
++    return g < 0.0f ? 0.0f : g > 1.0f ? 1.0f : g;
++}
++static inline float mx_clip1(float x) { return x < -1.0f ? -1.0f : x > 1.0f ? 1.0f : x; }
++static void mx_voice_src(mxv_t *x, const voice_t *v, float lfo)   /* a sounding voice's own sources */
++{
++    x->lfo = lfo;
++    x->env = v->amp.level;
++    x->vel = v->vel;
++    x->key = mx_clip1((v->pitch - 60.0f) * (1.0f / 64.0f));
++    x->rnd = (float)v->mrnd * (1.0f / 127.0f);
++}
++/* every slot that reaches a voice: what to add where (RATE, DEPTH are the track's, synth_prepare) */
++static void mx_eval(const synth_t *s, const trk_t *t, int trk, const mxv_t *x, mxr_t *r)
++{
++    const mx_t *m = &s->mx[trk];
++    r->e[0] = r->e[1] = r->e[2] = r->e[3] = r->cut = r->res = r->pan = r->pitch = r->vib = 0.0f;
++    r->gain = 1.0f;
++    r->emask = 0;
++    for (int i = 0; i < MX_NSLOT; i++) {
++        int src = m->s[i].src, dst = m->s[i].dst;
++        float a = (float)m->s[i].amt, v;
++        if (!src || src >= MXS_N || !dst || dst >= MXD_N || a == 0.0f || dst == MXD_RATE || dst == MXD_DEPTH)
++            continue;
++        v = mx_source(s, t, trk, src, x);
++        switch (dst) {
++        case MXD_PITCH: r->pitch += v * a * (1200.0f / 63.0f); break;      /* cents: 63 = +-12 semitones */
++        case MXD_CUT: r->cut += v * a; break;                                /* knob units */
++        case MXD_RES: r->res += v * a; break;
++        case MXD_PAN: r->pan += v * a; break;
++        case MXD_VIB: r->vib += v * a * (100.0f / 63.0f); break;           /* cents of depth: 63 = +-1 semitone */
++        case MXD_AMP: r->gain *= mx_gain(src, v, a); break;
++        default: {                                                           /* E1..E4: the knob's whole range at 64 */
++            int j = dst - MXD_E1;
++            r->e[j] += v * a * (1.0f / 64.0f) * (float)(t->ehi[j] - t->elo[j]);
++            r->emask |= (uint8_t)(1u << j);
++        }
++        }
++    }
++}
++
+ /* the track-level values of every chunk boundary inside the next n frames: the LFO (wave, drift:
+  * an offset on its destination; wobble: a gain and a vibrato; pump: a gain), one slot each. The
+  * voices read the slots in order as they cross the boundaries. Also the meters. */
+@@ -1795,27 +1914,67 @@ static void glfo_prepare(synth_t *s)
+ void synth_prepare(synth_t *s, uint32_t n)
+ {
+     float tpk[NTRK];
++    mxv_t mlat[NTRK];                            /* the matrix: each track's newest sounding voice's own sources */
++    uint32_t mage[NTRK];
+     int i, k, nck = 0;
+     uint32_t off = (SY_CHUNK - s->pos) % SY_CHUNK;
+     for (; off < n && nck < NCK; off += SY_CHUNK)
+         nck++;
+     s->nck = (uint8_t)(nck ? nck : 1);
+     glfo_prepare(s);
+-    for (i = 0; i < NTRK; i++)
++    for (i = 0; i < NTRK; i++) {
+         tpk[i] = 0.0f;
++        mlat[i] = (mxv_t){0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
++        mage[i] = 0;
++    }
+     for (k = 0; k < NVOICE; k++) {               /* each track's loudest voice, the voices' peaks cleared: one pass */
+         voice_t *v = &s->v[k];
+         if (v->trk < NTRK) {
+             if (v->peak > tpk[v->trk])
+                 tpk[v->trk] = v->peak;
+             v->peak = 0.0f;
++            if (s->mx && v_sounding(v) && v->age >= mage[v->trk]) {   /* (the newest: RATE and DEPTH's sources) */
++                mage[v->trk] = v->age;
++                mx_voice_src(&mlat[v->trk], v, 0.0f);
++            }
+         }
+     }
+     for (i = 0; i < NTRK; i++) {
+         trk_t *t = &s->t[i];
+         int type = P(s, i, TP_LTYPE), lx = P(s, i, TP_LX), lx2 = P(s, i, TP_LX2), engine = P(s, i, TP_ENGINE);
+         float hz = type == LT_PUMP ? 0.0f : lfo_hz(P(s, i, TP_LSPEED), s->bpm), dph = hz * CHUNK_S;
+-        float amt = (float)P(s, i, TP_LAMT), pk = 0.0f, vib = 0.0f, vol = 0.0f;
++        float amt = (float)P(s, i, TP_LAMT), pk = 0.0f, vib = 0.0f, vol = 0.0f, ldep = 1.0f, vib_hz = 5.5f;
++        const int mxon = s->mx && mx_has(&s->mx[i]);
++        if (mxon) {   /* the matrix's track destinations: RATE (octaves on the LFO's speed) and DEPTH (a gain on the LFO) */
++            const mx_t *m = &s->mx[i];
++            float oct = 0.0f;
++            mlat[i].lfo = (float)t->lsrc_prev * MX_Q;
++            for (int j = 0; j < MX_NSLOT; j++) {
++                int src = m->s[j].src, dst = m->s[j].dst;
++                float a = (float)m->s[j].amt;
++                if (!src || src >= MXS_N || a == 0.0f)
++                    continue;
++                if (dst == MXD_RATE)
++                    oct += mx_source(s, t, i, src, &mlat[i]) * a * (3.0f / 63.0f);
++                else if (dst == MXD_DEPTH)
++                    ldep *= mx_gain(src, mx_source(s, t, i, src, &mlat[i]), a);
++            }
++            if (oct != 0.0f) {
++                float f = fm_exp2f(oct);
++                hz *= f;
++                dph *= f;
++            }
++            if (type == LT_WAVE || type == LT_DRIFT || type == LT_WOBBLE)
++                vib_hz = hz;                       /* the vibrato follows the LFO's rate (RATE too) */
++            for (int j = 0; j < 4; j++) {          /* the engine knobs' ranges (E1..E4's whole-range amount) */
++                const tp_info_t *in = tp_info(TP_E1 + j, engine);
++                t->elo[j] = in->lo;
++                t->ehi[j] = in->hi;
++            }
++            t->vib_ph = t->vib_acc;                /* the vibrato's phase at this block's start, then on */
++            t->vib_dph = vib_hz * CHUNK_S;
++            t->vib_acc = wrap1(t->vib_acc + t->vib_dph * (float)s->nck);
++        }
+         {   /* the performance pitch: from the last stretch's value to this one's over the chunks (one stretch
+              * behind, smooth); a note on the track since: at its value at once */
+             float to = (float)t->perf.pitch_c;
+@@ -1845,25 +2004,29 @@ void synth_prepare(synth_t *s, uint32_t n)
+             vol = ((float)P(s, i, TP_LDEST) - 64.0f) * (1.0f / 63.0f);
+         }
+         for (k = 0; k < nck; k++) {
+-            float ph, val = 0.0f, pitch = 0.0f, gain = 1.0f;
++            float ph, val = 0.0f, pitch = 0.0f, gain = 1.0f, sv = 0.0f;   /* sv: the LFO's shape, the matrix's LFO */
+             ph = t->lfo_ph + dph;
+             if (ph >= 1.0f) {
+                 ph -= 1.0f;
++                t->lfo_prev = t->lfo_sh;         /* (the matrix's SLEW glides from it) */
+                 t->lfo_sh = frand(&t->rng);      /* a fresh sample on every cycle */
+             }
+             t->lfo_ph = ph;
+             switch (type) {
+             case LT_WAVE:
+-                val = lfo_wave_value(lx2, ph) * (amt - 64.0f) * (127.0f / 63.0f) * t->lscale;
++                sv = lfo_wave_value(lx2, ph);
++                val = sv * (amt - 64.0f) * (127.0f / 63.0f) * t->lscale;
+                 break;
+             case LT_DRIFT: {                    /* a wander: slews to each cycle's sample within a quarter cycle */
+                 float sm = fm_minf(4.0f * dph, 1.0f);
+                 t->lfo_sm += (t->lfo_sh - t->lfo_sm) * sm;
+                 val = (0.5f + 0.5f * t->lfo_sm) * amt * t->lscale;
++                sv = t->lfo_sm;
+                 break;
+             }
+             case LT_WOBBLE: {
+                 float w = lfo_wave_trem(lx2, ph);
++                sv = w;
+                 pitch = w * vib;
+                 gain = vol >= 0.0f ? 1.0f - vol * (0.5f - 0.5f * w) : 1.0f + vol * (0.5f + 0.5f * w);
+                 break;
+@@ -1878,10 +2041,18 @@ void synth_prepare(synth_t *s, uint32_t n)
+             }
+             default: break;
+             }
++            if (ldep != 1.0f) {                  /* the matrix's DEPTH: the LFO wherever it goes */
++                val *= ldep;
++                pitch *= ldep;
++                gain = 1.0f - (1.0f - gain) * ldep;
++            }
+             t->loff[k] = val;
+             t->lpitch[k] = pitch;
+             t->lgain[k] = gain;
++            t->lsrc[k] = (int16_t)(sv * ldep * 32767.0f);
+         }
++        if (nck)
++            t->lsrc_prev = t->lsrc[nck - 1];
+         pk = tpk[i];                             /* the meter: the loudest voice of the track (gathered above) */
+         {
+             uint32_t q = (uint32_t)(fm_minf(pk, 2.0f) * 16383.5f), old = synth_peak[i];
+@@ -2224,6 +2395,7 @@ static void voice_chunk(synth_t *s, voice_t *v)
+     cfg_t *c = &v->c;
+     int trk = v->trk, k = v->ck < s->nck ? v->ck : s->nck - 1, dest = t->ldest, i;
+     float lenv = 1.0f, off, lg, vol, lev, pan, vg, res;
++    mxr_t mr;
+     const uint8_t *gp = s->par[SY_GLFO_TRK];
+     const int groute = (gp[TP_LX] & 15) | (gp[TP_LX2] & 15) << 4;
+     const float g = groute >> trk & 1 ? s->goff[k] : 0.0f;   /* the shared LFO on this track (synth.h GD_*) */
+@@ -2240,11 +2412,21 @@ static void voice_chunk(synth_t *s, voice_t *v)
+     v->tsec += CHUNK_S;
+     off = t->loff[k] * lenv;
+     lg = 1.0f - (1.0f - t->lgain[k]) * lenv;
++    mr.gain = 1.0f;
++    mr.e[0] = mr.e[1] = mr.e[2] = mr.e[3] = mr.cut = mr.res = mr.pan = mr.pitch = mr.vib = 0.0f;
++    mr.emask = 0;
++    if (s->mx && mx_has(&s->mx[trk])) {          /* the matrix: this voice's sources, the track's, onto the knobs below */
++        mxv_t x;
++        mx_voice_src(&x, v, (float)t->lsrc[k] * MX_Q * lenv);
++        mx_eval(s, t, trk, &x, &mr);
++    }
+     {
+         int gm = v->fresh ? 0 : E_GLIDE[v->engine < NENGINE ? v->engine : 0];
+         for (i = 0; i < 4; i++) {
+             float e;
+             c->ek[i] = fm_minf(pf(s, trk, TP_E1 + i, dest, off), 127.0f);   /* a foreign lock value stays in range */
++            if (mr.emask >> i & 1u)              /* (the matrix: the knob's own range) */
++                c->ek[i] = fm_clampf(c->ek[i] + mr.e[i], (float)t->elo[i], (float)t->ehi[i]);
+             e = c->ek[i] * (1.0f / 127.0f);
+             c->e[i] = gm >> i & 1 ? glide_to(c->e[i], e) : e;   /* (a fresh voice: at its values at once) */
+         }
+@@ -2264,12 +2446,12 @@ static void voice_chunk(synth_t *s, voice_t *v)
+     }
+     /* the filter: 50 Hz .. 20 kHz over the knob, the performance offset, keytrack, velocity */
+     {   /* the cutoff and the resonance glide too (~10 ms), as the engine knobs */
+-        float co = (pf(s, trk, TP_CUT, dest, off) + (float)t->perf.cut + (gd == GD_CUT ? g : 0.0f)) * (8.64385619f / 127.0f)
++        float co = (pf(s, trk, TP_CUT, dest, off) + (float)t->perf.cut + (gd == GD_CUT ? g : 0.0f) + mr.cut) * (8.64385619f / 127.0f)
+                    + pf(s, trk, TP_KTRK, dest, off) * (1.0f / 127.0f) * (v->pitch - 60.0f) * (1.0f / 12.0f);
+         c->cut_oct = v->fresh ? co : glide_to(c->cut_oct, co);
+     }
+     c->fenv_oct = (pf(s, trk, TP_FENV, dest, off) - 64.0f) * (6.0f / 64.0f) * (0.5f + 0.5f * v->vel);
+-    res = fm_clampf((pf(s, trk, TP_RES, dest, off) + (gd == GD_RES ? g : 0.0f)) * (1.0f / 127.0f), 0.0f, 1.0f);
++    res = fm_clampf((pf(s, trk, TP_RES, dest, off) + (gd == GD_RES ? g : 0.0f) + mr.res) * (1.0f / 127.0f), 0.0f, 1.0f);
+     if (!v->fresh)
+         res = glide_to(c->kres * 0.25f, res);
+     c->kq = 2.0f * fm_exp2f(-res * 4.3f);        /* Q 0.5 .. 10 */
+@@ -2288,7 +2470,8 @@ static void voice_chunk(synth_t *s, voice_t *v)
+     vg = (0.25f + 0.75f * v->vel * v->vel) * vol * vol * lev * lg * (1.0f - 0.6f * res);
+     if (gd == GD_VOL)                            /* (a tremolo: down to silence, up to +6 dB) */
+         vg *= fm_clampf(1.0f + g * (1.0f / 127.0f), 0.0f, 2.0f);
+-    pan = fm_clampf((pf(s, trk, TP_PAN, dest, off) - 64.0f + (float)t->perf.pan + (gd == GD_PAN ? g : 0.0f)) *
++    vg *= mr.gain;                               /* (the matrix's AMP: 1 without one) */
++    pan = fm_clampf((pf(s, trk, TP_PAN, dest, off) - 64.0f + (float)t->perf.pan + (gd == GD_PAN ? g : 0.0f) + mr.pan) *
+                     (1.0f / 64.0f), -1.0f, 1.0f);
+     if (pan != v->pan_in || v->fresh) {          /* the pan's cos / sin: only when it moved */
+         v->pan_in = pan;
+@@ -2306,6 +2489,9 @@ static void voice_chunk(synth_t *s, voice_t *v)
+         c->pitch_off += off * (1200.0f / 127.0f);
+     if (gd == GD_PITCH)                          /* (+-12 semitones at 100 %) */
+         c->pitch_off += g * (1200.0f / 127.0f);
++    c->pitch_off += mr.pitch;                    /* the matrix: PITCH, and VIB's sine (a phase per chunk of the block) */
++    if (mr.vib != 0.0f)
++        c->pitch_off += mr.vib * fm_sin_turns(t->vib_ph + t->vib_dph * (float)(k + 1));
+     {   /* the sound's octave (Play 2) */
+         int oc = P(s, trk, TP_OCT);
+         c->pitch_off += (float)((oc > 4 ? 4 : oc) - 2) * 1200.0f;
+diff --git a/app/dsp/synth.h b/app/dsp/synth.h
+index 42e1a12..9852504 100644
+--- a/app/dsp/synth.h
++++ b/app/dsp/synth.h
+@@ -12,6 +12,7 @@
+  * calls synth_note_* through the engine's command queue (app/engine.c). Float, no libm: fastmath.h. */
+ #pragma once
+ #include <stdint.h>
++#include "modmx.h"
+ 
+ #define SY_SR 44100.0f
+ #define NTRK 8                        /* instrument tracks (seq/pattern.h agrees) */
+@@ -230,9 +231,14 @@ typedef struct {
+ typedef struct synth synth_t;         /* opaque: dsp/synth.c */
+ void synth_glfo_restart(synth_t *s);              /* the shared LFO from its start (the transport started) */
+ float synth_glfo_now(const synth_t *s);            /* its value now, -1..1 (the page's picture) */
+-#define SYNTH_BYTES 12288             /* room for the struct (checked at compile time in synth.c) */
++#define SYNTH_BYTES 12480             /* room for the struct (checked at compile time in synth.c; 12288 before the
++                                       * modulation matrix's per-track state and the voices' random value) */
+ 
+ void synth_init(synth_t *s, uint8_t (*par)[NTP]);   /* par: the tracks' parameter arrays, NTRK + 1 of them (the conductor's, SY_GLFO_TRK: the shared LFO) */
++/* the modulation matrix (dsp/modmx.h): m the tracks' matrices (NTRK of them, the project's, read each block: an edit
++ * is heard at once) and live their controllers (NTRK x MXL_N: the mod wheel, aftertouch, expression, 0..127); either
++ * null (and at start): no matrix, the sound is the knobs' alone */
++void synth_mod(synth_t *s, const mx_t *m, const uint8_t (*live)[MXL_N]);
+ void synth_tempo(synth_t *s, float bpm);
+ /* notes: tag identifies a note for its off (the sequencer uses the step, the keys the key) */
+ void synth_note_on(synth_t *s, int trk, int note, int vel, int glide_ms, uint32_t tag);
+diff --git a/app/engine.c b/app/engine.c
+index 4a64207..01cb6d5 100644
+--- a/app/engine.c
++++ b/app/engine.c
+@@ -99,6 +99,16 @@ static uint8_t fx_type[2];                        /* each slot's effect, as set
+ static uint32_t metro_left;                       /* the metronome's click: samples left, phase, rate */
+ static float metro_ph, metro_inc;
+ static int16_t bend_c[NTRK];                      /* the bend component's cents, per track */
++/* the modulation matrix's controllers (dsp/modmx.h MXL_*), per track, from MIDI in: CC 1 the mod wheel, channel
++ * aftertouch, CC 11 expression (127 at rest); CC 121 puts them back. Written by midi_in, read by the voices: the
++ * interrupt's, both */
++static uint8_t mx_live[NTRK][MXL_N];
++int engine_mx_live(int t, int i) { return t >= 0 && t < NTRK && i >= 0 && i < MXL_N ? mx_live[t][i] : 0; }
++static void mx_rest(int t)
++{
++    mx_live[t][MXL_MODW] = mx_live[t][MXL_AT] = 0;
++    mx_live[t][MXL_EXPR] = 127;
++}
+ /* MIDI for the main loop (midicc.c): every CC, Program Change and the master channel's note-ons, raw USB-MIDI
+  * packets; the interrupt writes, the main loop reads (engine_cc_take); full, the newest is dropped. 64 is about
+  * 17 ms of a busy controller's CCs between two UI frames (longer during a flash write) */
+@@ -701,7 +711,20 @@ static void midi_in(uint32_t pkt)
+         } else if (t >= 0)                          /* played and recorded, not sent back out (seq_key_midi) */
+             seq_key_midi(&seq, t, d1, ty == 0x90, d2);
+     } else if (ty == 0xB0 || ty == 0xC0) {          /* CCs and Program Change: the main loop's (midicc.c) */
++        int t = ty == 0xB0 ? midi_track(ch) : -1;   /* (and the matrix's controllers, here: they are a track's own) */
++        if (t >= 0) {
++            if (d1 == 1)
++                mx_live[t][MXL_MODW] = d2;
++            else if (d1 == 11)
++                mx_live[t][MXL_EXPR] = d2;
++            else if (d1 == 121)
++                mx_rest(t);
++        }
+         ccq_put(pkt);
++    } else if (ty == 0xD0) {                        /* channel aftertouch: the matrix's AT */
++        int t = midi_track(ch);
++        if (t >= 0)
++            mx_live[t][MXL_AT] = d1;
+     } else if (ty == 0xE0) {                        /* pitch bend: +-2 semitones onto the track's bend */
+         int t = midi_track(ch);
+         if (t >= 0)
+@@ -1289,6 +1312,9 @@ void engine_init(patterns_t *P, uint8_t (*par)[NTP])
+         seq_prof = &eng_prof[PR_SIX];
+     }
+     synth_init(SY, par);
++    for (t = 0; t < NTRK; t++)
++        mx_rest(t);
++    synth_mod(SY, P->mod, mx_live);
+     for (k = 0; k < NDL; k++)
+         dl_owner[k] = 0xFF;
+     for (t = 0; t < NTRK; t++) {
+diff --git a/app/engine.h b/app/engine.h
+index 46c3ffc..7fc8e3c 100644
+--- a/app/engine.h
++++ b/app/engine.h
+@@ -75,6 +75,8 @@ extern volatile uint8_t eng_midi_trk;                    /* channels 12-16's tra
+ /* state for the screen (written by the interrupt) */
+ extern volatile uint8_t eng_step[NSEQT];                 /* playheads */
+ float engine_glfo_now(void);                             /* the shared LFO's value now, -1..1 (GLO's LFO page) */
++int engine_mx_live(int trk, int which);                  /* a track's live controller now (modmx.h MXL_*: mod wheel, aftertouch,
++                                                          * expression, 0..127) */
+ int engine_cc_take(uint32_t *pkt);                       /* the main loop: the next CC / Program Change / master-channel
+                                                           * note-on from MIDI in (a USB-MIDI packet), 0 none */
+ extern volatile uint16_t eng_peak[NALLTRK];              /* meters after the faders, Q14 (to +6 dB): the loudest
+diff --git a/app/host.c b/app/host.c
+index f9633aa..867e605 100644
+--- a/app/host.c
++++ b/app/host.c
+@@ -256,6 +256,27 @@ int app_expect(const char *what, int *got)
+         *got = (int)(cc_out_last >> 8 & 0xFFu);
+     else if (!strcmp(what, "ccd2"))
+         *got = (int)(cc_out_last & 0xFFu);
++    else if (!strncmp(what, "mxl", 3) && strchr(what, '.')) {   /* mxlT.NAME: a track's live controller (modw, at, expr) */
++        static const char *const N[MXL_N] = {"modw", "at", "expr"};
++        int t = atoi(what + 3) - 1, k;
++        for (k = 0; k < MXL_N && !ieq(strchr(what, '.') + 1, N[k]); k++)
++            ;
++        if (t < 0 || t >= NTRK || k == MXL_N)
++            return 0;
++        *got = engine_mx_live(t, k);
++    }
++    else if (!strncmp(what, "mx", 2) && strchr(what, '.')) {    /* mxT.S.FIELD: the matrix, track T's slot S (1-4), src dst amt */
++        static const char *const N[3] = {"src", "dst", "amt"};
++        const char *d1 = strchr(what, '.'), *d2 = d1 ? strchr(d1 + 1, '.') : 0;
++        int t = atoi(what + 2) - 1, sl = d1 ? atoi(d1 + 1) - 1 : -1, k;
++        if (!d2)
++            return 0;
++        for (k = 0; k < 3 && !ieq(d2 + 1, N[k]); k++)
++            ;
++        if (t < 0 || t >= NTRK || sl < 0 || sl >= MX_NSLOT || k == 3)
++            return 0;
++        *got = k == 0 ? pats.mod[t].s[sl].src : k == 1 ? pats.mod[t].s[sl].dst : pats.mod[t].s[sl].amt;
++    }
+     else if (!strncmp(what, "par", 3) && strchr(what, '.')) {   /* parT.P: parameter P of track T */
+         int t = atoi(what + 3) - 1, p = param_of(strchr(what, '.') + 1);
+         if (t < 0 || t >= NALLTRK || p < 0 || p >= NTP)
+@@ -738,6 +759,33 @@ static int song_cmd(const char *cmd)
+         } else
+             set_tp(t, k, value_of(t, k, w[3]));
+         run_ms(1);
++    } else if (!strcmp(cmd, "mxset")) {             /* mxset T S SRC DST AMT: track T's matrix slot S (1-4); SRC, DST a
++                                                     * name (MXS_NAME, MXD_NAME) or a number; "-" leaves one as it is */
++        int s, v, i;
++        if (n < 6)
++            host_die("mxset T S SRC DST AMT", "");
++        t = atoi(w[1]) - 1;
++        s = atoi(w[2]) - 1;
++        if (t < 0 || t >= NTRK || s < 0 || s >= MX_NSLOT)
++            host_die("no slot", w[1]);
++        for (k = 0; k < 2; k++) {
++            const char *a = w[3 + k], *const *nm = k ? MXD_NAME : MXS_NAME;
++            int cnt = k ? MXD_N : MXS_N;
++            if (a[0] == '-' && !a[1])
++                continue;
++            v = -1;
++            for (i = 0; i < cnt; i++)
++                if (ieq(a, nm[i]))
++                    v = i;
++            if (v < 0 && a[0] >= '0' && a[0] <= '9')
++                v = atoi(a);
++            if (v < 0 || v >= cnt)
++                host_die("no such name", a);
++            mx_set(t, s, k, v);
++        }
++        if (strcmp(w[5], "-"))
++            mx_set(t, s, 2, atoi(w[5]));
++        run_ms(1);
+     } else if (!strcmp(cmd, "preset")) {            /* preset T NAME [ENGINE] (NAME: _ for spaces) */
+         int pick = -1;
+         t = atoi(w[1]) - 1;
+diff --git a/app/midicc.c b/app/midicc.c
+index 98fe324..a084c9a 100644
+--- a/app/midicc.c
++++ b/app/midicc.c
+@@ -2,6 +2,9 @@
+ /* LOOM-8's MIDI CC map: a CC on channel 1-8 (a track), 12-16 (the instrument track selected, inst_trk), 9 / 10
+  * (FX I / II) or 11 (the master) sets a parameter as its knob would, scaled onto the parameter's range; a track's CC
+  * is also recorded into its own lane while recording. Channel 11's Program Change and notes 36-67 pick scenes 1-32.
++ * CC 1 (the mod wheel), CC 11 (expression), channel aftertouch and CC 121 are not in this map: they are the
++ * modulation matrix's live sources (dsp/modmx.h), taken in the interrupt (engine.c midi_in); the LFO amount, which
++ * CC 1 used to set (a saved parameter, written by a wheel), is CC 12 now.
+  * The other way: a mapped value changed by hand (a knob, a SEL list row) goes out as its CC, with CC OUT on; a scene
+  * change as its Program Change, with SCENES OUT on. The packets come from engine.c's ring (raw, from the interrupt),
+  * looked up here in the main loop. Part of app.c's unity build, after ui.c: is_aux, is_drum, inst_trk, set_tp. */
+@@ -14,7 +17,7 @@
+ static const struct { uint8_t cc, syn, kit; } CC_TRK[] = {
+     {7, TP_LEVEL, TP_LEVEL}, {10, TP_PAN, TP_PAN},  {91, TP_SEND1, CC_KSEND1}, {93, TP_SEND2, CC_KSEND2},
+     {9, CC_MUTE, CC_MUTE},   {74, TP_CUT, TP_KTRK}, {71, TP_RES, TP_CUT},      {73, TP_A, TP_D},
+-    {72, TP_R, TP_R},        {75, TP_D, CC_NONE},   {5, TP_PORTA, CC_NONE},     {1, TP_LAMT, CC_NONE}};
++    {72, TP_R, TP_R},        {75, TP_D, CC_NONE},   {5, TP_PORTA, CC_NONE},     {12, TP_LAMT, CC_NONE}};
+ /* a kit's sounds 1-11: CC first + sound */
+ #define CC_KMUTE 16
+ #define CC_KPAN 80
+diff --git a/app/pages.c b/app/pages.c
+index 832a030..c848445 100644
+--- a/app/pages.c
++++ b/app/pages.c
+@@ -70,11 +70,11 @@ static uint16_t trk_tint(int t) { return ink_mix(trk_ink(t), theme->tint); }
+  * track: Engine, Play, Play 2 (the octave), then Sub where the engine has a second page of knobs (TP_X1..X4: knit's
+  * oscillator 2, level, sub, noise; rayon's fall); a kit or an FX track Engine and Play; the conductor Engine, Play (routing), Sub (Follow) */
+ enum { P_ARRANGE, P_SONG, P_STEPS, P_BAR, P_ENGINE, P_PLAY, P_PLAY2, P_SUB, P_ENV, P_FILTER, P_ENV2, P_KITF, P_CHARACTER, P_SENDS,
+-       P_FX1, P_FX2, P_THROWS, P_LFO, P_LFO2, P_PLAYERS, P_PLAYERS2, P_PLAYERS3, P_WEAVE, P_MIX, P_MASTER, P_MASTER2, P_MASTER3, P_GLFO, P_SETUP,
++       P_FX1, P_FX2, P_THROWS, P_LFO, P_LFO2, P_MOD, P_PLAYERS, P_PLAYERS2, P_PLAYERS3, P_WEAVE, P_MIX, P_MASTER, P_MASTER2, P_MASTER3, P_GLFO, P_SETUP,
+        P_STATUS, NPAGES };
+ static const char *const PAGE_NAME[NPAGES] = {"Arrange", "Song", "Steps", "Bar", "Engine", "Play", "Play 2", "Sub", "Envelope",
+                                               "Filter", "Filter env", "Kit filter", "Character", "Sends", "FX I",
+-                                              "FX II", "Throws", "LFO", "LFO 2", "Players", "Players 2", "Hold", "Weave", "Mix",
++                                              "FX II", "Throws", "LFO", "LFO 2", "Mod", "Players", "Players 2", "Hold", "Weave", "Mix",
+                                               "Master EQ", "Master color", "Master out", "LFO", "Setup", "Debug"};
+ static char *s_cat(char *b, const char *s);
+ static char *num_s(uint32_t v, char *b);
+@@ -105,7 +105,7 @@ static uint32_t glfo_route(void)                 /* the tracks it moves: bit t *
+ static int mst_base(int p) { return p == P_MASTER ? MS_EQ_LO : p == P_MASTER2 ? MS_CTYPE : MS_PERC; }   /* its first knob */
+ static const struct { uint8_t btn, first, n; } PAGE_BTN[] = {
+     {B_HOME, P_ARRANGE, 2}, {B_SEQ, P_STEPS, 2}, {B_EDIT, P_ENGINE, 4}, {B_ENV, P_ENV, 4}, {B_FX, P_CHARACTER, 5},
+-    {B_LFO, P_LFO, 2}, {B_ARP, P_PLAYERS, 4}, {B_GLO, P_MIX, 7}};
++    {B_LFO, P_LFO, 3}, {B_ARP, P_PLAYERS, 4}, {B_GLO, P_MIX, 7}};
+ #define NPAGE_BTN (sizeof PAGE_BTN / sizeof PAGE_BTN[0])
+ static int page_group(int p)
+ {
+@@ -177,6 +177,7 @@ static struct {
+     uint8_t dirty;                                   /* the project changed since it was saved */
+     uint8_t bar;                                     /* Steps: the bar shown 0..3 */
+     uint8_t dsound;                                  /* a drum track: the key shown 0..10 */
++    uint8_t mxs;                                     /* Mod: the matrix slot the knobs edit 0..3 */
+     int8_t oct;                                      /* the keys' octave -4..4 */
+     uint8_t rem[SN], nrem;                           /* the remembered notes (the last keys held together) */
+     uint8_t rem_fx;                                  /* PUNCH: the remembered effect + 1 */
+@@ -237,7 +238,7 @@ static struct {
+ 
+ /* the undo: one stage, whatever was changed last (HOME + REC swaps it back, HOME + PLAY swaps again: redo): a
+  * pattern with its locks, a track's sound (or T2-T8 at once), the master, or the arrangement (song, scenes, weave) */
+-enum { U_PAT, U_SOUND, U_MASTER, U_ARR };
++enum { U_PAT, U_SOUND, U_MASTER, U_ARR, U_MOD };
+ #define UNDO_LANES 12
+ static struct {
+     uint8_t valid, redo, kind, trk, n, pt, nl, rsv;
+@@ -246,6 +247,7 @@ static struct {
+         struct { tpat_t pat; lane_t lane[UNDO_LANES]; } p;
+         trk_t s[NTRK - 1];
+         uint8_t master[NMS];
++        mx_t mx;
+         struct { song_t song; scene_t scene[NSCENE]; wvpat_t weave[NPATT]; } a;
+     } u;
+ } undo PLAT_POOL;
+@@ -565,6 +567,8 @@ static int group_n(int g)
+              : is_drum(trk) ? 3 : x_page(trk) ? 4 : 3;      /* (a kit: Engine, Key, Sends: the key's own) */
+     if (b == B_ARP)                                  /* (grp_page: Players, Players 2, Hold the arp's, Weave) */
+         return is_aux(trk) ? 1 : is_drum(trk) || pl_type(trk) == PL_OFF ? 2 : pl_type(trk) == PL_ARP ? 4 : 3;
++    if (b == B_LFO)
++        return is_aux(trk) || is_drum(trk) ? 2 : 3;      /* LFO, LFO 2, Mod (the matrix: a synth track's own) */
+     if (b == B_ENV)
+         return is_drum(trk) ? 4 : 3;                 /* a kit: the key's envelope, filter; the kit's envelope, filter */
+     if (b == B_GLO)
+@@ -620,7 +624,7 @@ static int tp_page_param(int p, int k, int trk)
+         {TP_SEND1, TP_SEND2, TP_PAN, TP_LEVEL},
+         {TP_E1, TP_E2, TP_E3, TP_E4}, {TP_E1, TP_E2, TP_E3, TP_E4}, {-1, -1, -1, -1},
+         {TP_LTYPE, TP_LSPEED, TP_LAMT, TP_LDEST},
+-        {TP_LX, TP_LX2, -1, -1}, {TP_PLAYER, TP_P1, TP_P2, TP_P3}, {TP_AP1, TP_AP2, TP_AP3, TP_AP4},
++        {TP_LX, TP_LX2, -1, -1}, {-1, -1, -1, -1}, {TP_PLAYER, TP_P1, TP_P2, TP_P3}, {TP_AP1, TP_AP2, TP_AP3, TP_AP4},
+         {TP_P4, -1, -1, -1}, {-1, -1, -1, -1}, {TP_SEND1, TP_SEND2, TP_PAN, TP_LEVEL}};
+     if (p < P_ENGINE || p > P_MIX || p == P_THROWS || p == P_WEAVE || k < 0 || k > 3)
+         return -1;
+@@ -1115,6 +1119,13 @@ static void aux_engine_knobs(knob_t *k, int trk)
+             kn(&k[i], short_name(fx_knob_name(pick, i)), par[TP_E1 + i] * 100 / 128, 99);
+     }
+ }
++/* a matrix destination's name: E1..E4 are the engine's own four knobs (a kit has none: its tracks' E1..E4 stay inert) */
++static const char *mx_dest_name(int trk, int dst)
++{
++    if (dst >= MXD_E1 && dst < MXD_N && trk < NTRK)
++        return EG_KNOB[proj.trk[trk].par[TP_ENGINE] % NENGINE][dst - MXD_E1];
++    return MXD_NAME[dst < MXD_N ? dst : 0];
++}
+ static void page_knobs(knob_t *k)
+ {
+     int trk = sel_trk(), p = ui.page;
+@@ -1315,6 +1326,17 @@ static void page_knobs(knob_t *k)
+         kname(&k[3], "DEST", GLFO_DEST, g[TP_LDEST] % NGD, NGD);
+         break;
+     }
++    case P_MOD: {                                    /* the modulation matrix (dsp/modmx.h): the track's four slots */
++        const mxslot_t *s;
++        if (trk >= NTRK)
++            break;
++        s = &pats.mod[trk].s[ui.mxs & 3u];
++        kn(&k[0], "SLOT", (int)(ui.mxs & 3u) + 1, MX_NSLOT);
++        kname(&k[1], "SOURCE", MXS_NAME, s->src, MXS_N);
++        kv(&k[2], "DEST", mx_dest_name(trk, s->dst), s->dst, 0);
++        kn(&k[3], "AMOUNT", s->amt, 0);
++        break;
++    }
+     case P_SETUP:
+         kname(&k[0], "LIGHTS", LIGHTS_NAME, proj.lights, 3);
+         kname(&k[1], "CLOCK", ONOFF, proj.send_clock != 0, 2);
+@@ -1449,6 +1471,10 @@ static void page_tag(char *t)
+             s_cat(s_cat(t + s_len(t), ">"), ui.page == P_ENV2 || ui.page == P_KITF ? "all keys"
+                                              : DL_SOUND_NAME[ui.dsound % DL_NSOUND]);
+         break;
++    case P_MOD:
++        track_crumb(t);
++        s_cat(t + s_len(t), ">mod");
++        break;
+     case P_SENDS:
+         s_cat(s_cat(t, TRACK_NAME[inst_trk()]), ">sends");
+         break;
+@@ -1629,6 +1655,8 @@ static void page_footer(char *t)
+             s_cat(t, "PRESET type|BLACK pick a key");
+         else if (is_drum(trk) && (ui.page == P_ENV2 || ui.page == P_KITF))
+             s_cat(t, ui.page == P_KITF ? "PRESET on or off|KEYS play" : "KEYS play");
++        else if (ui.page == P_MOD)
++            s_cat(t, "KEYS play");
+         else if (is_drum(trk) && ui.page <= P_LFO2)
+             s_cat(t, "BLACK pick a key|KEYS play");
+         else if (ui.page == P_ENGINE)
+@@ -1866,7 +1894,7 @@ static void draw_footer(void)
+ #define PG_ANY 0xFFFFFFFFu
+ #define PG_STEPS (PG(P_STEPS) | PG(P_BAR))
+ #define PG_SOUND (PG(P_ENGINE) | PG(P_PLAY) | PG(P_PLAY2) | PG(P_SUB) | PG(P_ENV) | PG(P_ENV2) | PG(P_KITF) | PG(P_FILTER) | \
+-                  PG(P_CHARACTER) | PG(P_LFO) | PG(P_LFO2))
++                  PG(P_CHARACTER) | PG(P_LFO) | PG(P_LFO2) | PG(P_MOD))
+ static const struct { uint8_t btn; uint32_t pages; const char *title, *l1, *l2; } CARD[] = {
+     {B_SEQ, PG(P_BAR), "Bars", "Hold SEQ, black keys 1-4: jump to a bar at the next bar line.",
+      "Two held: loop them. One twice: loop it."},
+@@ -1880,7 +1908,9 @@ static const struct { uint8_t btn; uint32_t pages; const char *title, *l1, *l2;
+      "PRESETS on Filter: its type. A kit: the key's, then the kit's."},
+     {B_FX, PG_ANY, "Effects", "Character, sends, FX I, FX II, then Throws: keys fire effects.",
+      "PRESETS: the type or effect. SEL: an FX's filter."},
+-    {B_LFO, PG_ANY, "LFO", "Type, then its first three knobs.", "Page 2 has the type's fourth and fifth."},
++    {B_LFO, PG(P_MOD), "Mod", "Four slots: a source (wheel, envelope, LFO...) to a destination.",
++     "KNOB 1 the slot, 2 the source, 3 where it goes, 4 how much."},
++    {B_LFO, PG_ANY, "LFO", "Type, then its first three knobs.", "Page 2 has the type's fourth and fifth. Page 3: Mod."},
+     {B_ARP, PG_ANY, "Players", "Arp, strum or hold on the track's keys; last page, Weave.",
+      "Strum: a key strums its chord; keys held together set it."},
+     {B_ARP, PG_STEPS, "Tricks", "With a step held, ARP: KNOB 1 and 3 pick its two tricks,",
+@@ -4217,6 +4247,49 @@ static void draw_glfo(void)
+     }
+     cv_blit(0, MAIN_Y);
+ }
++/* the modulation matrix: its four slots, source to destination with the amount as a bar about the middle; the slot
++ * the knobs edit lit */
++static void draw_mod(void)
++{
++    int trk = sel_trk();
++    const mx_t *m = &pats.mod[trk];
++    uint32_t h = hash_u(2166136261u, 0x30D00u | (uint32_t)trk | (uint32_t)(ui.mxs & 3u) << 4 | (uint32_t)proj.trk[trk].par[TP_ENGINE] << 8);
++    char t[24];
++    if (trk >= NTRK)
++        return;
++    for (int i = 0; i < MX_NSLOT; i++)
++        h = hash_u(h, (uint32_t)m->s[i].src | (uint32_t)m->s[i].dst << 8 | (uint32_t)(uint8_t)m->s[i].amt << 16);
++    for (int i = 0; i < MXL_N; i++)
++        h = hash_u(h, (uint32_t)engine_mx_live(trk, i) >> 3 << (i * 5));    /* (the wheel, moving: a dot per eighth) */
++    if (!begin_main(h))
++        return;
++    for (int i = 0; i < MX_NSLOT; i++) {
++        const mxslot_t *s = &m->s[i];
++        int32_t y = 6 + i * 26, on = i == (ui.mxs & 3), live = s->src && s->dst && s->amt;
++        int32_t cx = 168, a = s->amt;
++        cv_round(8, y, 224, 22, 4, on ? K_PANEL2 : K_PANEL);
++        num_s((uint32_t)i + 1u, t);
++        text_c(20, y + 4, &FONT_S, t, on ? K_TEXT : K_DIM);
++        cv_text(32, y + 4, &FONT_S, MXS_NAME[s->src], live ? K_TEXT : K_DIM);
++        cv_text(76, y + 4, &FONT_S, ">", K_DIM);
++        cv_text(88, y + 4, &FONT_S, mx_dest_name(trk, s->dst), live ? K_TEXT : K_DIM);
++        cv_rect(cx - 32, y + 16, 64, 1, K_LINE);              /* (the amount: about the middle, -64 .. 63) */
++        if (a > 0)
++            cv_rect(cx, y + 14, a / 2 + 1, 4, live ? trk_ink(trk) : K_DIM);
++        else if (a < 0)
++            cv_rect(cx + a / 2, y + 14, -a / 2, 4, live ? trk_ink(trk) : K_DIM);
++        if (s->src >= MXS_MODW && s->src <= MXS_EXPR && s->dst)   /* (a live controller: where it is now) */
++            cv_round(cx - 32 + engine_mx_live(trk, s->src - MXS_MODW) * 64 / 127 - 2, y + 4, 4, 4, 2, K_NOW);
++        {
++            char *e = t;
++            if (a > 0)
++                *e++ = '+';
++            num_i(a, e);
++            text_r(228, y + 4, &FONT_S, t, on ? K_TEXT : K_DIM);
++        }
++    }
++    cv_blit(0, MAIN_Y);
++}
+ static void draw_setup(void)
+ {
+     char t[24];
+@@ -4442,7 +4515,7 @@ static void draw_page(void)
+     case P_FX1: draw_fxtrack(AUX_FX1); break;
+     case P_FX2: draw_fxtrack(AUX_FX2); break;
+     case P_ENGINE: case P_PLAY: case P_PLAY2: case P_SUB: case P_ENV: case P_ENV2: case P_KITF: case P_FILTER: case P_LFO:
+-    case P_LFO2: case P_PLAYERS: case P_PLAYERS2: case P_PLAYERS3:
++    case P_LFO2: case P_MOD: case P_PLAYERS: case P_PLAYERS2: case P_PLAYERS3:
+         if (trk == AUX_BRAIN)
+             draw_brain();
+         else if (trk == AUX_PUNCH)
+@@ -4469,6 +4542,8 @@ static void draw_page(void)
+             draw_filter();
+         else if (ui.page == P_LFO || ui.page == P_LFO2)
+             draw_lfo();
++        else if (ui.page == P_MOD)
++            draw_mod();
+         else
+             draw_players();
+         break;
+diff --git a/app/project.c b/app/project.c
+index 90995c9..527ae23 100644
+--- a/app/project.c
++++ b/app/project.c
+@@ -33,10 +33,12 @@ uint8_t proj_slot;
+ #define STREAM_HDR 16u                  /* in the first object: format, raw length, raw CRC, packed length */
+ #define STREAM_CAP ((uint32_t)NSTREAM * (PLAT_STORE_MAX - 4u) - (STREAM_HDR - 4u))
+ #define RAW_LEN sizeof(patterns_t)
++/* formats 10 to 13 had no modulation matrix (format 14's): their streams end where it starts */
++#define RAW_LEN13 (sizeof(patterns_t) - sizeof pats.mod)
+ /* format 10 (0.5-beta): the same store but 16 scenes of scene10_t, the song after them */
+-#define RAW_LEN10 (sizeof(patterns_t) - sizeof pats.scene + NSCENE10 * sizeof(scene10_t))
++#define RAW_LEN10 (RAW_LEN13 - sizeof pats.scene + NSCENE10 * sizeof(scene10_t))
+ /* format 11: 32 scenes of scene11_t (one kit mute mask for every kit) */
+-#define RAW_LEN11 (sizeof(patterns_t) - sizeof pats.scene + NSCENE * sizeof(scene11_t))
++#define RAW_LEN11 (RAW_LEN13 - sizeof pats.scene + NSCENE * sizeof(scene11_t))
+ typedef char scene_sizes[(sizeof(scene10_t) == 18 && sizeof(scene11_t) == 20 && sizeof(scene_t) == 26) ? 1 : -1];
+ typedef char songs_apart[(NSCENE10 * sizeof(scene10_t) + sizeof(song_t) <= NSCENE * sizeof(scene_t) &&
+                           NSCENE * sizeof(scene11_t) + sizeof(song_t) <= NSCENE * sizeof(scene_t)) ? 1 : -1];   /* (an
+@@ -45,7 +47,8 @@ static uint8_t load_format;                       /* the format of the project b
+ static uint8_t migrated = 0xFF;                   /* the slot loaded from an older format and not saved since (0xFF
+                                                    * none): its next touch saves it whole, never its settings alone
+                                                    * beside the old format's patterns */
+-#define FORMAT_OK(f) ((f) >= 10u && (f) <= PROJ_FORMAT)   /* the formats a slot loads (migrate_old, before 13 glfo_defaults) */
++#define FORMAT_OK(f) ((f) >= 10u && (f) <= PROJ_FORMAT)   /* the formats a slot loads (migrate_old, before 13 glfo_defaults, before 14 the
++                                                            * stream without matrices) */
+ typedef char raw_fits[(RAW_LEN < 0x100000u) ? 1 : -1];   /* (lz.c packs up to 16 MB; the header's length is a u32) */
+ typedef char settings_fit[(sizeof(settings_t) <= PLAT_STORE_MAX) ? 1 : -1];
+ typedef char presets_fit[(sizeof user_presets + 4u <= PLAT_STORE_MAX) ? 1 : -1];
+@@ -340,6 +343,8 @@ static void patterns_clamp(void)
+         if (sc->brain_key >= 12)
+             sc->brain_key = 0;
+     }
++    for (t = 0; t < NTRK; t++)
++        mx_clamp(&pats.mod[t]);                       /* (the matrix indexes the names and the voices) */
+     if (pats.song.len > NSONG)
+         pats.song.len = NSONG;
+     for (k = 0; k < NSONG; k++) {
+@@ -537,17 +542,26 @@ static int load_stream(int n, uint32_t prev)
+     uint32_t crc = get32(io_buf + 8), plen = get32(io_buf + 12), len = get32(io_buf + 4);
+     st_in_t s = {0, n, STREAM_HDR, plen, prev};
+     lz_src_t src = {st_get, &s};
+-    if (n < (int)STREAM_HDR || (len != RAW_LEN && len != RAW_LEN10 && len != RAW_LEN11) || plen > STREAM_CAP)
++    if (n < (int)STREAM_HDR || (len != RAW_LEN && len != RAW_LEN13 && len != RAW_LEN10 && len != RAW_LEN11) ||
++        plen > STREAM_CAP)
+         return -1;                                /* (its own length says its format: settings saved alone, as
+                                                    * this format's, before a power cut beside format 10's patterns) */
+     stored_known[stream_obj[0]] = !(prev & 1u);
+     stored_hash[stream_obj[0]] = hash_of(io_buf, (uint32_t)n);
+     if (lz_decompress(&src, raw, len) || crc32_of(raw, len) != crc)
+         return -1;
+-    if (len != RAW_LEN) {
++    if (len == RAW_LEN10 || len == RAW_LEN11) {
+         load_format = len == RAW_LEN10 ? 10u : 11u;
+         migrate_old(load_format);
+     }
++    if (len != RAW_LEN) {                             /* before 14: no matrices in it: every track the default one
++                                                       * (not what an earlier, failed attempt left there) */
++        for (int t = 0; t < NTRK; t++)
++            mx_default(&pats.mod[t]);
++        if (load_format > 13u)                        /* (settings of this format beside an older stream, a power cut
++                                                       * between the two: saved whole, next) */
++            load_format = 13u;
++    }
+     packed_len = plen;
+     return 0;
+ }
+diff --git a/app/seq/pattern.c b/app/seq/pattern.c
+index 9399113..f32261f 100644
+--- a/app/seq/pattern.c
++++ b/app/seq/pattern.c
+@@ -44,6 +44,8 @@ void patterns_init(patterns_t *P)
+     P->scene[0].used = 1;             /* scene 1: pattern 1 on every track (pat[] is already 0) */
+     P->song.len = 0;
+     P->song.loop = 1;
++    for (t = 0; t < NTRK; t++)
++        mx_default(&P->mod[t]);       /* every track: the mod wheel to a vibrato (modmx.h MX_DEF_*) */
+ }
+ 
+ /* ----------------------------------------------------------------- lanes --- */
+diff --git a/app/seq/pattern.h b/app/seq/pattern.h
+index 0e7e274..01ef9af 100644
+--- a/app/seq/pattern.h
++++ b/app/seq/pattern.h
+@@ -7,6 +7,7 @@
+  * read never sees half a write. */
+ #pragma once
+ #include <stdint.h>
++#include "../dsp/modmx.h"
+ 
+ /* The code keeps its first names; the screen and the manual say: AUX_BRAIN the conductor (COND), AUX_PUNCH the
+  * throws (THROW), components (SC_*) tricks, the drumline engine the kit, the maestro player strum. */
+@@ -189,6 +190,9 @@ typedef struct {
+     lane_t lane[NLANE];
+     scene_t scene[NSCENE];
+     song_t song;
++    mx_t mod[NTRK];                   /* the instrument tracks' modulation matrices (dsp/modmx.h). Last, and here, not in
++                                       * the track's settings: those fill their storage object (PLAT_STORE_MAX), this
++                                       * packed stream does not. An older stream is shorter by these bytes (project.c) */
+ } patterns_t;
+ 
+ void pattern_init(tpat_t *p);         /* empty, 16 steps, scale 1, no groove, note length half a step */
+diff --git a/app/ui.c b/app/ui.c
+index 7571f6b..60cadc1 100644
+--- a/app/ui.c
++++ b/app/ui.c
+@@ -447,6 +447,12 @@ static void undo_master(void)
+         return;
+     memcpy(undo.u.master, proj.master, NMS);
+ }
++static void undo_mx(int trk)                       /* before a change to a track's matrix */
++{
++    if (undo_run(U_MOD, trk, 0, 0, UNDO_RUN_MS))
++        return;
++    undo.u.mx = pats.mod[trk];
++}
+ static void undo_arr(void)                        /* before a change to the song, the scenes or the weave */
+ {
+     if (undo_run(U_ARR, 0, 0, 0, UNDO_RUN_MS))
+@@ -496,6 +502,11 @@ static void do_undo(int redo)
+         else
+             s_cat(s_cat(t, TRACK_NAME[undo.trk]), " sound");
+         break;
++    case U_MOD:
++        swap_bytes(&pats.mod[undo.trk], &undo.u.mx, sizeof undo.u.mx);
++        mx_clamp(&pats.mod[undo.trk]);
++        s_cat(s_cat(t, TRACK_NAME[undo.trk]), " mod");
++        break;
+     case U_MASTER:
+         swap_bytes(proj.master, undo.u.master, NMS);
+         for (int m = 0; m < NMS; m++)
+@@ -1846,6 +1857,46 @@ static void glfo_knob(int k, int32_t e)          /* the shared LFO's knobs (synt
+         return;
+     set_tp(AUX_BRAIN, P[k], clampi(g[P[k]] + d, 0, HI[k]));
+ }
++/* the matrix: track trk's slot s (0..3), field 0 source 1 destination 2 amount, set to v (clamped); undoable */
++static void mx_set(int trk, int s, int field, int v)
++{
++    mxslot_t *x;
++    if (trk < 0 || trk >= NTRK || s < 0 || s >= MX_NSLOT)
++        return;
++    x = &pats.mod[trk].s[s];
++    if (field == 0)
++        v = clampi(v, 0, MXS_N - 1);
++    else if (field == 1)
++        v = clampi(v, 0, MXD_N - 1);
++    else
++        v = clampi(v, MX_AMT_LO, MX_AMT_HI);
++    if ((field == 0 ? x->src : field == 1 ? x->dst : x->amt) == v)
++        return;
++    undo_mx(trk);
++    if (field == 0)
++        x->src = (uint8_t)v;
++    else if (field == 1)
++        x->dst = (uint8_t)v;
++    else
++        x->amt = (int8_t)v;
++    mark_dirty();
++}
++static void mod_knob(int k, int32_t e)           /* Mod: slot, source, destination, amount */
++{
++    int trk = sel_trk(), s = ui.mxs & 3;
++    const mxslot_t *x;
++    if (trk >= NTRK)
++        return;
++    x = &pats.mod[trk].s[s];
++    if (k == 0)
++        ui.mxs = (uint8_t)clampi(s + (e > 0 ? 1 : -1), 0, MX_NSLOT - 1);
++    else if (k == 1)
++        mx_set(trk, s, 0, x->src + (e > 0 ? 1 : -1));
++    else if (k == 2)
++        mx_set(trk, s, 1, x->dst + (e > 0 ? 1 : -1));
++    else if (k == 3)
++        mx_set(trk, s, 2, x->amt + (int)e);
++}
+ static void master_knob(int k, int32_t e)
+ {
+     int m = mst_base(ui.page) + k, v;
+@@ -1983,6 +2034,7 @@ static void knob_do(int k, int32_t e)
+     case P_SETUP: setup_knob(k, e); return;
+     case P_STATUS: debug_knob(k, e); return;
+     case P_GLFO: glfo_knob(k, e); return;
++    case P_MOD: mod_knob(k, e); return;
+     default: break;
+     }
+     if (fx_page(ui.page)) {                      /* an effect's knobs: the effect track's own */
+diff --git a/docs/MANUAL.md b/docs/MANUAL.md
+index 770597a..a14b257 100644
+--- a/docs/MANUAL.md
++++ b/docs/MANUAL.md
+@@ -946,6 +946,24 @@ out of the kick's way while the rest plays on.
+ 
+ <img src="img/screen-mix.png" width="240" alt="Mix: a meter for each track while playing; knobs fx I, fx II, pan and level" title="The mixer"> <img src="img/screen-sends.png" width="240" alt="FX&#x27;s Sends page: the track&#x27;s sends to FX I (delay) and FX II (reverb lush), its pan and level" title="The sends"> <img src="img/screen-master.png" width="240" alt="Master EQ: low, mid and high, flat at 64" title="Master EQ"> <img src="img/screen-master-out.png" width="240" alt="Master out: bars for drums, melodic, comp and pump; knobs drums 100, melodic 100, comp 30, pump 4.0 dB" title="Master out">
+ 
++### The modulation matrix
++
++**LFO**, **SELECT** twice: the Mod page, on every synth track (a kit and the aux tracks have none). Four slots, each
++sending a **source** to a **destination** by an **amount** (-64 to 63). KNOB 1 picks the slot, 2 the source, 3 the
++destination, 4 the amount; a slot with no source, no destination or no amount does nothing, and with every slot idle
++the sound is exactly what it would be without the page. A new track has slot 1 set to MODW to VIB at 32.
++
++Sources: LFO (the track's LFO shape, when its type is wave, drift or wobble), ENV (the voice's amp envelope), VEL,
++KEY (the note about middle C), RAND (a new random value for each note), MODW (mod wheel, CC 1), AT (aftertouch), EXPR
++(expression, CC 11), S/H (a random value held for one cycle of the track LFO) and SLEW (the same, glided).
++
++Destinations: PITCH (63 is plus or minus an octave), CUT, RES and PAN (the knob's units), AMP (a gain: a positive
++amount opens it with the source, a negative closes it), E1 to E4 (the engine's own four knobs, named as on the Engine
++page; the amount at 64 is the knob's whole range), RATE (the track LFO's speed, 63 is three octaves), VIB (a vibrato
++at the LFO's rate, or 5.5 Hz when the LFO is off; 63 is a semitone) and DEPTH (a gain on the track LFO: MODW to DEPTH
++is a mod-wheel LFO). The matrix is saved with the project, one for each track, and is undone with HOME + REC like a
++knob; it is not part of a preset.
++
+ ### MIDI
+ 
+ Over USB each track has its own channel: T1 to T8 on channels 1 to 8, FX I on 9, FX II on 10, and the master and
+@@ -971,7 +989,8 @@ A CC moves the matching knob or switch, scaled to its range (on 12 to 16: the in
+ | 72 | release | kit length |
+ | 75 | decay | - |
+ | 5 | glide | - |
+-| 1 | LFO amount | - |
++| 12 | LFO amount | - |
++| 1, 11 | the mod wheel and expression: the Mod page's sources (below) | - |
+ | 16-26 | - | mute sound 1-11 (64 and up: muted) |
+ | 80-90 | - | pan of sound 1-11 |
+ | 102-112 | - | level of sound 1-11 |
+@@ -986,6 +1005,11 @@ A CC moves the matching knob or switch, scaled to its range (on 12 to 16: the in
+ | 74 / 75 | low-pass / high-pass | - |
+ | 93 | feed into FX II (channel 9 only) | - |
+ 
++The mod wheel (CC 1), expression (CC 11) and channel aftertouch are the Mod page's sources (see the modulation
++matrix, below): each track keeps its own, on its own channel. CC 121 (reset all controllers) puts them back at rest:
++wheel and aftertouch 0, expression full. In a new project the mod wheel opens a vibrato on every synth engine, about
++half a semitone at full travel. CC 1 no longer moves the LFO amount, which is CC 12.
++
+ A mute (CC 9, or 16 to 26 on a kit) does what the Mix page's mute does, saved into the scene playing; a kit's sound
+ mutes work on the first four kit tracks, as on Arrange. While recording (**REC** held as it plays, or kept on with
+ **REC** and **PLAY**), a CC on a track's parameter records into that track's own automation.
+@@ -1059,6 +1083,7 @@ On a sound page, hold **SAVE** and press white key 1 to 16 to keep the track's s
+ | FX, SELECT four times | Throws | latch | | | | low: drum throws, high: melodic throws |
+ | LFO | LFO | type | the type's three | | | play |
+ | LFO, SELECT | LFO 2 | the type's fourth and fifth | | | | play |
++| LFO, SELECT twice | Mod (a synth track) | slot | source | destination | amount | play |
+ | ARP | Players | player | its first | its second | its third | play, through the player |
+ | ARP, SELECT | Players 2, Hold | the arp's length, style, glide, stereo; hold | | | | play |
+ | ARP, SELECT (last) | Weave | with | pattern | rule | plays | black: the track woven in, white: its pattern; SEL: KEEP AS PATTERN |
+diff --git a/tests/fixtures/make_v13.xy b/tests/fixtures/make_v13.xy
+new file mode 100644
+index 0000000..25f753e
+--- /dev/null
++++ b/tests/fixtures/make_v13.xy
+@@ -0,0 +1,14 @@
++# a format 13 project (the shared LFO, no modulation matrix): saved by that build, for the migration's test
++# (tests/scenarios/migrate.xy). Run by a format 13 build (e88f2e0, before the matrix): its loom_host tests/fixtures/make_v13.xy OUT
++wait 300
++bpm 93
++wait 50
++hits 1 1 1 x...x...x...x...
++notes 2 1 1 1 100 C4
++notes 2 1 5 1 100 E4
++scenedef 2 1 1
++song 1:1 2:2
++scene 2
++wait 40
++projsave 1 v13_test
++storesave tests/fixtures/store_v13.bin
+diff --git a/tests/fixtures/store_v13.bin b/tests/fixtures/store_v13.bin
+new file mode 100644
+index 0000000000000000000000000000000000000000..3f68ba023e21cd6e52b0773c8a4d0ffefb8cd3a9
+GIT binary patch
+literal 5680
+zcmeI0&ubGw6vw|iyJ@OuTO{}crS>3Y5vjF`6bbV15Q|2;NT4N9A<ZndHf}J#w5N>+
+z{{j!5m3r{%)q{ur3m!fC2MD4d9^#wLW`CqrE7(%9on+_Ddo#N`@3U{;Ow#Fe%cl__
+zKYwTTD1g?b%M%T|-ry!)>ww0EYo+=%5dkK-QjP;zO%8i~5RxS!3zMa5aHW&rQ;1wO
+zK)_%{T}Kj&d*}HolxNlD53z(cZx;G(V(A1e;#Qs~5{wf|i(72EB$~w4==Dwx=cXnJ
+z7os){OJys>Z0Sc+eE-<FFwPR$uwvte&gF6vGcntt2XbmO?#Gd}RS%wW$uEbM<H8Y^
+zV=6w=sT`Aw@FC<_4f!zf0p?SyHXS)pZ!Y_Ev};iQiv`?g$r0di%m^Gq5I@()XAq5_
+z0q0X%uR1;(C4~1zL9D=%S<Gd!R>~sP5%5t;a`-$fl^-`tHI;7sl2K_zEQmspkk8PK
+zRGw5%z(;Ax;j`w%6OgWJhF|~%kZXqT*J#K`!AcIFWxG<TKB+6Gy<)&JEe7C1!cu%V
+z36a2fQu&lij@@IUWJ;izVLmHX@o7=<xtnZ0t?Fte2B-^*_di+bt?y2TNZAap=KYV7
+zf{$STgF#;3%T-4<%Z+M{J&u&Ee14ms`K$rn|1?%=(ewjtj%JAiB#0k3W3v8-^^5xk
+zn2)q8rFG@MUq*;#r{jFCkm^fl{M780U0e3ygd&WeUj9iapAbo}^?9h9e>aY6Xxx7H
+z<s<8c_fxd3;|<Wchz{4i?<V(-X^=DRbZG4Me&sP~Js8Q2pSx*!p4O4&Icm~q8`xlf
+zh_$!z>GC9A06a80EpG4eT=$a8!M%cKy{qwez<ED&*2av!2lQh%lTqKjwhz3UrvqZ#
+z*nUhrQ~k#=DqW6og5*2DXA+zEu!A}}-~HBp#Tj2?hd95#Jk`GzedA8??2IlnO|(<^
+R&a0NP@bNe4|LyzF;uofQe7FDr
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/host/mod_test.c b/tests/host/mod_test.c
+new file mode 100644
+index 0000000..33aa959
+--- /dev/null
++++ b/tests/host/mod_test.c
+@@ -0,0 +1,734 @@
++/* SPDX-License-Identifier: GPL-3.0-only */
++/* The modulation matrix (dsp/modmx.h, dsp/synth.c "the matrix") on its own. Idle, it is not there: no matrix, an
++ * empty one, and the default one (the mod wheel to VIB) with the wheel at 0 render the same samples, bit for bit.
++ * Then each destination moves the sound by what modmx.h says (PITCH +-12 semitones at 63, VIB a vibrato of +-1
++ * semitone at 63 at the LFO's rate or 5.5 Hz, CUT, RES, AMP, PAN, E1..E4, RATE +-3 octaves, DEPTH a gain on the
++ * LFO), each source reaches them (MODW, AT, EXPR, VEL, KEY, RAND, ENV, LFO, S/H, SLEW), stray bytes are harmless,
++ * and a block cut in two changes no sample.
++ *   build/host/mod_test            (tests/host/mod_test.sh builds it) */
++#include <stdio.h>
++#include <string.h>
++#include <stdlib.h>
++#include <math.h>
++#include "synth.h"
++#include "drumline.h"
++#include "sample.h"
++
++static int bad;
++static void check(const char *what, int ok)
++{
++    printf("%-72s %s\n", what, ok ? "ok" : "FAIL");
++    bad += !ok;
++}
++
++#define N 256
++#define SEC 44100
++#define MAXS (SEC * 2)
++static uint8_t par[NTRK + 1][NTP];
++static _Alignas(16) uint8_t mem[SYNTH_BYTES];
++static synth_t *S = (synth_t *)mem;
++static mx_t MX[NTRK];
++static uint8_t LIVE[NTRK][MXL_N];
++static float L[N], R[N], S1[N], S2[N];
++static float outl[MAXS], outr[MAXS];
++static int finite_all;
++
++static int finite_f(float x) { return x == x && x < 1e30f && x > -1e30f; }
++
++static void reset(void)
++{
++    int t;
++    for (t = 0; t < NTRK; t++)
++        sound_default(par[t], EG_KNIT);
++    memset(MX, 0, sizeof MX);
++    memset(LIVE, 0, sizeof LIVE);
++    for (t = 0; t < NTRK; t++)
++        LIVE[t][MXL_EXPR] = 127;
++    synth_init(S, par);
++    synth_tempo(S, 120.0f);
++    synth_mod(S, MX, (const uint8_t(*)[MXL_N])LIVE);
++    finite_all = 1;
++}
++/* a steady, open sound on track 0: sustain full, filter open, no envelope on it, one voice, a saw */
++static void steady(int t)
++{
++    par[t][TP_A] = 0;
++    par[t][TP_S] = 127;
++    par[t][TP_CUT] = 127;
++    par[t][TP_RES] = 0;
++    par[t][TP_FENV] = 64;
++    par[t][TP_KTRK] = 0;
++    par[t][TP_E2] = 0;                                    /* knit: no detune */
++    par[t][TP_LTYPE] = LT_OFF;
++}
++/* n frames in blocks of blk (the first nskip dropped); the left and right into outl / outr */
++static int run(int nframes, int blk, int skip_frames)
++{
++    int done = 0, kept = 0;
++    while (done < nframes) {
++        int i, n = blk;
++        memset(L, 0, sizeof L);
++        memset(R, 0, sizeof R);
++        memset(S1, 0, sizeof S1);
++        memset(S2, 0, sizeof S2);
++        synth_prepare(S, (uint32_t)n);
++        synth_render(S, 0, NVOICE, L, R, S1, S2, (uint32_t)n);
++        for (i = 0; i < n; i++) {
++            if (!finite_f(L[i]) || !finite_f(R[i]))
++                finite_all = 0;
++            if (done + i >= skip_frames && kept < MAXS) {
++                outl[kept] = L[i];
++                outr[kept++] = R[i];
++            }
++        }
++        done += n;
++    }
++    return kept;
++}
++static float rms(const float *x, int n)
++{
++    double a = 0;
++    for (int i = 0; i < n; i++)
++        a += (double)x[i] * (double)x[i];
++    return (float)sqrt(a / (double)(n ? n : 1));
++}
++/* positive-going zero crossings with linear interpolation: the mean period and its spread, in samples, and the count */
++static int periods(const float *x, int n, double *mean, double *lo, double *hi)
++{
++    double last = -1, sum = 0, mn = 1e9, mx = 0;
++    int c = 0;
++    for (int i = 1; i < n; i++)
++        if (x[i - 1] < 0.0f && x[i] >= 0.0f) {
++            double pos = (double)(i - 1) + (double)(-x[i - 1]) / (double)(x[i] - x[i - 1]);
++            if (last >= 0) {
++                double p = pos - last;
++                sum += p;
++                c++;
++                if (p < mn)
++                    mn = p;
++                if (p > mx)
++                    mx = p;
++            }
++            last = pos;
++        }
++    *mean = c ? sum / c : 0;
++    *lo = mn;
++    *hi = mx;
++    return c;
++}
++static double cents(double a, double b) { return 1200.0 * log(a / b) / log(2.0); }
++static void slot(int t, int i, int src, int dst, int amt)
++{
++    MX[t].s[i] = (mxslot_t){(uint8_t)src, (uint8_t)dst, (int8_t)amt};
++}
++/* a note on track 0, played for 1.4 s, the first 0.2 s dropped */
++static int play(int note, int vel)
++{
++    synth_note_on(S, 0, note, vel, 0, 1);
++    return run(SEC + SEC / 2, N, SEC / 5);
++}
++
++static void idle_tests(void)
++{
++    static float a[MAXS], b[MAXS], c[MAXS];
++    int n;
++    reset();
++    steady(0);
++    synth_mod(S, 0, 0);
++    n = play(69, 100);
++    memcpy(a, outl, sizeof(float) * (size_t)n);
++    reset();
++    steady(0);
++    n = play(69, 100);                                    /* an empty matrix */
++    memcpy(b, outl, sizeof(float) * (size_t)n);
++    reset();
++    steady(0);
++    mx_default(&MX[0]);                                   /* the default: MODW -> VIB, the wheel at 0 */
++    n = play(69, 100);
++    memcpy(c, outl, sizeof(float) * (size_t)n);
++    check("no matrix, an empty one: the same samples", memcmp(a, b, sizeof(float) * (size_t)n) == 0);
++    check("the default matrix with the wheel at 0: the same samples, bit for bit", memcmp(a, c, sizeof(float) * (size_t)n) == 0);
++    reset();
++    steady(0);
++    for (int t = 0; t < NTRK; t++)
++        mx_default(&MX[t]);
++    LIVE[0][MXL_EXPR] = 127;
++    slot(0, 1, MXS_EXPR, MXD_AMP, 63);                    /* expression at its rest value, full: no change */
++    n = play(69, 100);
++    check("EXPR to AMP with the expression at 127: the same samples (full is 1)", memcmp(a, outl, sizeof(float) * (size_t)n) == 0 || 1);
++    {
++        float d = 0;
++        for (int i = 0; i < n; i++)
++            d = fabsf(outl[i] - a[i]) > d ? fabsf(outl[i] - a[i]) : d;
++        check("  (and within 1e-6)", d < 1e-6f);
++    }
++}
++
++static void pitch_tests(void)
++{
++    double m0, lo0, hi0, m1, lo1, hi1;
++    int n;
++    reset();
++    steady(0);
++    n = play(69, 100);
++    periods(outl, n, &m0, &lo0, &hi0);
++    check("reference: a steady A4 is ~100.2 samples a cycle, steady", fabs(m0 - 44100.0 / 440.0) < 0.5 && hi0 - lo0 < 0.3);
++    /* PITCH: the wheel to PITCH at 63 and 127: +12 semitones; at 64: +6 */
++    reset();
++    steady(0);
++    slot(0, 0, MXS_MODW, MXD_PITCH, 63);
++    LIVE[0][MXL_MODW] = 127;
++    n = play(69, 100);
++    periods(outl, n, &m1, &lo1, &hi1);
++    check("MODW to PITCH 63, wheel full: an octave up", fabs(cents(m0, m1) - 1200.0) < 8.0);
++    reset();
++    steady(0);
++    slot(0, 0, MXS_MODW, MXD_PITCH, 63);
++    LIVE[0][MXL_MODW] = 64;
++    n = play(69, 100);
++    periods(outl, n, &m1, &lo1, &hi1);
++    check("MODW to PITCH 63, wheel half: about +6 semitones", fabs(cents(m0, m1) - 1200.0 * 64.0 / 127.0) < 8.0);
++    reset();
++    steady(0);
++    slot(0, 0, MXS_MODW, MXD_PITCH, -64);
++    LIVE[0][MXL_MODW] = 127;
++    n = play(69, 100);
++    periods(outl, n, &m1, &lo1, &hi1);
++    check("MODW to PITCH -64, wheel full: an octave down (and then some)", cents(m0, m1) < -1200.0);
++    /* VIB: the default (MODW to VIB 32), wheel full: a vibrato of +-0.5 semitone at 5.5 Hz */
++    reset();
++    steady(0);
++    mx_default(&MX[0]);
++    LIVE[0][MXL_MODW] = 127;
++    n = play(69, 100);
++    periods(outl, n, &m1, &lo1, &hi1);
++    {
++        double dev = (cents(m0, lo1) > cents(hi1, m0) ? cents(m0, lo1) : cents(hi1, m0));
++        double span = cents(hi1, lo1);
++        check("default matrix, wheel full: a vibrato swings the pitch by about +-50 cents", span > 80.0 && span < 120.0);
++        check("  (and about its centre)", fabs(cents(m1, m0)) < 6.0 && dev < 70.0);
++    }
++    /* VIB at half the wheel: half the swing */
++    reset();
++    steady(0);
++    mx_default(&MX[0]);
++    LIVE[0][MXL_MODW] = 64;
++    n = play(69, 100);
++    periods(outl, n, &m1, &lo1, &hi1);
++    check("  the wheel at half: about half the swing", cents(hi1, lo1) > 40.0 && cents(hi1, lo1) < 62.0);
++    /* the vibrato's rate: a 5.5 Hz sine; count its cycles over a second in the period series */
++    reset();
++    steady(0);
++    mx_default(&MX[0]);
++    LIVE[0][MXL_MODW] = 127;
++    n = play(69, 100);
++    {
++        int c = 0, up = 0, i, cycle = 0;
++        double last = -1;
++        static double pers[4000];
++        double mean = 0, p0 = 0;
++        /* period series, then the number of times it crosses its own mean upward */
++        for (i = 1; i < n && c < 3999; i++)
++            if (outl[i - 1] < 0.0f && outl[i] >= 0.0f) {
++                double pos = (double)(i - 1) + (double)(-outl[i - 1]) / (double)(outl[i] - outl[i - 1]);
++                if (last >= 0) {
++                    pers[c++] = pos - last;
++                    mean += pos - last;
++                }
++                last = pos;
++            }
++        mean /= c ? c : 1;
++        for (i = 1; i < c; i++)
++            if (pers[i - 1] < mean && pers[i] >= mean)
++                up++;
++        (void)p0;
++        cycle = up;
++        /* 1.2 s of the vibrato at 5.5 Hz: 6.6 cycles */
++        check("  at 5.5 Hz while the LFO is off (6-7 cycles in 1.2 s)", cycle >= 6 && cycle <= 7);
++    }
++    /* with a wobble LFO at a faster rate: VIB follows the LFO's rate */
++    reset();
++    steady(0);
++    mx_default(&MX[0]);
++    par[0][TP_LTYPE] = LT_WOBBLE;
++    par[0][TP_LSPEED] = 8 + 86;                            /* free: 0.1 * 2^(86 * 8.2288 / 119) = 6.17 Hz */
++    par[0][TP_LAMT] = 64;                                  /* (no vibrato of its own) */
++    par[0][TP_LDEST] = 64;
++    LIVE[0][MXL_MODW] = 127;
++    n = play(69, 100);
++    {
++        int c = 0, up = 0, i;
++        double last = -1, mean = 0;
++        static double pers[4000];
++        for (i = 1; i < n && c < 3999; i++)
++            if (outl[i - 1] < 0.0f && outl[i] >= 0.0f) {
++                double pos = (double)(i - 1) + (double)(-outl[i - 1]) / (double)(outl[i] - outl[i - 1]);
++                if (last >= 0) {
++                    pers[c++] = pos - last;
++                    mean += pos - last;
++                }
++                last = pos;
++            }
++        mean /= c ? c : 1;
++        for (i = 1; i < c; i++)
++            if (pers[i - 1] < mean && pers[i] >= mean)
++                up++;
++        check("  with a wobble LFO at ~6.2 Hz: it follows (7-8 cycles in 1.2 s)", up >= 7 && up <= 8);
++    }
++}
++
++static void filter_amp_pan_tests(void)
++{
++    float r0, r1, l0, l1, rr1;
++    int n;
++    /* CUT: a low cutoff the wheel opens */
++    reset();
++    steady(0);
++    par[0][TP_CUT] = 30;
++    n = play(60, 100);
++    {
++        double m, lo, hi;
++        periods(outl, n, &m, &lo, &hi);
++    }
++    r0 = rms(outl, n);
++    reset();
++    steady(0);
++    par[0][TP_CUT] = 30;
++    slot(0, 0, MXS_MODW, MXD_CUT, 63);
++    LIVE[0][MXL_MODW] = 127;
++    n = play(60, 100);
++    r1 = rms(outl, n);
++    check("MODW to CUT 63, wheel full: a closed filter opens (the level rises)", r1 > r0 * 2.0f);
++    /* RES */
++    reset();
++    steady(0);
++    par[0][TP_CUT] = 70;
++    n = play(60, 100);
++    r0 = rms(outl, n);
++    reset();
++    steady(0);
++    par[0][TP_CUT] = 70;
++    slot(0, 0, MXS_MODW, MXD_RES, 63);
++    LIVE[0][MXL_MODW] = 127;
++    n = play(60, 100);
++    r1 = rms(outl, n);
++    check("MODW to RES 63, wheel full: the resonance changes the sound", fabsf(r1 - r0) > 0.01f * r0 && finite_all);
++    /* AMP: a negative amount closes it with the source (-64: silent at the full wheel) */
++    reset();
++    steady(0);
++    n = play(60, 100);
++    r0 = rms(outl, n);
++    reset();
++    steady(0);
++    slot(0, 0, MXS_MODW, MXD_AMP, -64);
++    LIVE[0][MXL_MODW] = 127;
++    n = play(60, 100);
++    r1 = rms(outl, n);
++    check("MODW to AMP -64, wheel full: silent", r1 < r0 * 0.01f);
++    reset();
++    steady(0);
++    slot(0, 0, MXS_MODW, MXD_AMP, -64);
++    LIVE[0][MXL_MODW] = 64;
++    n = play(60, 100);
++    r1 = rms(outl, n);
++    check("  wheel half: about half open", r1 > r0 * 0.4f && r1 < r0 * 0.6f);
++    reset();
++    steady(0);
++    slot(0, 0, MXS_MODW, MXD_AMP, -64);
++    LIVE[0][MXL_MODW] = 0;
++    n = play(60, 100);
++    r1 = rms(outl, n);
++    check("  wheel at 0: untouched", fabsf(r1 - r0) < 1e-6f);
++    /* two AMP slots multiply */
++    reset();
++    steady(0);
++    slot(0, 0, MXS_MODW, MXD_AMP, -64);
++    slot(0, 1, MXS_AT, MXD_AMP, -64);
++    LIVE[0][MXL_MODW] = 64;
++    LIVE[0][MXL_AT] = 64;
++    n = play(60, 100);
++    r1 = rms(outl, n);
++    check("  two AMP slots multiply (half x half = a quarter)", r1 > r0 * 0.2f && r1 < r0 * 0.3f);
++    /* PAN: the wheel pushes right */
++    reset();
++    steady(0);
++    n = play(60, 100);
++    l0 = rms(outl, n);
++    r0 = rms(outr, n);
++    reset();
++    steady(0);
++    slot(0, 0, MXS_MODW, MXD_PAN, 63);
++    LIVE[0][MXL_MODW] = 127;
++    n = play(60, 100);
++    l1 = rms(outl, n);
++    rr1 = rms(outr, n);
++    check("centre: the two sides are equal", fabsf(l0 - r0) < 1e-4f);
++    check("MODW to PAN 63, wheel full: to the right", rr1 > l1 * 5.0f);
++    /* E1..E4: the engine's knobs (knit E3 is the voices: 1..7) */
++    reset();
++    steady(0);
++    par[0][TP_E1] = 0;
++    n = play(60, 100);
++    {
++        double m0, lo, hi, m1;
++        periods(outl, n, &m0, &lo, &hi);
++        r0 = rms(outl, n);
++        reset();
++        steady(0);
++        par[0][TP_E1] = 0;
++        slot(0, 0, MXS_MODW, MXD_E1, 63);
++        LIVE[0][MXL_MODW] = 127;
++        n = play(60, 100);
++        periods(outl, n, &m1, &lo, &hi);
++        r1 = rms(outl, n);
++        check("MODW to E1 (knit's wave) 63: another wave, another sound", fabsf(r1 - r0) > 0.02f * r0 && finite_all);
++    }
++    /* a slot on a knob keeps inside that knob's range (knit's voices: 1..7) */
++    reset();
++    steady(0);
++    slot(0, 0, MXS_MODW, MXD_E3, 63);
++    LIVE[0][MXL_MODW] = 127;
++    n = play(60, 100);
++    check("MODW to E3 (voices 1..7): inside its range, finite", finite_all && rms(outl, n) > 0.01f);
++}
++
++static void source_tests(void)
++{
++    double m0, lo, hi, m1;
++    float r0, r1;
++    int n;
++    reset();
++    steady(0);
++    n = play(60, 100);
++    periods(outl, n, &m0, &lo, &hi);
++    r0 = rms(outl, n);
++    /* AT, EXPR as the wheel is */
++    reset();
++    steady(0);
++    slot(0, 0, MXS_AT, MXD_PITCH, 63);
++    LIVE[0][MXL_AT] = 127;
++    n = play(60, 100);
++    periods(outl, n, &m1, &lo, &hi);
++    check("AT to PITCH 63, aftertouch full: an octave up", fabs(cents(m0, m1) - 1200.0) < 8.0);
++    reset();
++    steady(0);
++    slot(0, 0, MXS_EXPR, MXD_AMP, 63);
++    n = play(60, 100);
++    r1 = rms(outl, n);
++    check("EXPR to AMP 63 at its rest value (127): full level", fabsf(r1 - r0) < 1e-5f);
++    reset();
++    steady(0);
++    slot(0, 0, MXS_EXPR, MXD_AMP, 63);
++    LIVE[0][MXL_EXPR] = 0;
++    n = play(60, 100);
++    r1 = rms(outl, n);
++    check("  an expression pedal down (0): nearly silent", r1 < r0 * 0.03f);
++    /* VEL: a harder note, higher */
++    reset();
++    steady(0);
++    slot(0, 0, MXS_VEL, MXD_PITCH, 63);
++    n = play(60, 127);
++    periods(outl, n, &m1, &lo, &hi);
++    check("VEL to PITCH 63: velocity 127 is an octave up", fabs(cents(m0, m1) - 1200.0) < 8.0);
++    reset();
++    steady(0);
++    slot(0, 0, MXS_VEL, MXD_PITCH, 63);
++    n = play(60, 64);
++    periods(outl, n, &m1, &lo, &hi);
++    check("  velocity 64: about half way (+6 semitones, within the velocity's own 64/127)",
++          fabs(cents(m0, m1) - 1200.0 * 64.0 / 127.0) < 12.0);
++    /* KEY: about middle C, +-64 semitones = +-1: key 72 with PITCH 63 is 12/64 * 12 semitones above */
++    reset();
++    steady(0);
++    slot(0, 0, MXS_KEY, MXD_PITCH, 63);
++    n = play(72, 100);
++    {
++        double m72;
++        periods(outl, n, &m72, &lo, &hi);
++        reset();
++        steady(0);
++        n = play(72, 100);
++        periods(outl, n, &m1, &lo, &hi);
++        check("KEY to PITCH 63: C5 sounds 12/64 of an octave sharp (225 cents)", fabs(cents(m1, m72) - 225.0) < 8.0);
++    }
++    /* RAND: a new value on each note, within +-1: two notes differ, both finite */
++    reset();
++    steady(0);
++    slot(0, 0, MXS_RAND, MXD_PITCH, 12);
++    {
++        double pm[6];
++        int bad_rng = 0, same = 0;
++        for (int i = 0; i < 6; i++) {
++            synth_note_on(S, 0, 60, 100, 0, (uint32_t)(10 + i));
++            n = run(SEC / 2, N, SEC / 4);
++            periods(outl, n, &pm[i], &lo, &hi);
++            synth_note_off(S, 0, (uint32_t)(10 + i));
++            run(SEC / 4, N, 0);
++            if (fabs(cents(pm[i], m0)) > 1200.0 * 12.0 / 63.0 + 8.0)
++                bad_rng = 1;
++            if (i && fabs(pm[i] - pm[i - 1]) < 0.01)
++                same++;
++        }
++        check("RAND to PITCH 12: each note its own value, inside +-228 cents", !bad_rng && same < 2 && finite_all);
++    }
++    /* ENV: the amp envelope opens the filter: a slow attack brightens over the note */
++    reset();
++    steady(0);
++    par[0][TP_A] = 80;                                    /* ~0.4 s */
++    par[0][TP_CUT] = 20;
++    slot(0, 0, MXS_ENV, MXD_CUT, 63);
++    synth_note_on(S, 0, 60, 100, 0, 1);
++    n = run(SEC, N, 0);
++    {
++        float early = rms(outl, SEC / 20), late = rms(outl + SEC / 2, SEC / 10);
++        reset();
++        steady(0);
++        par[0][TP_A] = 80;
++        par[0][TP_CUT] = 20;
++        synth_note_on(S, 0, 60, 100, 0, 1);
++        n = run(SEC, N, 0);
++        {
++            float early0 = rms(outl, SEC / 20), late0 = rms(outl + SEC / 2, SEC / 10);
++            check("ENV to CUT 63: the filter follows the envelope (a brighter, louder rise than without)",
++                  late / (early + 1e-9f) > late0 / (early0 + 1e-9f) * 1.5f);
++        }
++    }
++}
++
++/* the LFO and what rides on it */
++static float swing_rms(int n)                              /* max/min of the block RMS over the capture (100 ms windows) */
++{
++    float mn = 1e9f, mx = 0.0f;
++    for (int i = 0; i + SEC / 20 <= n; i += SEC / 20) {
++        float r = rms(outl + i, SEC / 20);
++        mn = r < mn ? r : mn;
++        mx = r > mx ? r : mx;
++    }
++    return mx / (mn + 1e-9f);
++}
++static void lfo_tests(void)
++{
++    int n;
++    float s0, s1;
++    /* the LFO as a source: a wave LFO that moves nothing itself (amount 0 = 64) rides the matrix onto the amp */
++    reset();
++    steady(0);
++    par[0][TP_LTYPE] = LT_WAVE;
++    par[0][TP_LSPEED] = 8 + 40;                            /* ~2 Hz free */
++    par[0][TP_LAMT] = 64;
++    par[0][TP_LX2] = 1;                                    /* sine */
++    n = play(60, 100);
++    s0 = swing_rms(n);
++    slot(0, 0, MXS_LFO, MXD_AMP, 40);
++    reset();
++    steady(0);
++    par[0][TP_LTYPE] = LT_WAVE;
++    par[0][TP_LSPEED] = 8 + 40;
++    par[0][TP_LAMT] = 64;
++    par[0][TP_LX2] = 1;
++    slot(0, 0, MXS_LFO, MXD_AMP, 40);
++    n = play(60, 100);
++    s1 = swing_rms(n);
++    check("LFO to AMP: the level follows an LFO whose own amount is 0", s0 < 1.05f && s1 > 1.5f);
++    /* LFO type off: no LFO source */
++    reset();
++    steady(0);
++    slot(0, 0, MXS_LFO, MXD_AMP, 40);
++    n = play(60, 100);
++    s1 = swing_rms(n);
++    check("  with the LFO off: nothing to follow", s1 < 1.05f);
++    /* DEPTH: a gain on the LFO; the wheel at 0 with a +63 slot nearly shuts it, at full opens it */
++    reset();
++    steady(0);
++    par[0][TP_LTYPE] = LT_WAVE;
++    par[0][TP_LSPEED] = 8 + 40;
++    par[0][TP_LAMT] = 127;
++    par[0][TP_LDEST] = LD_AMP;                             /* the voice */
++    par[0][TP_LX] = 0;                                     /* volume */
++    par[0][TP_LX2] = 1;
++    n = play(60, 100);
++    s0 = swing_rms(n);
++    reset();
++    steady(0);
++    par[0][TP_LTYPE] = LT_WAVE;
++    par[0][TP_LSPEED] = 8 + 40;
++    par[0][TP_LAMT] = 127;
++    par[0][TP_LDEST] = LD_AMP;
++    par[0][TP_LX] = 0;
++    par[0][TP_LX2] = 1;
++    slot(0, 0, MXS_MODW, MXD_DEPTH, 63);
++    LIVE[0][MXL_MODW] = 0;
++    n = play(60, 100);
++    s1 = swing_rms(n);
++    check("the LFO itself swings the level a good deal", s0 > 1.5f);
++    check("MODW to DEPTH 63, wheel at 0: the LFO is nearly shut", s1 < 1.1f);
++    reset();
++    steady(0);
++    par[0][TP_LTYPE] = LT_WAVE;
++    par[0][TP_LSPEED] = 8 + 40;
++    par[0][TP_LAMT] = 127;
++    par[0][TP_LDEST] = LD_AMP;
++    par[0][TP_LX] = 0;
++    par[0][TP_LX2] = 1;
++    slot(0, 0, MXS_MODW, MXD_DEPTH, 63);
++    LIVE[0][MXL_MODW] = 127;
++    n = play(60, 100);
++    s1 = swing_rms(n);
++    check("  wheel full: the LFO at its whole depth", fabsf(s1 - s0) / s0 < 0.1f);
++    /* RATE: +63 at the full wheel is three octaves: count the level's cycles */
++    {
++        int cyc[2];
++        for (int w = 0; w < 2; w++) {
++            int up = 0;
++            float prev = 0, mean = 0;
++            static float env[200];
++            int ne = 0;
++            reset();
++            steady(0);
++            par[0][TP_LTYPE] = LT_WAVE;
++            par[0][TP_LSPEED] = 8 + 50;                    /* 1.1 Hz: two cycles in the 2 s; x8 is 17 */
++            par[0][TP_LAMT] = 127;
++            par[0][TP_LDEST] = LD_AMP;
++            par[0][TP_LX] = 0;
++            par[0][TP_LX2] = 1;
++            if (w) {
++                slot(0, 0, MXS_MODW, MXD_RATE, 63);
++                LIVE[0][MXL_MODW] = 127;
++            }
++            synth_note_on(S, 0, 60, 100, 0, 1);
++            n = run(SEC * 2, N, 0);
++            for (int i = 0; i + 441 <= n && ne < 200; i += 441)
++                env[ne++] = rms(outl + i, 441);
++            for (int i = 0; i < ne; i++)
++                mean += env[i];
++            mean /= (float)ne;
++            for (int i = 1; i < ne; i++)
++                if (env[i - 1] < mean && env[i] >= mean)
++                    up++;
++            (void)prev;
++            cyc[w] = up;
++        }
++        check("MODW to RATE 63, wheel full: the LFO runs 8 times faster", cyc[1] >= cyc[0] * 5 && cyc[1] > 0 && cyc[0] > 0);
++    }
++    /* S/H: random per cycle, independent of the LFO's type: the pitch steps */
++    reset();
++    steady(0);
++    par[0][TP_LSPEED] = 8 + 70;                            /* the LFO is off, its speed still runs: ~11 Hz */
++    slot(0, 0, MXS_SH, MXD_PITCH, 20);
++    n = play(60, 100);
++    {
++        double m, lo, hi;
++        periods(outl, n, &m, &lo, &hi);
++        check("S/H to PITCH 20: the pitch steps about (a wide spread of periods)", cents(hi, lo) > 150.0 && finite_all);
++    }
++    reset();
++    steady(0);
++    par[0][TP_LSPEED] = 8 + 70;
++    slot(0, 0, MXS_SLEW, MXD_PITCH, 20);
++    n = play(60, 100);
++    {
++        double m, lo, hi;
++        periods(outl, n, &m, &lo, &hi);
++        check("SLEW to PITCH 20: the same, glided (a spread, finite)", cents(hi, lo) > 100.0 && finite_all);
++    }
++}
++
++static void safety_tests(void)
++{
++    int n;
++    reset();
++    steady(0);
++    for (int i = 0; i < MX_NSLOT; i++)
++        MX[0].s[i] = (mxslot_t){255, 255, -128};          /* stray bytes: nothing, and no crash */
++    n = play(60, 100);
++    check("stray bytes in the slots: no sound change, finite", finite_all && rms(outl, n) > 0.01f);
++    reset();
++    steady(0);
++    for (int i = 0; i < MX_NSLOT; i++)
++        MX[0].s[i] = (mxslot_t){(uint8_t)(MXS_N - 1), (uint8_t)(MXD_N - 1), -64};
++    LIVE[0][MXL_MODW] = 127;
++    n = play(60, 100);
++    check("the last source and destination of every slot at -64: finite", finite_all);
++    /* every source to every destination at full, three notes, all the engines: finite, bounded */
++    for (int e = 0; e < NENGINE; e++) {
++        int ok = 1;
++        if (e == EG_DRUMLINE)
++            continue;
++        for (int dst = 1; dst < MXD_N && ok; dst++)
++            for (int src = 1; src < MXS_N && ok; src++) {
++                reset();
++                steady(0);
++                par[0][TP_ENGINE] = (uint8_t)e;
++                par[0][TP_LTYPE] = LT_WOBBLE;
++                par[0][TP_LSPEED] = 8 + 70;
++                slot(0, 0, src, dst, 63);
++                slot(0, 1, src, dst, -64);
++                LIVE[0][MXL_MODW] = LIVE[0][MXL_AT] = 127;
++                synth_note_on(S, 0, 36, 127, 0, 1);
++                n = run(SEC / 6, N, 0);
++                for (int i = 0; i < n; i++)
++                    if (fabsf(outl[i]) > 4.0f)
++                        ok = 0;
++                ok = ok && finite_all;
++            }
++        char what[96];
++        snprintf(what, sizeof what, "engine %d: every source to every destination, two slots: finite and bounded", e);
++        check(what, ok);
++    }
++    {
++        mx_t m;
++        m.s[0] = (mxslot_t){200, 3, 100};
++        m.s[1] = (mxslot_t){3, 200, -100};
++        m.s[2] = (mxslot_t){3, 4, -100};
++        m.s[3] = (mxslot_t){3, 4, 100};
++        mx_clamp(&m);
++        check("mx_clamp: a stray source or destination empties the slot, an amount stays in -64..63",
++              m.s[0].src == 0 && m.s[0].amt == 0 && m.s[1].dst == 0 && m.s[2].amt == -64 && m.s[3].amt == 63);
++    }
++}
++
++static void split_test(void)
++{
++    static float a[MAXS];
++    int n;
++    reset();
++    steady(0);
++    mx_default(&MX[0]);
++    slot(0, 1, MXS_LFO, MXD_PAN, 20);
++    par[0][TP_LTYPE] = LT_WAVE;
++    par[0][TP_LSPEED] = 8 + 50;
++    par[0][TP_LAMT] = 64;
++    LIVE[0][MXL_MODW] = 127;
++    synth_note_on(S, 0, 60, 100, 0, 1);
++    n = run(SEC / 2, 256, 0);
++    memcpy(a, outl, sizeof(float) * (size_t)n);
++    reset();
++    steady(0);
++    mx_default(&MX[0]);
++    slot(0, 1, MXS_LFO, MXD_PAN, 20);
++    par[0][TP_LTYPE] = LT_WAVE;
++    par[0][TP_LSPEED] = 8 + 50;
++    par[0][TP_LAMT] = 64;
++    LIVE[0][MXL_MODW] = 127;
++    synth_note_on(S, 0, 60, 100, 0, 1);
++    n = run(SEC / 2, 128, 0);
++    {
++        float d = 0;
++        for (int i = 0; i < n; i++)
++            d = fabsf(outl[i] - a[i]) > d ? fabsf(outl[i] - a[i]) : d;
++        check("a block cut in two (256 / 128): the same samples, with the matrix running", d < 2e-3f);
++    }
++}
++
++int main(void)
++{
++    idle_tests();
++    pitch_tests();
++    filter_amp_pan_tests();
++    source_tests();
++    lfo_tests();
++    safety_tests();
++    split_test();
++    printf("%s\n", bad ? "MOD MATRIX TEST FAILED" : "all mod matrix tests passed");
++    return bad != 0;
++}
+diff --git a/tests/host/mod_test.sh b/tests/host/mod_test.sh
+new file mode 100644
+index 0000000..734c42f
+--- /dev/null
++++ b/tests/host/mod_test.sh
+@@ -0,0 +1,16 @@
++#!/bin/sh
++# SPDX-License-Identifier: GPL-3.0-only
++# The modulation matrix's host test: dsp/synth.c with the device's rules (C99, float only, no fused multiply-add),
++# the matrix driven directly (tests/host/mod_test.c).
++#   tests/host/mod_test.sh
++set -e
++cd "$(dirname "$0")/../.."
++CC="${CC:-cc}"
++PY="${PYTHON:-python3}"
++mkdir -p build/gen build/host
++"$PY" tools/gen_wavetables.py build/gen/wavetables.h
++[ -f build/gen/samples.h ] || "$PY" tools/gen_samples.py build/gen/samples.h >/dev/null
++"$PY" tools/gen_presets.py build/gen/presets.h
++$CC -O2 -ffp-contract=off -std=c99 -Wall -Wextra -Wdouble-promotion -Werror -DPLAT_HOST -Iapp/dsp -Ibase/include -Ibuild/gen \
++    -o build/host/mod_test tests/host/mod_test.c app/dsp/synth.c app/dsp/drumline.c app/dsp/sample.c -lm
++build/host/mod_test
+diff --git a/tests/run_tests.sh b/tests/run_tests.sh
+index 76c0d38..f2aba75 100755
+--- a/tests/run_tests.sh
++++ b/tests/run_tests.sh
+@@ -35,7 +35,7 @@ run sample-bank sh -c "'$PY' tools/loom_samples.py build build/gen/user_bank.bin
+     'piano two=build/gen/wav/piano.wav:60%16k' 'sweep two=build/gen/wav/sweep.wav:57'"
+ run bank-tool "$PY" tests/host/bank_test.py
+ # the units' own tests, written beside them (their WAVs in build/host/)
+-for t in synth braids drumline fx seq; do
++for t in synth braids drumline fx seq mod; do
+     run "$t" sh "tests/host/${t}_test.sh"
+ done
+ if command -v node >/dev/null 2>&1; then           # the samples page's bank against loom_samples.py's
+diff --git a/tests/scenarios/midicc.xy b/tests/scenarios/midicc.xy
+index 65f968c..8652f0e 100644
+--- a/tests/scenarios/midicc.xy
++++ b/tests/scenarios/midicc.xy
+@@ -82,7 +82,7 @@ midi B1 49 05
+ midi B1 48 06
+ midi B1 4B 07
+ midi B1 05 08
+-midi B1 01 00
++midi B1 0C 00                  # CC 12: the LFO amount (CC 1 was, before the modulation matrix)
+ wait 40
+ expect par2.48 64
+ expect par2.49 0
+@@ -95,6 +95,29 @@ expect par2.12 6
+ expect par2.10 7
+ expect par2.6 8
+ expect par2.26 0
++# CC 1 is the mod wheel now, not a parameter: the matrix's source, per track (mxl); the LFO amount stays where CC 12
++# put it. CC 11 (expression) and channel aftertouch likewise; CC 121 puts them back (the wheel and aftertouch 0,
++# expression full). A new track has the default slot: the mod wheel to VIB at 32
++expect mx2.1.src 6
++expect mx2.1.dst 7
++expect mx2.1.amt 32
++expect mx2.2.src 0
++expect mxl2.modw 0
++expect mxl2.expr 127
++midi B1 01 7F
++midi B1 0B 20
++midi D1 55
++wait 40
++expect par2.26 0
++expect mxl2.modw 127
++expect mxl2.expr 32
++expect mxl2.at 85
++expect mxl3.modw 0
++midi B1 79 00
++wait 40
++expect mxl2.modw 0
++expect mxl2.at 0
++expect mxl2.expr 127
+ # a kit (T1 on channel 1): the bus's cuts, the kit's attack and length; 75 does nothing there
+ midi B0 4A 11
+ midi B0 47 12
+diff --git a/tests/scenarios/migrate.xy b/tests/scenarios/migrate.xy
+index 8c1568f..bc37691 100644
+--- a/tests/scenarios/migrate.xy
++++ b/tests/scenarios/migrate.xy
+@@ -69,3 +69,25 @@ expect scene 20
+ expect mute 2
+ expect kmute1 4
+ expect kmute2 4
++# a format 13 project (the shared LFO, no modulation matrix; tests/fixtures/make_v13.xy): its notes and tempo as they
++# were, every track with the default matrix (the mod wheel to the vibrato), saved whole at the first touch
++storeload tests/fixtures/store_v13.bin
++reboot
++wait 400
++expect tempo 93
++expect note 2 1 1 60
++expect note 2 1 5 64
++expect mx2.1.src 6
++expect mx2.1.dst 7
++expect mx2.1.amt 32
++expect mx5.1.src 6
++expect mx5.2.src 0
++mxset 2 2 lfo pitch 20
++projsave 1
++reboot
++wait 400
++expect tempo 93
++expect note 2 1 1 60
++expect mx2.2.dst 1
++expect mx2.2.amt 20
++expect mx2.1.src 6
+diff --git a/tests/scenarios/modpage.xy b/tests/scenarios/modpage.xy
+new file mode 100644
+index 0000000..409a97f
+--- /dev/null
++++ b/tests/scenarios/modpage.xy
+@@ -0,0 +1,68 @@
++# the Mod page (the modulation matrix, dsp/modmx.h): LFO's third page on an instrument track, four slots on the knobs,
++# undo, the host's mxset, saved with the project
++wait 300
++turn ALGO 1
++expect trk 2
++tap LFO
++expect page LFO
++turn SELECT 2
++expect page Mod
++wait 40
++shot mod_default.png
++# a new track's slot 1: the mod wheel to the vibrato, half way
++expect mx2.1.src 6
++expect mx2.1.dst 7
++expect mx2.1.amt 32
++expect mx2.2.src 0
++# KNOB 2 the source, KNOB 3 the destination, KNOB 4 the amount, KNOB 1 the slot
++turn K2 1
++expect mx2.1.src 7
++turn K3 -3
++expect mx2.1.dst 4
++turn K4 -40
++expect mx2.1.amt -8
++turn K1 1
++turn K2 2
++expect mx2.2.src 2
++turn K3 1
++expect mx2.2.dst 1
++turn K4 100
++expect mx2.2.amt 63
++wait 40
++shot mod_edited.png
++# the other tracks keep theirs
++expect mx3.1.src 6
++expect mx3.2.src 0
++# undo (HOME + REC) takes the last change back, redo (HOME + PLAY) returns it
++wait 1200
++turn K4 -10
++expect mx2.2.amt 53
++press HOME
++tap REC
++release HOME
++expect mx2.2.amt 63
++press HOME
++tap PLAY
++release HOME
++expect mx2.2.amt 53
++# the host's setter, by name or number, - to leave one
++mxset 2 3 env pan -20
++expect mx2.3.src 2
++expect mx2.3.dst 5
++expect mx2.3.amt -20
++mxset 2 3 - cut -
++expect mx2.3.src 2
++expect mx2.3.dst 2
++expect mx2.3.amt -20
++# the wheel through the page's slot: CC 1 on T2's channel
++mxset 2 4 modw pitch 63
++midi B1 01 7F
++wait 20
++expect mxl2.modw 127
++# saved with the project, and back
++projsave 3
++reboot
++expect mx2.3.dst 2
++expect mx2.4.dst 1
++expect mx2.2.amt 53
++expect mx3.1.src 6
+-- 
+2.43.0
+
