@@ -33,10 +33,12 @@ uint8_t proj_slot;
 #define STREAM_HDR 16u                  /* in the first object: format, raw length, raw CRC, packed length */
 #define STREAM_CAP ((uint32_t)NSTREAM * (PLAT_STORE_MAX - 4u) - (STREAM_HDR - 4u))
 #define RAW_LEN sizeof(patterns_t)
+/* formats 10 to 13 had no modulation matrix (format 14's): their streams end where it starts */
+#define RAW_LEN13 (sizeof(patterns_t) - sizeof pats.mod)
 /* format 10 (0.5-beta): the same store but 16 scenes of scene10_t, the song after them */
-#define RAW_LEN10 (sizeof(patterns_t) - sizeof pats.scene + NSCENE10 * sizeof(scene10_t))
+#define RAW_LEN10 (RAW_LEN13 - sizeof pats.scene + NSCENE10 * sizeof(scene10_t))
 /* format 11: 32 scenes of scene11_t (one kit mute mask for every kit) */
-#define RAW_LEN11 (sizeof(patterns_t) - sizeof pats.scene + NSCENE * sizeof(scene11_t))
+#define RAW_LEN11 (RAW_LEN13 - sizeof pats.scene + NSCENE * sizeof(scene11_t))
 typedef char scene_sizes[(sizeof(scene10_t) == 18 && sizeof(scene11_t) == 20 && sizeof(scene_t) == 26) ? 1 : -1];
 typedef char songs_apart[(NSCENE10 * sizeof(scene10_t) + sizeof(song_t) <= NSCENE * sizeof(scene_t) &&
                           NSCENE * sizeof(scene11_t) + sizeof(song_t) <= NSCENE * sizeof(scene_t)) ? 1 : -1];   /* (an
@@ -45,7 +47,8 @@ static uint8_t load_format;                       /* the format of the project b
 static uint8_t migrated = 0xFF;                   /* the slot loaded from an older format and not saved since (0xFF
                                                    * none): its next touch saves it whole, never its settings alone
                                                    * beside the old format's patterns */
-#define FORMAT_OK(f) ((f) >= 10u && (f) <= PROJ_FORMAT)   /* the formats a slot loads (migrate_old, before 13 glfo_defaults) */
+#define FORMAT_OK(f) ((f) >= 10u && (f) <= PROJ_FORMAT)   /* the formats a slot loads (migrate_old, before 13 glfo_defaults, before 14 the
+                                                            * stream without matrices) */
 typedef char raw_fits[(RAW_LEN < 0x100000u) ? 1 : -1];   /* (lz.c packs up to 16 MB; the header's length is a u32) */
 typedef char settings_fit[(sizeof(settings_t) <= PLAT_STORE_MAX) ? 1 : -1];
 typedef char presets_fit[(sizeof user_presets + 4u <= PLAT_STORE_MAX) ? 1 : -1];
@@ -340,6 +343,8 @@ static void patterns_clamp(void)
         if (sc->brain_key >= 12)
             sc->brain_key = 0;
     }
+    for (t = 0; t < NTRK; t++)
+        mx_clamp(&pats.mod[t]);                       /* (the matrix indexes the names and the voices) */
     if (pats.song.len > NSONG)
         pats.song.len = NSONG;
     for (k = 0; k < NSONG; k++) {
@@ -537,16 +542,25 @@ static int load_stream(int n, uint32_t prev)
     uint32_t crc = get32(io_buf + 8), plen = get32(io_buf + 12), len = get32(io_buf + 4);
     st_in_t s = {0, n, STREAM_HDR, plen, prev};
     lz_src_t src = {st_get, &s};
-    if (n < (int)STREAM_HDR || (len != RAW_LEN && len != RAW_LEN10 && len != RAW_LEN11) || plen > STREAM_CAP)
+    if (n < (int)STREAM_HDR || (len != RAW_LEN && len != RAW_LEN13 && len != RAW_LEN10 && len != RAW_LEN11) ||
+        plen > STREAM_CAP)
         return -1;                                /* (its own length says its format: settings saved alone, as
                                                    * this format's, before a power cut beside format 10's patterns) */
     stored_known[stream_obj[0]] = !(prev & 1u);
     stored_hash[stream_obj[0]] = hash_of(io_buf, (uint32_t)n);
     if (lz_decompress(&src, raw, len) || crc32_of(raw, len) != crc)
         return -1;
-    if (len != RAW_LEN) {
+    if (len == RAW_LEN10 || len == RAW_LEN11) {
         load_format = len == RAW_LEN10 ? 10u : 11u;
         migrate_old(load_format);
+    }
+    if (len != RAW_LEN) {                             /* before 14: no matrices in it: every track the default one
+                                                       * (not what an earlier, failed attempt left there) */
+        for (int t = 0; t < NTRK; t++)
+            mx_default(&pats.mod[t]);
+        if (load_format > 13u)                        /* (settings of this format beside an older stream, a power cut
+                                                       * between the two: saved whole, next) */
+            load_format = 13u;
     }
     packed_len = plen;
     return 0;

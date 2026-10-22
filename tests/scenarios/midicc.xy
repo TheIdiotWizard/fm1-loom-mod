@@ -82,7 +82,7 @@ midi B1 49 05
 midi B1 48 06
 midi B1 4B 07
 midi B1 05 08
-midi B1 01 00
+midi B1 0C 00                  # CC 12: the LFO amount (CC 1 was, before the modulation matrix)
 wait 40
 expect par2.48 64
 expect par2.49 0
@@ -95,6 +95,29 @@ expect par2.12 6
 expect par2.10 7
 expect par2.6 8
 expect par2.26 0
+# CC 1 is the mod wheel now, not a parameter: the matrix's source, per track (mxl); the LFO amount stays where CC 12
+# put it. CC 11 (expression) and channel aftertouch likewise; CC 121 puts them back (the wheel and aftertouch 0,
+# expression full). A new track has the default slot: the mod wheel to VIB at 32
+expect mx2.1.src 6
+expect mx2.1.dst 7
+expect mx2.1.amt 32
+expect mx2.2.src 0
+expect mxl2.modw 0
+expect mxl2.expr 127
+midi B1 01 7F
+midi B1 0B 20
+midi D1 55
+wait 40
+expect par2.26 0
+expect mxl2.modw 127
+expect mxl2.expr 32
+expect mxl2.at 85
+expect mxl3.modw 0
+midi B1 79 00
+wait 40
+expect mxl2.modw 0
+expect mxl2.at 0
+expect mxl2.expr 127
 # a kit (T1 on channel 1): the bus's cuts, the kit's attack and length; 75 does nothing there
 midi B0 4A 11
 midi B0 47 12

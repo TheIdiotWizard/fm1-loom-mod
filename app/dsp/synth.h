@@ -12,6 +12,7 @@
  * calls synth_note_* through the engine's command queue (app/engine.c). Float, no libm: fastmath.h. */
 #pragma once
 #include <stdint.h>
+#include "modmx.h"
 
 #define SY_SR 44100.0f
 #define NTRK 8                        /* instrument tracks (seq/pattern.h agrees) */
@@ -230,9 +231,14 @@ typedef struct {
 typedef struct synth synth_t;         /* opaque: dsp/synth.c */
 void synth_glfo_restart(synth_t *s);              /* the shared LFO from its start (the transport started) */
 float synth_glfo_now(const synth_t *s);            /* its value now, -1..1 (the page's picture) */
-#define SYNTH_BYTES 12288             /* room for the struct (checked at compile time in synth.c) */
+#define SYNTH_BYTES 12480             /* room for the struct (checked at compile time in synth.c; 12288 before the
+                                       * modulation matrix's per-track state and the voices' random value) */
 
 void synth_init(synth_t *s, uint8_t (*par)[NTP]);   /* par: the tracks' parameter arrays, NTRK + 1 of them (the conductor's, SY_GLFO_TRK: the shared LFO) */
+/* the modulation matrix (dsp/modmx.h): m the tracks' matrices (NTRK of them, the project's, read each block: an edit
+ * is heard at once) and live their controllers (NTRK x MXL_N: the mod wheel, aftertouch, expression, 0..127); either
+ * null (and at start): no matrix, the sound is the knobs' alone */
+void synth_mod(synth_t *s, const mx_t *m, const uint8_t (*live)[MXL_N]);
 void synth_tempo(synth_t *s, float bpm);
 /* notes: tag identifies a note for its off (the sequencer uses the step, the keys the key) */
 void synth_note_on(synth_t *s, int trk, int note, int vel, int glide_ms, uint32_t tag);

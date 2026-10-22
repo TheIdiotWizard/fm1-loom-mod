@@ -75,6 +75,8 @@ extern volatile uint8_t eng_midi_trk;                    /* channels 12-16's tra
 /* state for the screen (written by the interrupt) */
 extern volatile uint8_t eng_step[NSEQT];                 /* playheads */
 float engine_glfo_now(void);                             /* the shared LFO's value now, -1..1 (GLO's LFO page) */
+int engine_mx_live(int trk, int which);                  /* a track's live controller now (modmx.h MXL_*: mod wheel, aftertouch,
+                                                          * expression, 0..127) */
 int engine_cc_take(uint32_t *pkt);                       /* the main loop: the next CC / Program Change / master-channel
                                                           * note-on from MIDI in (a USB-MIDI packet), 0 none */
 extern volatile uint16_t eng_peak[NALLTRK];              /* meters after the faders, Q14 (to +6 dB): the loudest

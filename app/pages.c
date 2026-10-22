@@ -70,11 +70,11 @@ static uint16_t trk_tint(int t) { return ink_mix(trk_ink(t), theme->tint); }
  * track: Engine, Play, Play 2 (the octave), then Sub where the engine has a second page of knobs (TP_X1..X4: knit's
  * oscillator 2, level, sub, noise; rayon's fall); a kit or an FX track Engine and Play; the conductor Engine, Play (routing), Sub (Follow) */
 enum { P_ARRANGE, P_SONG, P_STEPS, P_BAR, P_ENGINE, P_PLAY, P_PLAY2, P_SUB, P_ENV, P_FILTER, P_ENV2, P_KITF, P_CHARACTER, P_SENDS,
-       P_FX1, P_FX2, P_THROWS, P_LFO, P_LFO2, P_PLAYERS, P_PLAYERS2, P_PLAYERS3, P_WEAVE, P_MIX, P_MASTER, P_MASTER2, P_MASTER3, P_GLFO, P_SETUP,
+       P_FX1, P_FX2, P_THROWS, P_LFO, P_LFO2, P_MOD, P_PLAYERS, P_PLAYERS2, P_PLAYERS3, P_WEAVE, P_MIX, P_MASTER, P_MASTER2, P_MASTER3, P_GLFO, P_SETUP,
        P_STATUS, NPAGES };
 static const char *const PAGE_NAME[NPAGES] = {"Arrange", "Song", "Steps", "Bar", "Engine", "Play", "Play 2", "Sub", "Envelope",
                                               "Filter", "Filter env", "Kit filter", "Character", "Sends", "FX I",
-                                              "FX II", "Throws", "LFO", "LFO 2", "Players", "Players 2", "Hold", "Weave", "Mix",
+                                              "FX II", "Throws", "LFO", "LFO 2", "Mod", "Players", "Players 2", "Hold", "Weave", "Mix",
                                               "Master EQ", "Master color", "Master out", "LFO", "Setup", "Debug"};
 static char *s_cat(char *b, const char *s);
 static char *num_s(uint32_t v, char *b);
@@ -105,7 +105,7 @@ static uint32_t glfo_route(void)                 /* the tracks it moves: bit t *
 static int mst_base(int p) { return p == P_MASTER ? MS_EQ_LO : p == P_MASTER2 ? MS_CTYPE : MS_PERC; }   /* its first knob */
 static const struct { uint8_t btn, first, n; } PAGE_BTN[] = {
     {B_HOME, P_ARRANGE, 2}, {B_SEQ, P_STEPS, 2}, {B_EDIT, P_ENGINE, 4}, {B_ENV, P_ENV, 4}, {B_FX, P_CHARACTER, 5},
-    {B_LFO, P_LFO, 2}, {B_ARP, P_PLAYERS, 4}, {B_GLO, P_MIX, 7}};
+    {B_LFO, P_LFO, 3}, {B_ARP, P_PLAYERS, 4}, {B_GLO, P_MIX, 7}};
 #define NPAGE_BTN (sizeof PAGE_BTN / sizeof PAGE_BTN[0])
 static int page_group(int p)
 {
@@ -177,6 +177,7 @@ static struct {
     uint8_t dirty;                                   /* the project changed since it was saved */
     uint8_t bar;                                     /* Steps: the bar shown 0..3 */
     uint8_t dsound;                                  /* a drum track: the key shown 0..10 */
+    uint8_t mxs;                                     /* Mod: the matrix slot the knobs edit 0..3 */
     int8_t oct;                                      /* the keys' octave -4..4 */
     uint8_t rem[SN], nrem;                           /* the remembered notes (the last keys held together) */
     uint8_t rem_fx;                                  /* PUNCH: the remembered effect + 1 */
@@ -237,7 +238,7 @@ static struct {
 
 /* the undo: one stage, whatever was changed last (HOME + REC swaps it back, HOME + PLAY swaps again: redo): a
  * pattern with its locks, a track's sound (or T2-T8 at once), the master, or the arrangement (song, scenes, weave) */
-enum { U_PAT, U_SOUND, U_MASTER, U_ARR };
+enum { U_PAT, U_SOUND, U_MASTER, U_ARR, U_MOD };
 #define UNDO_LANES 12
 static struct {
     uint8_t valid, redo, kind, trk, n, pt, nl, rsv;
@@ -246,6 +247,7 @@ static struct {
         struct { tpat_t pat; lane_t lane[UNDO_LANES]; } p;
         trk_t s[NTRK - 1];
         uint8_t master[NMS];
+        mx_t mx;
         struct { song_t song; scene_t scene[NSCENE]; wvpat_t weave[NPATT]; } a;
     } u;
 } undo PLAT_POOL;
@@ -565,6 +567,8 @@ static int group_n(int g)
              : is_drum(trk) ? 3 : x_page(trk) ? 4 : 3;      /* (a kit: Engine, Key, Sends: the key's own) */
     if (b == B_ARP)                                  /* (grp_page: Players, Players 2, Hold the arp's, Weave) */
         return is_aux(trk) ? 1 : is_drum(trk) || pl_type(trk) == PL_OFF ? 2 : pl_type(trk) == PL_ARP ? 4 : 3;
+    if (b == B_LFO)
+        return is_aux(trk) || is_drum(trk) ? 2 : 3;      /* LFO, LFO 2, Mod (the matrix: a synth track's own) */
     if (b == B_ENV)
         return is_drum(trk) ? 4 : 3;                 /* a kit: the key's envelope, filter; the kit's envelope, filter */
     if (b == B_GLO)
@@ -620,7 +624,7 @@ static int tp_page_param(int p, int k, int trk)
         {TP_SEND1, TP_SEND2, TP_PAN, TP_LEVEL},
         {TP_E1, TP_E2, TP_E3, TP_E4}, {TP_E1, TP_E2, TP_E3, TP_E4}, {-1, -1, -1, -1},
         {TP_LTYPE, TP_LSPEED, TP_LAMT, TP_LDEST},
-        {TP_LX, TP_LX2, -1, -1}, {TP_PLAYER, TP_P1, TP_P2, TP_P3}, {TP_AP1, TP_AP2, TP_AP3, TP_AP4},
+        {TP_LX, TP_LX2, -1, -1}, {-1, -1, -1, -1}, {TP_PLAYER, TP_P1, TP_P2, TP_P3}, {TP_AP1, TP_AP2, TP_AP3, TP_AP4},
         {TP_P4, -1, -1, -1}, {-1, -1, -1, -1}, {TP_SEND1, TP_SEND2, TP_PAN, TP_LEVEL}};
     if (p < P_ENGINE || p > P_MIX || p == P_THROWS || p == P_WEAVE || k < 0 || k > 3)
         return -1;
@@ -1115,6 +1119,13 @@ static void aux_engine_knobs(knob_t *k, int trk)
             kn(&k[i], short_name(fx_knob_name(pick, i)), par[TP_E1 + i] * 100 / 128, 99);
     }
 }
+/* a matrix destination's name: E1..E4 are the engine's own four knobs (a kit has none: its tracks' E1..E4 stay inert) */
+static const char *mx_dest_name(int trk, int dst)
+{
+    if (dst >= MXD_E1 && dst < MXD_N && trk < NTRK)
+        return EG_KNOB[proj.trk[trk].par[TP_ENGINE] % NENGINE][dst - MXD_E1];
+    return MXD_NAME[dst < MXD_N ? dst : 0];
+}
 static void page_knobs(knob_t *k)
 {
     int trk = sel_trk(), p = ui.page;
@@ -1315,6 +1326,17 @@ static void page_knobs(knob_t *k)
         kname(&k[3], "DEST", GLFO_DEST, g[TP_LDEST] % NGD, NGD);
         break;
     }
+    case P_MOD: {                                    /* the modulation matrix (dsp/modmx.h): the track's four slots */
+        const mxslot_t *s;
+        if (trk >= NTRK)
+            break;
+        s = &pats.mod[trk].s[ui.mxs & 3u];
+        kn(&k[0], "SLOT", (int)(ui.mxs & 3u) + 1, MX_NSLOT);
+        kname(&k[1], "SOURCE", MXS_NAME, s->src, MXS_N);
+        kv(&k[2], "DEST", mx_dest_name(trk, s->dst), s->dst, 0);
+        kn(&k[3], "AMOUNT", s->amt, 0);
+        break;
+    }
     case P_SETUP:
         kname(&k[0], "LIGHTS", LIGHTS_NAME, proj.lights, 3);
         kname(&k[1], "CLOCK", ONOFF, proj.send_clock != 0, 2);
@@ -1448,6 +1470,10 @@ static void page_tag(char *t)
         if (is_drum(sel_trk()))                      /* the key the knobs edit (the kit's own pages: the whole kit) */
             s_cat(s_cat(t + s_len(t), ">"), ui.page == P_ENV2 || ui.page == P_KITF ? "all keys"
                                              : DL_SOUND_NAME[ui.dsound % DL_NSOUND]);
+        break;
+    case P_MOD:
+        track_crumb(t);
+        s_cat(t + s_len(t), ">mod");
         break;
     case P_SENDS:
         s_cat(s_cat(t, TRACK_NAME[inst_trk()]), ">sends");
@@ -1629,6 +1655,8 @@ static void page_footer(char *t)
             s_cat(t, "PRESET type|BLACK pick a key");
         else if (is_drum(trk) && (ui.page == P_ENV2 || ui.page == P_KITF))
             s_cat(t, ui.page == P_KITF ? "PRESET on or off|KEYS play" : "KEYS play");
+        else if (ui.page == P_MOD)
+            s_cat(t, "KEYS play");
         else if (is_drum(trk) && ui.page <= P_LFO2)
             s_cat(t, "BLACK pick a key|KEYS play");
         else if (ui.page == P_ENGINE)
@@ -1866,7 +1894,7 @@ static void draw_footer(void)
 #define PG_ANY 0xFFFFFFFFu
 #define PG_STEPS (PG(P_STEPS) | PG(P_BAR))
 #define PG_SOUND (PG(P_ENGINE) | PG(P_PLAY) | PG(P_PLAY2) | PG(P_SUB) | PG(P_ENV) | PG(P_ENV2) | PG(P_KITF) | PG(P_FILTER) | \
-                  PG(P_CHARACTER) | PG(P_LFO) | PG(P_LFO2))
+                  PG(P_CHARACTER) | PG(P_LFO) | PG(P_LFO2) | PG(P_MOD))
 static const struct { uint8_t btn; uint32_t pages; const char *title, *l1, *l2; } CARD[] = {
     {B_SEQ, PG(P_BAR), "Bars", "Hold SEQ, black keys 1-4: jump to a bar at the next bar line.",
      "Two held: loop them. One twice: loop it."},
@@ -1880,7 +1908,9 @@ static const struct { uint8_t btn; uint32_t pages; const char *title, *l1, *l2; 
      "PRESETS on Filter: its type. A kit: the key's, then the kit's."},
     {B_FX, PG_ANY, "Effects", "Character, sends, FX I, FX II, then Throws: keys fire effects.",
      "PRESETS: the type or effect. SEL: an FX's filter."},
-    {B_LFO, PG_ANY, "LFO", "Type, then its first three knobs.", "Page 2 has the type's fourth and fifth."},
+    {B_LFO, PG(P_MOD), "Mod", "Four slots: a source (wheel, envelope, LFO...) to a destination.",
+     "KNOB 1 the slot, 2 the source, 3 where it goes, 4 how much."},
+    {B_LFO, PG_ANY, "LFO", "Type, then its first three knobs.", "Page 2 has the type's fourth and fifth. Page 3: Mod."},
     {B_ARP, PG_ANY, "Players", "Arp, strum or hold on the track's keys; last page, Weave.",
      "Strum: a key strums its chord; keys held together set it."},
     {B_ARP, PG_STEPS, "Tricks", "With a step held, ARP: KNOB 1 and 3 pick its two tricks,",
@@ -4217,6 +4247,49 @@ static void draw_glfo(void)
     }
     cv_blit(0, MAIN_Y);
 }
+/* the modulation matrix: its four slots, source to destination with the amount as a bar about the middle; the slot
+ * the knobs edit lit */
+static void draw_mod(void)
+{
+    int trk = sel_trk();
+    const mx_t *m = &pats.mod[trk];
+    uint32_t h = hash_u(2166136261u, 0x30D00u | (uint32_t)trk | (uint32_t)(ui.mxs & 3u) << 4 | (uint32_t)proj.trk[trk].par[TP_ENGINE] << 8);
+    char t[24];
+    if (trk >= NTRK)
+        return;
+    for (int i = 0; i < MX_NSLOT; i++)
+        h = hash_u(h, (uint32_t)m->s[i].src | (uint32_t)m->s[i].dst << 8 | (uint32_t)(uint8_t)m->s[i].amt << 16);
+    for (int i = 0; i < MXL_N; i++)
+        h = hash_u(h, (uint32_t)engine_mx_live(trk, i) >> 3 << (i * 5));    /* (the wheel, moving: a dot per eighth) */
+    if (!begin_main(h))
+        return;
+    for (int i = 0; i < MX_NSLOT; i++) {
+        const mxslot_t *s = &m->s[i];
+        int32_t y = 6 + i * 26, on = i == (ui.mxs & 3), live = s->src && s->dst && s->amt;
+        int32_t cx = 168, a = s->amt;
+        cv_round(8, y, 224, 22, 4, on ? K_PANEL2 : K_PANEL);
+        num_s((uint32_t)i + 1u, t);
+        text_c(20, y + 4, &FONT_S, t, on ? K_TEXT : K_DIM);
+        cv_text(32, y + 4, &FONT_S, MXS_NAME[s->src], live ? K_TEXT : K_DIM);
+        cv_text(76, y + 4, &FONT_S, ">", K_DIM);
+        cv_text(88, y + 4, &FONT_S, mx_dest_name(trk, s->dst), live ? K_TEXT : K_DIM);
+        cv_rect(cx - 32, y + 16, 64, 1, K_LINE);              /* (the amount: about the middle, -64 .. 63) */
+        if (a > 0)
+            cv_rect(cx, y + 14, a / 2 + 1, 4, live ? trk_ink(trk) : K_DIM);
+        else if (a < 0)
+            cv_rect(cx + a / 2, y + 14, -a / 2, 4, live ? trk_ink(trk) : K_DIM);
+        if (s->src >= MXS_MODW && s->src <= MXS_EXPR && s->dst)   /* (a live controller: where it is now) */
+            cv_round(cx - 32 + engine_mx_live(trk, s->src - MXS_MODW) * 64 / 127 - 2, y + 4, 4, 4, 2, K_NOW);
+        {
+            char *e = t;
+            if (a > 0)
+                *e++ = '+';
+            num_i(a, e);
+            text_r(228, y + 4, &FONT_S, t, on ? K_TEXT : K_DIM);
+        }
+    }
+    cv_blit(0, MAIN_Y);
+}
 static void draw_setup(void)
 {
     char t[24];
@@ -4442,7 +4515,7 @@ static void draw_page(void)
     case P_FX1: draw_fxtrack(AUX_FX1); break;
     case P_FX2: draw_fxtrack(AUX_FX2); break;
     case P_ENGINE: case P_PLAY: case P_PLAY2: case P_SUB: case P_ENV: case P_ENV2: case P_KITF: case P_FILTER: case P_LFO:
-    case P_LFO2: case P_PLAYERS: case P_PLAYERS2: case P_PLAYERS3:
+    case P_LFO2: case P_MOD: case P_PLAYERS: case P_PLAYERS2: case P_PLAYERS3:
         if (trk == AUX_BRAIN)
             draw_brain();
         else if (trk == AUX_PUNCH)
@@ -4469,6 +4542,8 @@ static void draw_page(void)
             draw_filter();
         else if (ui.page == P_LFO || ui.page == P_LFO2)
             draw_lfo();
+        else if (ui.page == P_MOD)
+            draw_mod();
         else
             draw_players();
         break;

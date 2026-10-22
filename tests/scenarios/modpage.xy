@@ -1,0 +1,68 @@
+# the Mod page (the modulation matrix, dsp/modmx.h): LFO's third page on an instrument track, four slots on the knobs,
+# undo, the host's mxset, saved with the project
+wait 300
+turn ALGO 1
+expect trk 2
+tap LFO
+expect page LFO
+turn SELECT 2
+expect page Mod
+wait 40
+shot mod_default.png
+# a new track's slot 1: the mod wheel to the vibrato, half way
+expect mx2.1.src 6
+expect mx2.1.dst 7
+expect mx2.1.amt 32
+expect mx2.2.src 0
+# KNOB 2 the source, KNOB 3 the destination, KNOB 4 the amount, KNOB 1 the slot
+turn K2 1
+expect mx2.1.src 7
+turn K3 -3
+expect mx2.1.dst 4
+turn K4 -40
+expect mx2.1.amt -8
+turn K1 1
+turn K2 2
+expect mx2.2.src 2
+turn K3 1
+expect mx2.2.dst 1
+turn K4 100
+expect mx2.2.amt 63
+wait 40
+shot mod_edited.png
+# the other tracks keep theirs
+expect mx3.1.src 6
+expect mx3.2.src 0
+# undo (HOME + REC) takes the last change back, redo (HOME + PLAY) returns it
+wait 1200
+turn K4 -10
+expect mx2.2.amt 53
+press HOME
+tap REC
+release HOME
+expect mx2.2.amt 63
+press HOME
+tap PLAY
+release HOME
+expect mx2.2.amt 53
+# the host's setter, by name or number, - to leave one
+mxset 2 3 env pan -20
+expect mx2.3.src 2
+expect mx2.3.dst 5
+expect mx2.3.amt -20
+mxset 2 3 - cut -
+expect mx2.3.src 2
+expect mx2.3.dst 2
+expect mx2.3.amt -20
+# the wheel through the page's slot: CC 1 on T2's channel
+mxset 2 4 modw pitch 63
+midi B1 01 7F
+wait 20
+expect mxl2.modw 127
+# saved with the project, and back
+projsave 3
+reboot
+expect mx2.3.dst 2
+expect mx2.4.dst 1
+expect mx2.2.amt 53
+expect mx3.1.src 6

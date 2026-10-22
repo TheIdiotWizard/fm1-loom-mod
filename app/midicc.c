@@ -2,6 +2,9 @@
 /* LOOM-8's MIDI CC map: a CC on channel 1-8 (a track), 12-16 (the instrument track selected, inst_trk), 9 / 10
  * (FX I / II) or 11 (the master) sets a parameter as its knob would, scaled onto the parameter's range; a track's CC
  * is also recorded into its own lane while recording. Channel 11's Program Change and notes 36-67 pick scenes 1-32.
+ * CC 1 (the mod wheel), CC 11 (expression), channel aftertouch and CC 121 are not in this map: they are the
+ * modulation matrix's live sources (dsp/modmx.h), taken in the interrupt (engine.c midi_in); the LFO amount, which
+ * CC 1 used to set (a saved parameter, written by a wheel), is CC 12 now.
  * The other way: a mapped value changed by hand (a knob, a SEL list row) goes out as its CC, with CC OUT on; a scene
  * change as its Program Change, with SCENES OUT on. The packets come from engine.c's ring (raw, from the interrupt),
  * looked up here in the main loop. Part of app.c's unity build, after ui.c: is_aux, is_drum, inst_trk, set_tp. */
@@ -14,7 +17,7 @@
 static const struct { uint8_t cc, syn, kit; } CC_TRK[] = {
     {7, TP_LEVEL, TP_LEVEL}, {10, TP_PAN, TP_PAN},  {91, TP_SEND1, CC_KSEND1}, {93, TP_SEND2, CC_KSEND2},
     {9, CC_MUTE, CC_MUTE},   {74, TP_CUT, TP_KTRK}, {71, TP_RES, TP_CUT},      {73, TP_A, TP_D},
-    {72, TP_R, TP_R},        {75, TP_D, CC_NONE},   {5, TP_PORTA, CC_NONE},     {1, TP_LAMT, CC_NONE}};
+    {72, TP_R, TP_R},        {75, TP_D, CC_NONE},   {5, TP_PORTA, CC_NONE},     {12, TP_LAMT, CC_NONE}};
 /* a kit's sounds 1-11: CC first + sound */
 #define CC_KMUTE 16
 #define CC_KPAN 80

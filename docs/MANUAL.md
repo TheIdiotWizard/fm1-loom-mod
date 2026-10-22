@@ -946,6 +946,24 @@ out of the kick's way while the rest plays on.
 
 <img src="img/screen-mix.png" width="240" alt="Mix: a meter for each track while playing; knobs fx I, fx II, pan and level" title="The mixer"> <img src="img/screen-sends.png" width="240" alt="FX&#x27;s Sends page: the track&#x27;s sends to FX I (delay) and FX II (reverb lush), its pan and level" title="The sends"> <img src="img/screen-master.png" width="240" alt="Master EQ: low, mid and high, flat at 64" title="Master EQ"> <img src="img/screen-master-out.png" width="240" alt="Master out: bars for drums, melodic, comp and pump; knobs drums 100, melodic 100, comp 30, pump 4.0 dB" title="Master out">
 
+### The modulation matrix
+
+**LFO**, **SELECT** twice: the Mod page, on every synth track (a kit and the aux tracks have none). Four slots, each
+sending a **source** to a **destination** by an **amount** (-64 to 63). KNOB 1 picks the slot, 2 the source, 3 the
+destination, 4 the amount; a slot with no source, no destination or no amount does nothing, and with every slot idle
+the sound is exactly what it would be without the page. A new track has slot 1 set to MODW to VIB at 32.
+
+Sources: LFO (the track's LFO shape, when its type is wave, drift or wobble), ENV (the voice's amp envelope), VEL,
+KEY (the note about middle C), RAND (a new random value for each note), MODW (mod wheel, CC 1), AT (aftertouch), EXPR
+(expression, CC 11), S/H (a random value held for one cycle of the track LFO) and SLEW (the same, glided).
+
+Destinations: PITCH (63 is plus or minus an octave), CUT, RES and PAN (the knob's units), AMP (a gain: a positive
+amount opens it with the source, a negative closes it), E1 to E4 (the engine's own four knobs, named as on the Engine
+page; the amount at 64 is the knob's whole range), RATE (the track LFO's speed, 63 is three octaves), VIB (a vibrato
+at the LFO's rate, or 5.5 Hz when the LFO is off; 63 is a semitone) and DEPTH (a gain on the track LFO: MODW to DEPTH
+is a mod-wheel LFO). The matrix is saved with the project, one for each track, and is undone with HOME + REC like a
+knob; it is not part of a preset.
+
 ### MIDI
 
 Over USB each track has its own channel: T1 to T8 on channels 1 to 8, FX I on 9, FX II on 10, and the master and
@@ -971,7 +989,8 @@ A CC moves the matching knob or switch, scaled to its range (on 12 to 16: the in
 | 72 | release | kit length |
 | 75 | decay | - |
 | 5 | glide | - |
-| 1 | LFO amount | - |
+| 12 | LFO amount | - |
+| 1, 11 | the mod wheel and expression: the Mod page's sources (below) | - |
 | 16-26 | - | mute sound 1-11 (64 and up: muted) |
 | 80-90 | - | pan of sound 1-11 |
 | 102-112 | - | level of sound 1-11 |
@@ -985,6 +1004,11 @@ A CC moves the matching knob or switch, scaled to its range (on 12 to 16: the in
 | 28 | - | pump release |
 | 74 / 75 | low-pass / high-pass | - |
 | 93 | feed into FX II (channel 9 only) | - |
+
+The mod wheel (CC 1), expression (CC 11) and channel aftertouch are the Mod page's sources (see the modulation
+matrix, below): each track keeps its own, on its own channel. CC 121 (reset all controllers) puts them back at rest:
+wheel and aftertouch 0, expression full. In a new project the mod wheel opens a vibrato on every synth engine, about
+half a semitone at full travel. CC 1 no longer moves the LFO amount, which is CC 12.
 
 A mute (CC 9, or 16 to 26 on a kit) does what the Mix page's mute does, saved into the scene playing; a kit's sound
 mutes work on the first four kit tracks, as on Arrange. While recording (**REC** held as it plays, or kept on with
@@ -1059,6 +1083,7 @@ On a sound page, hold **SAVE** and press white key 1 to 16 to keep the track's s
 | FX, SELECT four times | Throws | latch | | | | low: drum throws, high: melodic throws |
 | LFO | LFO | type | the type's three | | | play |
 | LFO, SELECT | LFO 2 | the type's fourth and fifth | | | | play |
+| LFO, SELECT twice | Mod (a synth track) | slot | source | destination | amount | play |
 | ARP | Players | player | its first | its second | its third | play, through the player |
 | ARP, SELECT | Players 2, Hold | the arp's length, style, glide, stereo; hold | | | | play |
 | ARP, SELECT (last) | Weave | with | pattern | rule | plays | black: the track woven in, white: its pattern; SEL: KEEP AS PATTERN |

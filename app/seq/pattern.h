@@ -7,6 +7,7 @@
  * read never sees half a write. */
 #pragma once
 #include <stdint.h>
+#include "../dsp/modmx.h"
 
 /* The code keeps its first names; the screen and the manual say: AUX_BRAIN the conductor (COND), AUX_PUNCH the
  * throws (THROW), components (SC_*) tricks, the drumline engine the kit, the maestro player strum. */
@@ -189,6 +190,9 @@ typedef struct {
     lane_t lane[NLANE];
     scene_t scene[NSCENE];
     song_t song;
+    mx_t mod[NTRK];                   /* the instrument tracks' modulation matrices (dsp/modmx.h). Last, and here, not in
+                                       * the track's settings: those fill their storage object (PLAT_STORE_MAX), this
+                                       * packed stream does not. An older stream is shorter by these bytes (project.c) */
 } patterns_t;
 
 void pattern_init(tpat_t *p);         /* empty, 16 steps, scale 1, no groove, note length half a step */

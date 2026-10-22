@@ -447,6 +447,12 @@ static void undo_master(void)
         return;
     memcpy(undo.u.master, proj.master, NMS);
 }
+static void undo_mx(int trk)                       /* before a change to a track's matrix */
+{
+    if (undo_run(U_MOD, trk, 0, 0, UNDO_RUN_MS))
+        return;
+    undo.u.mx = pats.mod[trk];
+}
 static void undo_arr(void)                        /* before a change to the song, the scenes or the weave */
 {
     if (undo_run(U_ARR, 0, 0, 0, UNDO_RUN_MS))
@@ -495,6 +501,11 @@ static void do_undo(int redo)
             s_cat(s_cat(s_cat(t, TRACK_NAME[undo.trk]), " to "), TRACK_NAME[undo.trk + undo.n - 1]);
         else
             s_cat(s_cat(t, TRACK_NAME[undo.trk]), " sound");
+        break;
+    case U_MOD:
+        swap_bytes(&pats.mod[undo.trk], &undo.u.mx, sizeof undo.u.mx);
+        mx_clamp(&pats.mod[undo.trk]);
+        s_cat(s_cat(t, TRACK_NAME[undo.trk]), " mod");
         break;
     case U_MASTER:
         swap_bytes(proj.master, undo.u.master, NMS);
@@ -1846,6 +1857,46 @@ static void glfo_knob(int k, int32_t e)          /* the shared LFO's knobs (synt
         return;
     set_tp(AUX_BRAIN, P[k], clampi(g[P[k]] + d, 0, HI[k]));
 }
+/* the matrix: track trk's slot s (0..3), field 0 source 1 destination 2 amount, set to v (clamped); undoable */
+static void mx_set(int trk, int s, int field, int v)
+{
+    mxslot_t *x;
+    if (trk < 0 || trk >= NTRK || s < 0 || s >= MX_NSLOT)
+        return;
+    x = &pats.mod[trk].s[s];
+    if (field == 0)
+        v = clampi(v, 0, MXS_N - 1);
+    else if (field == 1)
+        v = clampi(v, 0, MXD_N - 1);
+    else
+        v = clampi(v, MX_AMT_LO, MX_AMT_HI);
+    if ((field == 0 ? x->src : field == 1 ? x->dst : x->amt) == v)
+        return;
+    undo_mx(trk);
+    if (field == 0)
+        x->src = (uint8_t)v;
+    else if (field == 1)
+        x->dst = (uint8_t)v;
+    else
+        x->amt = (int8_t)v;
+    mark_dirty();
+}
+static void mod_knob(int k, int32_t e)           /* Mod: slot, source, destination, amount */
+{
+    int trk = sel_trk(), s = ui.mxs & 3;
+    const mxslot_t *x;
+    if (trk >= NTRK)
+        return;
+    x = &pats.mod[trk].s[s];
+    if (k == 0)
+        ui.mxs = (uint8_t)clampi(s + (e > 0 ? 1 : -1), 0, MX_NSLOT - 1);
+    else if (k == 1)
+        mx_set(trk, s, 0, x->src + (e > 0 ? 1 : -1));
+    else if (k == 2)
+        mx_set(trk, s, 1, x->dst + (e > 0 ? 1 : -1));
+    else if (k == 3)
+        mx_set(trk, s, 2, x->amt + (int)e);
+}
 static void master_knob(int k, int32_t e)
 {
     int m = mst_base(ui.page) + k, v;
@@ -1983,6 +2034,7 @@ static void knob_do(int k, int32_t e)
     case P_SETUP: setup_knob(k, e); return;
     case P_STATUS: debug_knob(k, e); return;
     case P_GLFO: glfo_knob(k, e); return;
+    case P_MOD: mod_knob(k, e); return;
     default: break;
     }
     if (fx_page(ui.page)) {                      /* an effect's knobs: the effect track's own */

@@ -1,0 +1,14 @@
+# a format 13 project (the shared LFO, no modulation matrix): saved by that build, for the migration's test
+# (tests/scenarios/migrate.xy). Run by a format 13 build (e88f2e0, before the matrix): its loom_host tests/fixtures/make_v13.xy OUT
+wait 300
+bpm 93
+wait 50
+hits 1 1 1 x...x...x...x...
+notes 2 1 1 1 100 C4
+notes 2 1 5 1 100 E4
+scenedef 2 1 1
+song 1:1 2:2
+scene 2
+wait 40
+projsave 1 v13_test
+storesave tests/fixtures/store_v13.bin

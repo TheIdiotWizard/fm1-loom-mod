@@ -99,6 +99,16 @@ static uint8_t fx_type[2];                        /* each slot's effect, as set 
 static uint32_t metro_left;                       /* the metronome's click: samples left, phase, rate */
 static float metro_ph, metro_inc;
 static int16_t bend_c[NTRK];                      /* the bend component's cents, per track */
+/* the modulation matrix's controllers (dsp/modmx.h MXL_*), per track, from MIDI in: CC 1 the mod wheel, channel
+ * aftertouch, CC 11 expression (127 at rest); CC 121 puts them back. Written by midi_in, read by the voices: the
+ * interrupt's, both */
+static uint8_t mx_live[NTRK][MXL_N];
+int engine_mx_live(int t, int i) { return t >= 0 && t < NTRK && i >= 0 && i < MXL_N ? mx_live[t][i] : 0; }
+static void mx_rest(int t)
+{
+    mx_live[t][MXL_MODW] = mx_live[t][MXL_AT] = 0;
+    mx_live[t][MXL_EXPR] = 127;
+}
 /* MIDI for the main loop (midicc.c): every CC, Program Change and the master channel's note-ons, raw USB-MIDI
  * packets; the interrupt writes, the main loop reads (engine_cc_take); full, the newest is dropped. 64 is about
  * 17 ms of a busy controller's CCs between two UI frames (longer during a flash write) */
@@ -701,7 +711,20 @@ static void midi_in(uint32_t pkt)
         } else if (t >= 0)                          /* played and recorded, not sent back out (seq_key_midi) */
             seq_key_midi(&seq, t, d1, ty == 0x90, d2);
     } else if (ty == 0xB0 || ty == 0xC0) {          /* CCs and Program Change: the main loop's (midicc.c) */
+        int t = ty == 0xB0 ? midi_track(ch) : -1;   /* (and the matrix's controllers, here: they are a track's own) */
+        if (t >= 0) {
+            if (d1 == 1)
+                mx_live[t][MXL_MODW] = d2;
+            else if (d1 == 11)
+                mx_live[t][MXL_EXPR] = d2;
+            else if (d1 == 121)
+                mx_rest(t);
+        }
         ccq_put(pkt);
+    } else if (ty == 0xD0) {                        /* channel aftertouch: the matrix's AT */
+        int t = midi_track(ch);
+        if (t >= 0)
+            mx_live[t][MXL_AT] = d1;
     } else if (ty == 0xE0) {                        /* pitch bend: +-2 semitones onto the track's bend */
         int t = midi_track(ch);
         if (t >= 0)
@@ -1289,6 +1312,9 @@ void engine_init(patterns_t *P, uint8_t (*par)[NTP])
         seq_prof = &eng_prof[PR_SIX];
     }
     synth_init(SY, par);
+    for (t = 0; t < NTRK; t++)
+        mx_rest(t);
+    synth_mod(SY, P->mod, mx_live);
     for (k = 0; k < NDL; k++)
         dl_owner[k] = 0xFF;
     for (t = 0; t < NTRK; t++) {

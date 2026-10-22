@@ -44,6 +44,8 @@ void patterns_init(patterns_t *P)
     P->scene[0].used = 1;             /* scene 1: pattern 1 on every track (pat[] is already 0) */
     P->song.len = 0;
     P->song.loop = 1;
+    for (t = 0; t < NTRK; t++)
+        mx_default(&P->mod[t]);       /* every track: the mod wheel to a vibrato (modmx.h MX_DEF_*) */
 }
 
 /* ----------------------------------------------------------------- lanes --- */

@@ -61,6 +61,12 @@ const char *const RL_NAME[NRL] = {"bass", "lead", "pad", "keys", "pluck", "bell"
                                   "chord", "fx", "drum", "loop"};
 const char *const EG_NAME[NENGINE] = {"knit", "rayon", "jacquard", "bellows", "cane", "voile", "sample", "slice",
                                       "kit"};
+/* the matrix's lists (modmx.h): short names for the page's cell, long ones for its list and the reader */
+const char *const MXS_NAME[MXS_N] = {"OFF", "LFO", "ENV", "VEL", "KEY", "RAND", "MODW", "AT", "EXPR", "S/H", "SLEW"};
+const char *const MXS_LONG[MXS_N] = {"off", "LFO", "envelope", "velocity", "key", "random", "mod wheel", "aftertouch",
+                                     "expression", "sample and hold", "slew"};
+const char *const MXD_NAME[MXD_N] = {"OFF", "PITCH", "CUT", "RES", "AMP", "PAN", "RATE", "VIB", "DEPTH",
+                                     "E1", "E2", "E3", "E4"};
 const char *const EG_KNOB[NENGINE][4] = {
     {"wave", "detune", "voices", "width"}, {"bright", "ratio", "edge", "tine"},     {"table", "scan", "bend", "ripple"},
     {"stops", "pedal", "rotor", "rate"},   {"model", "timbre", "color", "damp"},   {"model", "timbre", "color", "breath"},
@@ -143,6 +149,7 @@ typedef struct {
     uint8_t trk, held, engine, steal_phase;   /* held: the key is down; steal: 1 fading out, 2 in */
     uint8_t note, pend_note, pend_vel, pend_held;
     uint32_t tag, pend_tag, age;
+    int8_t mrnd;                      /* the matrix's RAND: a value drawn when the note started (-127..127) */
     float vel, pitch, pitch_cur, glide_k;     /* semitones; glide_k: the chunk's approach fraction */
     int16_t pend_glide;
     uint16_t pos;                     /* sample in the chunk */
@@ -202,6 +209,12 @@ typedef struct {
     int16_t ldest;                    /* the resolved destination: a TP_* index, LD_PITCH or LD_NONE */
     uint32_t rng;
     float loff[NCK], lpitch[NCK], lgain[NCK];   /* the chunk slots: offset (param units), cents, gain */
+    /* the modulation matrix (modmx.h): the track LFO's shape at each chunk (Q15, bipolar, before its amount; with the
+     * depth gain), the vibrato's phase at the block's start and its step a chunk (turns), the LFO source of the
+     * block before (RATE and DEPTH read it), the last cycle's random value (S/H's was lfo_sh), the engine knobs' ranges */
+    int16_t lsrc[NCK], lsrc_prev;
+    float vib_ph, vib_dph, vib_acc, lfo_prev;
+    uint8_t elo[4], ehi[4];
 } trk_t;
 
 struct synth {
@@ -218,6 +231,8 @@ struct synth {
     float g_ph, g_sh, g_now;          /* its phase, its random value, its value at the block's end (-1..1) */
     uint32_t g_rng;                   /* (its random steps' generator)*/
     volatile uint8_t g_reset;         /* restart at the next prepare (the transport started) */
+    const mx_t *mx;                   /* the tracks' modulation matrices and live controllers (synth_mod), or null */
+    const uint8_t (*mxl)[MXL_N];
 };
 uint32_t synth_load_steals;           /* new notes that took a sounding voice to stay inside LOAD_ADMIT (synth.h) */
 _Static_assert(sizeof(struct synth) <= SYNTH_BYTES, "synth_t outgrew SYNTH_BYTES");
@@ -245,6 +260,19 @@ static inline uint32_t xs(uint32_t *r)
     return x;
 }
 static inline float frand(uint32_t *r) { return (float)(int32_t)xs(r) * (1.0f / 2147483648.0f); }   /* -1..1 */
+/* the matrix's RAND for a note: a hash of what is read-only in a render (the note count, the tag, the voice) so a
+ * stolen note's start (in a render, on either core) needs no shared state and no voice's own generator moves */
+static inline int8_t mx_draw(const synth_t *s, const voice_t *v, int note, int vel, uint32_t tag)
+{
+    uint32_t h = s->counter * 2654435761u ^ tag * 2246822519u ^ (uint32_t)note << 8 ^ (uint32_t)vel << 16 ^
+                 (uint32_t)v->vi * 3266489917u;
+    h ^= h >> 15;
+    h *= 2246822519u;
+    h ^= h >> 13;
+    h *= 3266489917u;
+    h ^= h >> 16;
+    return (int8_t)((int)((h >> 8) % 255u) - 127);
+}
 static inline float blep(float t, float dt, float idt)      /* the PolyBLEP residual at phase t, step dt */
 {
     if (t < dt) {
@@ -1185,6 +1213,7 @@ static void voice_start(synth_t *s, voice_t *v, int note, int vel, int glide_ms,
     v->note = (uint8_t)note;
     v->tag = tag;
     v->vel = (float)vel * (1.0f / 127.0f);
+    v->mrnd = mx_draw(s, v, note, vel, tag);
     v->held = (uint8_t)held;
     v->pitch = (float)note;
     v->pitch_cur = (ms > 0.5f && t->last_pitch > 0.0f) ? t->last_pitch : v->pitch;
@@ -1505,6 +1534,7 @@ void synth_note_on(synth_t *s, int trk, int note, int vel, int glide_ms, uint32_
             v->note = (uint8_t)note;
             v->tag = tag;
             v->vel = (float)vel * (1.0f / 127.0f);
+            v->mrnd = mx_draw(s, v, note, vel, tag);
             v->held = 1;
             v->pitch = (float)note;
             v->glide_k = ms > 0.5f ? 1.0f - fm_expf(-(float)SY_CHUNK * 1000.0f / (ms * SY_SR)) : 1.0f;
@@ -1680,6 +1710,12 @@ void synth_duck_trigger(synth_t *s, int src)
         }
 }
 
+void synth_mod(synth_t *s, const mx_t *m, const uint8_t (*live)[MXL_N])
+{
+    s->mx = m && live ? m : 0;
+    s->mxl = live;
+}
+
 void synth_init(synth_t *s, uint8_t (*par)[NTP])
 {
     int i, j;
@@ -1733,6 +1769,89 @@ static inline float lfo_wave_trem(int shape, float ph)    /* sine, saw, exponent
     case 3: return ph < 0.5f ? 1.0f : -1.0f;
     case 4: return ph < 0.08f ? 1.0f : -1.0f;
     default: return fm_sin_turns(ph);
+    }
+}
+
+/* ------------------------------------------------------------- the matrix --- */
+/* modmx.h says what the slots mean. The sources a voice has of its own (ENV, VEL, KEY, RAND, the LFO with this voice's
+ * fade) come in an mxv_t: a voice's, or, for the destinations that belong to the track (RATE, DEPTH), the track's
+ * newest sounding voice's (synth_prepare gathers them). Everything else is the track's: the live controllers, S/H,
+ * SLEW. Evaluated once a chunk for each voice (voice_chunk), once a block for the track (synth_prepare). */
+#define MX_Q (1.0f / 32768.0f)
+#define MX_BIPOLAR(s) ((s) == MXS_LFO || (s) == MXS_KEY || (s) == MXS_RAND || (s) >= MXS_SH)
+typedef struct { float lfo, env, vel, key, rnd; } mxv_t;
+typedef struct {
+    float e[4], cut, res, pan, pitch, vib, gain;
+    uint8_t emask;                                /* the engine knobs a slot moved (bit j: E(j+1)) */
+} mxr_t;
+static inline int mx_has(const mx_t *m)           /* a slot that does anything (a stray byte counts as none) */
+{
+    for (int i = 0; i < MX_NSLOT; i++)
+        if (m->s[i].src && m->s[i].src < MXS_N && m->s[i].dst && m->s[i].dst < MXD_N && m->s[i].amt)
+            return 1;
+    return 0;
+}
+static inline float mx_unit(float x)               /* a source as 0..1 (a bipolar one about the middle) */
+{
+    return x * 0.5f + 0.5f;
+}
+static float mx_source(const synth_t *s, const trk_t *t, int trk, int src, const mxv_t *x)
+{
+    switch (src) {
+    case MXS_LFO: return x->lfo;
+    case MXS_ENV: return x->env;
+    case MXS_VEL: return x->vel;
+    case MXS_KEY: return x->key;
+    case MXS_RAND: return x->rnd;
+    case MXS_MODW: return (float)s->mxl[trk][MXL_MODW] * (1.0f / 127.0f);
+    case MXS_AT: return (float)s->mxl[trk][MXL_AT] * (1.0f / 127.0f);
+    case MXS_EXPR: return (float)s->mxl[trk][MXL_EXPR] * (1.0f / 127.0f);
+    case MXS_SH: return t->lfo_sh;
+    default: return t->lfo_prev + (t->lfo_sh - t->lfo_prev) * t->lfo_ph;   /* SLEW: last cycle's value to this one's */
+    }
+}
+/* a gain <= 1 from a source at amount a (AMP, DEPTH): a > 0 the source opens it (a 64: shut at 0, open at 1), a < 0
+ * closes it */
+static float mx_gain(int src, float x, float a)
+{
+    float u = MX_BIPOLAR(src) ? mx_unit(x) : x, g = 1.0f - (a > 0.0f ? (1.0f - u) * a : u * -a) * (1.0f / 64.0f);
+    return g < 0.0f ? 0.0f : g > 1.0f ? 1.0f : g;
+}
+static inline float mx_clip1(float x) { return x < -1.0f ? -1.0f : x > 1.0f ? 1.0f : x; }
+static void mx_voice_src(mxv_t *x, const voice_t *v, float lfo)   /* a sounding voice's own sources */
+{
+    x->lfo = lfo;
+    x->env = v->amp.level;
+    x->vel = v->vel;
+    x->key = mx_clip1((v->pitch - 60.0f) * (1.0f / 64.0f));
+    x->rnd = (float)v->mrnd * (1.0f / 127.0f);
+}
+/* every slot that reaches a voice: what to add where (RATE, DEPTH are the track's, synth_prepare) */
+static void mx_eval(const synth_t *s, const trk_t *t, int trk, const mxv_t *x, mxr_t *r)
+{
+    const mx_t *m = &s->mx[trk];
+    r->e[0] = r->e[1] = r->e[2] = r->e[3] = r->cut = r->res = r->pan = r->pitch = r->vib = 0.0f;
+    r->gain = 1.0f;
+    r->emask = 0;
+    for (int i = 0; i < MX_NSLOT; i++) {
+        int src = m->s[i].src, dst = m->s[i].dst;
+        float a = (float)m->s[i].amt, v;
+        if (!src || src >= MXS_N || !dst || dst >= MXD_N || a == 0.0f || dst == MXD_RATE || dst == MXD_DEPTH)
+            continue;
+        v = mx_source(s, t, trk, src, x);
+        switch (dst) {
+        case MXD_PITCH: r->pitch += v * a * (1200.0f / 63.0f); break;      /* cents: 63 = +-12 semitones */
+        case MXD_CUT: r->cut += v * a; break;                                /* knob units */
+        case MXD_RES: r->res += v * a; break;
+        case MXD_PAN: r->pan += v * a; break;
+        case MXD_VIB: r->vib += v * a * (100.0f / 63.0f); break;           /* cents of depth: 63 = +-1 semitone */
+        case MXD_AMP: r->gain *= mx_gain(src, v, a); break;
+        default: {                                                           /* E1..E4: the knob's whole range at 64 */
+            int j = dst - MXD_E1;
+            r->e[j] += v * a * (1.0f / 64.0f) * (float)(t->ehi[j] - t->elo[j]);
+            r->emask |= (uint8_t)(1u << j);
+        }
+        }
     }
 }
 
@@ -1795,27 +1914,67 @@ static void glfo_prepare(synth_t *s)
 void synth_prepare(synth_t *s, uint32_t n)
 {
     float tpk[NTRK];
+    mxv_t mlat[NTRK];                            /* the matrix: each track's newest sounding voice's own sources */
+    uint32_t mage[NTRK];
     int i, k, nck = 0;
     uint32_t off = (SY_CHUNK - s->pos) % SY_CHUNK;
     for (; off < n && nck < NCK; off += SY_CHUNK)
         nck++;
     s->nck = (uint8_t)(nck ? nck : 1);
     glfo_prepare(s);
-    for (i = 0; i < NTRK; i++)
+    for (i = 0; i < NTRK; i++) {
         tpk[i] = 0.0f;
+        mlat[i] = (mxv_t){0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+        mage[i] = 0;
+    }
     for (k = 0; k < NVOICE; k++) {               /* each track's loudest voice, the voices' peaks cleared: one pass */
         voice_t *v = &s->v[k];
         if (v->trk < NTRK) {
             if (v->peak > tpk[v->trk])
                 tpk[v->trk] = v->peak;
             v->peak = 0.0f;
+            if (s->mx && v_sounding(v) && v->age >= mage[v->trk]) {   /* (the newest: RATE and DEPTH's sources) */
+                mage[v->trk] = v->age;
+                mx_voice_src(&mlat[v->trk], v, 0.0f);
+            }
         }
     }
     for (i = 0; i < NTRK; i++) {
         trk_t *t = &s->t[i];
         int type = P(s, i, TP_LTYPE), lx = P(s, i, TP_LX), lx2 = P(s, i, TP_LX2), engine = P(s, i, TP_ENGINE);
         float hz = type == LT_PUMP ? 0.0f : lfo_hz(P(s, i, TP_LSPEED), s->bpm), dph = hz * CHUNK_S;
-        float amt = (float)P(s, i, TP_LAMT), pk = 0.0f, vib = 0.0f, vol = 0.0f;
+        float amt = (float)P(s, i, TP_LAMT), pk = 0.0f, vib = 0.0f, vol = 0.0f, ldep = 1.0f, vib_hz = 5.5f;
+        const int mxon = s->mx && mx_has(&s->mx[i]);
+        if (mxon) {   /* the matrix's track destinations: RATE (octaves on the LFO's speed) and DEPTH (a gain on the LFO) */
+            const mx_t *m = &s->mx[i];
+            float oct = 0.0f;
+            mlat[i].lfo = (float)t->lsrc_prev * MX_Q;
+            for (int j = 0; j < MX_NSLOT; j++) {
+                int src = m->s[j].src, dst = m->s[j].dst;
+                float a = (float)m->s[j].amt;
+                if (!src || src >= MXS_N || a == 0.0f)
+                    continue;
+                if (dst == MXD_RATE)
+                    oct += mx_source(s, t, i, src, &mlat[i]) * a * (3.0f / 63.0f);
+                else if (dst == MXD_DEPTH)
+                    ldep *= mx_gain(src, mx_source(s, t, i, src, &mlat[i]), a);
+            }
+            if (oct != 0.0f) {
+                float f = fm_exp2f(oct);
+                hz *= f;
+                dph *= f;
+            }
+            if (type == LT_WAVE || type == LT_DRIFT || type == LT_WOBBLE)
+                vib_hz = hz;                       /* the vibrato follows the LFO's rate (RATE too) */
+            for (int j = 0; j < 4; j++) {          /* the engine knobs' ranges (E1..E4's whole-range amount) */
+                const tp_info_t *in = tp_info(TP_E1 + j, engine);
+                t->elo[j] = in->lo;
+                t->ehi[j] = in->hi;
+            }
+            t->vib_ph = t->vib_acc;                /* the vibrato's phase at this block's start, then on */
+            t->vib_dph = vib_hz * CHUNK_S;
+            t->vib_acc = wrap1(t->vib_acc + t->vib_dph * (float)s->nck);
+        }
         {   /* the performance pitch: from the last stretch's value to this one's over the chunks (one stretch
              * behind, smooth); a note on the track since: at its value at once */
             float to = (float)t->perf.pitch_c;
@@ -1845,25 +2004,29 @@ void synth_prepare(synth_t *s, uint32_t n)
             vol = ((float)P(s, i, TP_LDEST) - 64.0f) * (1.0f / 63.0f);
         }
         for (k = 0; k < nck; k++) {
-            float ph, val = 0.0f, pitch = 0.0f, gain = 1.0f;
+            float ph, val = 0.0f, pitch = 0.0f, gain = 1.0f, sv = 0.0f;   /* sv: the LFO's shape, the matrix's LFO */
             ph = t->lfo_ph + dph;
             if (ph >= 1.0f) {
                 ph -= 1.0f;
+                t->lfo_prev = t->lfo_sh;         /* (the matrix's SLEW glides from it) */
                 t->lfo_sh = frand(&t->rng);      /* a fresh sample on every cycle */
             }
             t->lfo_ph = ph;
             switch (type) {
             case LT_WAVE:
-                val = lfo_wave_value(lx2, ph) * (amt - 64.0f) * (127.0f / 63.0f) * t->lscale;
+                sv = lfo_wave_value(lx2, ph);
+                val = sv * (amt - 64.0f) * (127.0f / 63.0f) * t->lscale;
                 break;
             case LT_DRIFT: {                    /* a wander: slews to each cycle's sample within a quarter cycle */
                 float sm = fm_minf(4.0f * dph, 1.0f);
                 t->lfo_sm += (t->lfo_sh - t->lfo_sm) * sm;
                 val = (0.5f + 0.5f * t->lfo_sm) * amt * t->lscale;
+                sv = t->lfo_sm;
                 break;
             }
             case LT_WOBBLE: {
                 float w = lfo_wave_trem(lx2, ph);
+                sv = w;
                 pitch = w * vib;
                 gain = vol >= 0.0f ? 1.0f - vol * (0.5f - 0.5f * w) : 1.0f + vol * (0.5f + 0.5f * w);
                 break;
@@ -1878,10 +2041,18 @@ void synth_prepare(synth_t *s, uint32_t n)
             }
             default: break;
             }
+            if (ldep != 1.0f) {                  /* the matrix's DEPTH: the LFO wherever it goes */
+                val *= ldep;
+                pitch *= ldep;
+                gain = 1.0f - (1.0f - gain) * ldep;
+            }
             t->loff[k] = val;
             t->lpitch[k] = pitch;
             t->lgain[k] = gain;
+            t->lsrc[k] = (int16_t)(sv * ldep * 32767.0f);
         }
+        if (nck)
+            t->lsrc_prev = t->lsrc[nck - 1];
         pk = tpk[i];                             /* the meter: the loudest voice of the track (gathered above) */
         {
             uint32_t q = (uint32_t)(fm_minf(pk, 2.0f) * 16383.5f), old = synth_peak[i];
@@ -2224,6 +2395,7 @@ static void voice_chunk(synth_t *s, voice_t *v)
     cfg_t *c = &v->c;
     int trk = v->trk, k = v->ck < s->nck ? v->ck : s->nck - 1, dest = t->ldest, i;
     float lenv = 1.0f, off, lg, vol, lev, pan, vg, res;
+    mxr_t mr;
     const uint8_t *gp = s->par[SY_GLFO_TRK];
     const int groute = (gp[TP_LX] & 15) | (gp[TP_LX2] & 15) << 4;
     const float g = groute >> trk & 1 ? s->goff[k] : 0.0f;   /* the shared LFO on this track (synth.h GD_*) */
@@ -2240,11 +2412,21 @@ static void voice_chunk(synth_t *s, voice_t *v)
     v->tsec += CHUNK_S;
     off = t->loff[k] * lenv;
     lg = 1.0f - (1.0f - t->lgain[k]) * lenv;
+    mr.gain = 1.0f;
+    mr.e[0] = mr.e[1] = mr.e[2] = mr.e[3] = mr.cut = mr.res = mr.pan = mr.pitch = mr.vib = 0.0f;
+    mr.emask = 0;
+    if (s->mx && mx_has(&s->mx[trk])) {          /* the matrix: this voice's sources, the track's, onto the knobs below */
+        mxv_t x;
+        mx_voice_src(&x, v, (float)t->lsrc[k] * MX_Q * lenv);
+        mx_eval(s, t, trk, &x, &mr);
+    }
     {
         int gm = v->fresh ? 0 : E_GLIDE[v->engine < NENGINE ? v->engine : 0];
         for (i = 0; i < 4; i++) {
             float e;
             c->ek[i] = fm_minf(pf(s, trk, TP_E1 + i, dest, off), 127.0f);   /* a foreign lock value stays in range */
+            if (mr.emask >> i & 1u)              /* (the matrix: the knob's own range) */
+                c->ek[i] = fm_clampf(c->ek[i] + mr.e[i], (float)t->elo[i], (float)t->ehi[i]);
             e = c->ek[i] * (1.0f / 127.0f);
             c->e[i] = gm >> i & 1 ? glide_to(c->e[i], e) : e;   /* (a fresh voice: at its values at once) */
         }
@@ -2264,12 +2446,12 @@ static void voice_chunk(synth_t *s, voice_t *v)
     }
     /* the filter: 50 Hz .. 20 kHz over the knob, the performance offset, keytrack, velocity */
     {   /* the cutoff and the resonance glide too (~10 ms), as the engine knobs */
-        float co = (pf(s, trk, TP_CUT, dest, off) + (float)t->perf.cut + (gd == GD_CUT ? g : 0.0f)) * (8.64385619f / 127.0f)
+        float co = (pf(s, trk, TP_CUT, dest, off) + (float)t->perf.cut + (gd == GD_CUT ? g : 0.0f) + mr.cut) * (8.64385619f / 127.0f)
                    + pf(s, trk, TP_KTRK, dest, off) * (1.0f / 127.0f) * (v->pitch - 60.0f) * (1.0f / 12.0f);
         c->cut_oct = v->fresh ? co : glide_to(c->cut_oct, co);
     }
     c->fenv_oct = (pf(s, trk, TP_FENV, dest, off) - 64.0f) * (6.0f / 64.0f) * (0.5f + 0.5f * v->vel);
-    res = fm_clampf((pf(s, trk, TP_RES, dest, off) + (gd == GD_RES ? g : 0.0f)) * (1.0f / 127.0f), 0.0f, 1.0f);
+    res = fm_clampf((pf(s, trk, TP_RES, dest, off) + (gd == GD_RES ? g : 0.0f) + mr.res) * (1.0f / 127.0f), 0.0f, 1.0f);
     if (!v->fresh)
         res = glide_to(c->kres * 0.25f, res);
     c->kq = 2.0f * fm_exp2f(-res * 4.3f);        /* Q 0.5 .. 10 */
@@ -2288,7 +2470,8 @@ static void voice_chunk(synth_t *s, voice_t *v)
     vg = (0.25f + 0.75f * v->vel * v->vel) * vol * vol * lev * lg * (1.0f - 0.6f * res);
     if (gd == GD_VOL)                            /* (a tremolo: down to silence, up to +6 dB) */
         vg *= fm_clampf(1.0f + g * (1.0f / 127.0f), 0.0f, 2.0f);
-    pan = fm_clampf((pf(s, trk, TP_PAN, dest, off) - 64.0f + (float)t->perf.pan + (gd == GD_PAN ? g : 0.0f)) *
+    vg *= mr.gain;                               /* (the matrix's AMP: 1 without one) */
+    pan = fm_clampf((pf(s, trk, TP_PAN, dest, off) - 64.0f + (float)t->perf.pan + (gd == GD_PAN ? g : 0.0f) + mr.pan) *
                     (1.0f / 64.0f), -1.0f, 1.0f);
     if (pan != v->pan_in || v->fresh) {          /* the pan's cos / sin: only when it moved */
         v->pan_in = pan;
@@ -2306,6 +2489,9 @@ static void voice_chunk(synth_t *s, voice_t *v)
         c->pitch_off += off * (1200.0f / 127.0f);
     if (gd == GD_PITCH)                          /* (+-12 semitones at 100 %) */
         c->pitch_off += g * (1200.0f / 127.0f);
+    c->pitch_off += mr.pitch;                    /* the matrix: PITCH, and VIB's sine (a phase per chunk of the block) */
+    if (mr.vib != 0.0f)
+        c->pitch_off += mr.vib * fm_sin_turns(t->vib_ph + t->vib_dph * (float)(k + 1));
     {   /* the sound's octave (Play 2) */
         int oc = P(s, trk, TP_OCT);
         c->pitch_off += (float)((oc > 4 ? 4 : oc) - 2) * 1200.0f;

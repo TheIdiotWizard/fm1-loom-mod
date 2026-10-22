@@ -256,6 +256,27 @@ int app_expect(const char *what, int *got)
         *got = (int)(cc_out_last >> 8 & 0xFFu);
     else if (!strcmp(what, "ccd2"))
         *got = (int)(cc_out_last & 0xFFu);
+    else if (!strncmp(what, "mxl", 3) && strchr(what, '.')) {   /* mxlT.NAME: a track's live controller (modw, at, expr) */
+        static const char *const N[MXL_N] = {"modw", "at", "expr"};
+        int t = atoi(what + 3) - 1, k;
+        for (k = 0; k < MXL_N && !ieq(strchr(what, '.') + 1, N[k]); k++)
+            ;
+        if (t < 0 || t >= NTRK || k == MXL_N)
+            return 0;
+        *got = engine_mx_live(t, k);
+    }
+    else if (!strncmp(what, "mx", 2) && strchr(what, '.')) {    /* mxT.S.FIELD: the matrix, track T's slot S (1-4), src dst amt */
+        static const char *const N[3] = {"src", "dst", "amt"};
+        const char *d1 = strchr(what, '.'), *d2 = d1 ? strchr(d1 + 1, '.') : 0;
+        int t = atoi(what + 2) - 1, sl = d1 ? atoi(d1 + 1) - 1 : -1, k;
+        if (!d2)
+            return 0;
+        for (k = 0; k < 3 && !ieq(d2 + 1, N[k]); k++)
+            ;
+        if (t < 0 || t >= NTRK || sl < 0 || sl >= MX_NSLOT || k == 3)
+            return 0;
+        *got = k == 0 ? pats.mod[t].s[sl].src : k == 1 ? pats.mod[t].s[sl].dst : pats.mod[t].s[sl].amt;
+    }
     else if (!strncmp(what, "par", 3) && strchr(what, '.')) {   /* parT.P: parameter P of track T */
         int t = atoi(what + 3) - 1, p = param_of(strchr(what, '.') + 1);
         if (t < 0 || t >= NALLTRK || p < 0 || p >= NTP)
@@ -737,6 +758,33 @@ static int song_cmd(const char *cmd)
                 set_tp(t, TP_DRUM(d, k == TP_SEND1 ? DP_SEND1 : DP_SEND2), v);
         } else
             set_tp(t, k, value_of(t, k, w[3]));
+        run_ms(1);
+    } else if (!strcmp(cmd, "mxset")) {             /* mxset T S SRC DST AMT: track T's matrix slot S (1-4); SRC, DST a
+                                                     * name (MXS_NAME, MXD_NAME) or a number; "-" leaves one as it is */
+        int s, v, i;
+        if (n < 6)
+            host_die("mxset T S SRC DST AMT", "");
+        t = atoi(w[1]) - 1;
+        s = atoi(w[2]) - 1;
+        if (t < 0 || t >= NTRK || s < 0 || s >= MX_NSLOT)
+            host_die("no slot", w[1]);
+        for (k = 0; k < 2; k++) {
+            const char *a = w[3 + k], *const *nm = k ? MXD_NAME : MXS_NAME;
+            int cnt = k ? MXD_N : MXS_N;
+            if (a[0] == '-' && !a[1])
+                continue;
+            v = -1;
+            for (i = 0; i < cnt; i++)
+                if (ieq(a, nm[i]))
+                    v = i;
+            if (v < 0 && a[0] >= '0' && a[0] <= '9')
+                v = atoi(a);
+            if (v < 0 || v >= cnt)
+                host_die("no such name", a);
+            mx_set(t, s, k, v);
+        }
+        if (strcmp(w[5], "-"))
+            mx_set(t, s, 2, atoi(w[5]));
         run_ms(1);
     } else if (!strcmp(cmd, "preset")) {            /* preset T NAME [ENGINE] (NAME: _ for spaces) */
         int pick = -1;

@@ -69,3 +69,25 @@ expect scene 20
 expect mute 2
 expect kmute1 4
 expect kmute2 4
+# a format 13 project (the shared LFO, no modulation matrix; tests/fixtures/make_v13.xy): its notes and tempo as they
+# were, every track with the default matrix (the mod wheel to the vibrato), saved whole at the first touch
+storeload tests/fixtures/store_v13.bin
+reboot
+wait 400
+expect tempo 93
+expect note 2 1 1 60
+expect note 2 1 5 64
+expect mx2.1.src 6
+expect mx2.1.dst 7
+expect mx2.1.amt 32
+expect mx5.1.src 6
+expect mx5.2.src 0
+mxset 2 2 lfo pitch 20
+projsave 1
+reboot
+wait 400
+expect tempo 93
+expect note 2 1 1 60
+expect mx2.2.dst 1
+expect mx2.2.amt 20
+expect mx2.1.src 6
